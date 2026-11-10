@@ -9,14 +9,11 @@ Builds any body from a data file and a seed. Nothing about a body is stored:
 
 - `run-planetgen.bat`: builds both bodies, writes previews and reports to `out\`
 - `run-tests.bat`: runs all tests (generator and world store)
-- `run-asteroidloop.bat`: plays five copies of tutorial asteroid 1 to launch with the scripted idle player and writes the run report and growth data (CSV) to `out\`
 - `cargo run --release --bin tutorials`: compares ways of pacing the second tutorial asteroid
-- `run-sandboxdemo.bat`: opens a corridor between a magma pocket and a water pocket and a cavity under loose rubble, and a moat around a block of rock so it breaks free and falls, runs the sandbox for two minutes and writes frames to `out\sandbox\`
 - `run-refsheet.bat`: rebuilds the reference sheets in `reference\` (pictures and a spec sheet per body); add `--glamour 0.5` in the file to see the glamour pass instead
 - `run-stress.bat`: pushes bodies and swarms past their usual sizes and reports the cost (see `src\bin\stress.rs` for the settings)
 - `run-abundance.bat`: measures how much of every element each body holds (whole body and outer 500 m) and writes `data\reference\abundance.csv`
 - `run-game.bat`, `continue-game.bat`, `test-*.bat`: the game, the last save, and the game test setups
-- `run-minedemo.bat`: digs tunnels, strip-mines regions and sinks a shaft to the Heart, then saves, reloads, checks the books and renders the result to `out\`
 
 ## Layout
 

@@ -13,30 +13,33 @@ Read this first, then ROADMAP.md (what's built and what's next) and README.md
   live progress, not popping over his other work.
 - He wants honest numbers, frequent short progress messages during long
   work, and plain words.
-- The project lives on his PC under `source\repos\DarkForestTheory`
-  (connect that folder to the session). He moved to a new PC in November
-  2026: check the folder is there and that Rust is installed
-  (`install-rust.bat`, `check-rust.bat`).
+- The project lives on his PC in `Downloads\DarkForestTheory-source`, a git
+  repo pushed to https://github.com/tr0n42/dft. Since 10 November 2026 the
+  work happens in Claude Code, running on his PC in that folder (see
+  CLAUDE.md). Rust stable (MSVC) is installed there.
 
-## How the work has been done
+## How the work is done
 
-- Build and test in the cloud workspace, then copy changed files to his PC
-  and check them byte for byte (md5) before saying they're there. Use a
-  fresh staging folder each time: a stale staged file once sent him code
-  that didn't compile.
+- Build and test directly on his PC, in the project folder. (Before Claude
+  Code, the work was built in a cloud workspace and copied over with md5
+  checks. That routine is retired.)
 - Sim crate (repo root): `cargo build --release`, tests with
   `cargo test --release --no-fail-fast` (about 25 minutes; run it in the
   background). The game crate is `game/`:
   `cargo build --release --ignore-rust-version`.
 - Generator changes change every body's fingerprint: re-lock with
   `BLESS=1 cargo test --release --test reference` once the change is meant.
-- Screenshots under Xvfb need `--windowed` (the default borderless
-  fullscreen doesn't capture). The stockpile window's collapse arrow is at
+- The game opens a borderless fullscreen window by default; pass
+  `--windowed` for a window. The stockpile window's collapse arrow is at
   about (1365, 28) on a 1600 x 900 screen.
-- The cloud box has about 7 GB of memory: don't run the test suite and the
-  abundance tool at the same time.
+- The test suite and the abundance tool both use a lot of memory, so don't
+  run them at the same time.
 
-## Design documents (claude.ai docs, in the DarkForestTheory project; open them by link)
+## Design documents
+
+Snapshots are in `docs/design/` (pulled 10 November 2026; images and
+diagrams don't export). The originals are claude.ai docs in the
+DarkForestTheory project, opened by link:
 
 - **Swarm Production Design**: production in the swarm, robot-lore parts,
   factories, the director's hidden queue, energy, heat-sink bots and
@@ -46,7 +49,12 @@ Read this first, then ROADMAP.md (what's built and what's next) and README.md
   crust, every body's specialties, the specialty catalogue and odds,
   rarity-priced drone parts, the meta-tree bias.
   https://claude.ai/artifact/2yb9kfVeL86XptSLn7KX7Y
-- Older: "Life L1 - Procedural Flora Design".
+- Older: "Life L1 - Procedural Flora Design" (`docs/design/flora-design.md`),
+  https://claude.ai/artifact/Ss3ZUbdBKLF9Kk3dJbrS4o
+- The master plan: "The Dark Forest Theory — Plan" (vision, architecture,
+  milestone results M0 to M4, geology passes, decision log;
+  `docs/design/game-design-plan.md`),
+  https://claude.ai/artifact/4Wfryd7cBArfBR7cx6SkCr
 
 ## Where things stand (November 2026)
 
