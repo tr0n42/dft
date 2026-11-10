@@ -1,7 +1,29 @@
+# Build output
 target/
+viewer/pkg/
+viewer/dist/
+
+# Run output: logs, saves, renders and reports
 logs/
 saves/
 out/
 *-log.txt
-viewer/pkg/
-viewer/dist/
+test-results.txt
+rust-check.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
