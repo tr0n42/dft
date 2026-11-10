@@ -1,0 +1,485 @@
+# The Dark Forest Theory: geology rules (G2). Which ore forms where.
+# Loaded together with the material tables (append-only: the [geology] table).
+#
+# hydrothermal: minerals carried by hot fluids out of a cooling pluton and laid
+#   down in veins. zone is the stretch of a vein, as a fraction of the pluton's
+#   halo (0 = at the magma, 1 = the far end), where the mineral forms. kind is
+#   the pluton kind that makes it (felsic: granite-like; mafic: gabbro-like).
+#   Real porphyry systems are zoned this way: copper and molybdenum close in,
+#   lead, zinc and silver in the middle, gold, antimony and mercury far out.
+# contact: rock baked by a pluton's heat within its aureole.
+# skarn: what forms where a pluton touches carbonate rock.
+# cumulate: what settles in stripes at the base of a mafic pluton.
+
+[geology]
+vein_gangue = "quartz crystal"
+skarn_hosts = ["limestone", "marble"]
+cumulate_nugget = "platinum nugget"
+cumulate_nugget_chance = 0.004
+
+[[geology.hydrothermal]]
+material = "chalcopyrite"
+kind = "felsic"
+zone = [0.0, 0.4]
+weight = 3
+
+[[geology.hydrothermal]]
+material = "molybdenite"
+kind = "felsic"
+zone = [0.0, 0.25]
+weight = 0.5
+
+[[geology.hydrothermal]]
+material = "cassiterite"
+kind = "felsic"
+zone = [0.0, 0.2]
+weight = 0.3
+
+[[geology.hydrothermal]]
+material = "wolframite"
+kind = "felsic"
+zone = [0.0, 0.2]
+weight = 0.3
+
+[[geology.hydrothermal]]
+material = "pyrite"
+kind = "felsic"
+zone = [0.1, 0.6]
+weight = 1.5
+
+[[geology.hydrothermal]]
+material = "galena"
+kind = "felsic"
+zone = [0.35, 0.7]
+weight = 1.0
+
+[[geology.hydrothermal]]
+material = "sphalerite"
+kind = "felsic"
+zone = [0.35, 0.7]
+weight = 2
+
+[[geology.hydrothermal]]
+material = "native silver"
+kind = "felsic"
+zone = [0.45, 0.75]
+weight = 0.3
+
+[[geology.hydrothermal]]
+material = "gold-quartz"
+kind = "felsic"
+zone = [0.5, 1.0]
+weight = 1.5
+
+[[geology.hydrothermal]]
+material = "arsenopyrite"
+kind = "felsic"
+zone = [0.6, 0.9]
+weight = 0.3
+
+[[geology.hydrothermal]]
+material = "stibnite"
+kind = "felsic"
+zone = [0.75, 1.0]
+weight = 0.4
+
+[[geology.hydrothermal]]
+material = "cinnabar"
+kind = "felsic"
+zone = [0.85, 1.0]
+weight = 0.5
+
+[[geology.hydrothermal]]
+material = "chalcopyrite"
+kind = "mafic"
+zone = [0.0, 0.5]
+weight = 2
+
+[[geology.hydrothermal]]
+material = "troilite"
+kind = "mafic"
+zone = [0.0, 0.6]
+weight = 2
+
+[[geology.hydrothermal]]
+material = "cobaltite"
+kind = "mafic"
+zone = [0.3, 0.8]
+weight = 0.6
+
+[[geology.hydrothermal]]
+material = "native copper"
+kind = "mafic"
+zone = [0.5, 1.0]
+weight = 1
+
+[[geology.contact]]
+from = "limestone"
+to = "marble"
+
+[[geology.contact]]
+from = "shale"
+to = "slate"
+
+[[geology.contact]]
+from = "sandstone"
+to = "quartzite"
+
+[[geology.contact]]
+from = "coal"
+to = "graphite"
+
+[[geology.contact]]
+from = "conglomerate"
+to = "quartzite"
+
+[[geology.contact]]
+from = "tuff"
+to = "schist"
+
+[[geology.skarn]]
+material = "magnetite"
+weight = 3
+
+[[geology.skarn]]
+material = "garnet"
+weight = 2
+
+[[geology.skarn]]
+material = "chalcopyrite"
+weight = 1
+
+[[geology.cumulate]]
+material = "chromite"
+weight = 1
+
+[[geology.cumulate]]     # platinum-group reefs, as in the Bushveld's Merensky Reef
+material = "sperrylite"
+weight = 0.5
+
+# ---- the full element table (phase 0) ----
+
+# Pegmatites: the last melt of a granite, rich in the elements that fit no
+# common mineral (lithium, beryllium, caesium, niobium, tantalum, the
+# radioactive ones), crystallised right against the pluton.
+[[geology.hydrothermal]]
+material = "lepidolite"
+kind = "felsic"
+zone = [0.0, 0.15]
+weight = 0.5
+
+[[geology.hydrothermal]]
+material = "spodumene"
+kind = "felsic"
+zone = [0.0, 0.15]
+weight = 0.4
+
+[[geology.hydrothermal]]
+material = "beryl"
+kind = "felsic"
+zone = [0.0, 0.15]
+weight = 0.3
+
+[[geology.hydrothermal]]
+material = "columbite"
+kind = "felsic"
+zone = [0.0, 0.15]
+weight = 0.4
+
+[[geology.hydrothermal]]
+material = "tantalite"
+kind = "felsic"
+zone = [0.0, 0.12]
+weight = 0.12
+
+[[geology.hydrothermal]]
+material = "pollucite"
+kind = "felsic"
+zone = [0.0, 0.12]
+weight = 0.2
+
+[[geology.hydrothermal]]
+material = "zircon"
+kind = "felsic"
+zone = [0.0, 0.15]
+weight = 0.3
+
+[[geology.hydrothermal]]
+material = "xenotime"
+kind = "felsic"
+zone = [0.0, 0.15]
+weight = 0.2
+
+[[geology.hydrothermal]]
+material = "thortveitite"
+kind = "felsic"
+zone = [0.0, 0.1]
+weight = 0.08
+
+[[geology.hydrothermal]]
+material = "thorite"
+kind = "felsic"
+zone = [0.0, 0.15]
+weight = 0.2
+
+[[geology.hydrothermal]]
+material = "pitchblende"
+kind = "felsic"
+zone = [0.0, 0.3]
+weight = 0.15
+
+# Further out along the veins.
+[[geology.hydrothermal]]
+material = "bismuthinite"
+kind = "felsic"
+zone = [0.0, 0.25]
+weight = 0.05
+
+[[geology.hydrothermal]]
+material = "native bismuth"
+kind = "felsic"
+zone = [0.1, 0.3]
+weight = 0.02
+
+[[geology.hydrothermal]]
+material = "greenockite"
+kind = "felsic"
+zone = [0.35, 0.7]
+weight = 0.08
+
+[[geology.hydrothermal]]
+material = "clausthalite"
+kind = "felsic"
+zone = [0.4, 0.7]
+weight = 0.04
+
+[[geology.hydrothermal]]
+material = "calaverite"
+kind = "felsic"
+zone = [0.6, 1.0]
+weight = 0.06
+
+[[geology.hydrothermal]]
+material = "baryte"
+kind = "felsic"
+zone = [0.7, 1.0]
+weight = 0.8
+
+[[geology.hydrothermal]]
+material = "lorandite"
+kind = "felsic"
+zone = [0.85, 1.0]
+weight = 0.15
+
+# Mafic bodies: niobium from carbonatite-like melts close in, baryte far out.
+[[geology.hydrothermal]]
+material = "pyrochlore"
+kind = "mafic"
+zone = [0.0, 0.3]
+weight = 0.3
+
+[[geology.hydrothermal]]
+material = "baryte"
+kind = "mafic"
+zone = [0.6, 1.0]
+weight = 0.4
+
+# The platinum-group metals settle with the chromite.
+[[geology.cumulate]]
+material = "braggite"
+weight = 0.3
+
+[[geology.cumulate]]
+material = "laurite"
+weight = 0.05
+
+[[geology.cumulate]]
+material = "osmiridium"
+weight = 0.1
+
+[[geology.cumulate]]
+material = "hollingworthite"
+weight = 0.1
+
+# accessory: pods of a mineral scattered through a host rock, wherever that
+# rock is on any body. The ground is cut into squares grid_m across; in a
+# share `chance` of them a pod sits, radius_m across, between depth_m below
+# the surface (as generated). Pods never cross a square's edge.
+[[geology.accessory]]       # zircon in granite and its sands (placers)
+material = "zircon"
+host = ["granite", "gneiss", "sand", "sandstone"]
+grid_m = 60
+chance = 0.06
+radius_m = [1.5, 4]
+
+[[geology.accessory]]       # thorium in granite
+material = "thorite"
+host = ["granite", "gneiss"]
+grid_m = 80
+chance = 0.03
+radius_m = [1.5, 3.5]
+
+[[geology.accessory]]       # roll-front uranium in sandstone, and in granite
+material = "pitchblende"
+host = ["sandstone", "aquifer sandstone", "granite"]
+grid_m = 120
+chance = 0.008
+radius_m = [2, 6]
+
+[[geology.accessory]]       # radon seeping from the uranium in granite
+material = "radon gas"
+host = ["granite"]
+grid_m = 90
+chance = 0.03
+radius_m = [2, 5]
+depth_m = [20, 5000]
+
+[[geology.accessory]]       # helium and the noble gases, trapped in porous rock
+material = "radiogenic gas"
+host = ["sandstone", "aquifer sandstone", "limestone", "conglomerate", "tuff"]
+grid_m = 150
+chance = 0.04
+radius_m = [4, 12]
+depth_m = [40, 8000]
+
+[[geology.accessory]]       # strontium in carbonates and evaporites
+material = "celestine"
+host = ["limestone", "gypsum", "marble"]
+grid_m = 80
+chance = 0.05
+radius_m = [2, 6]
+
+[[geology.accessory]]       # barium in shale and limestone
+material = "baryte"
+host = ["shale", "limestone", "slate"]
+grid_m = 80
+chance = 0.04
+radius_m = [2, 6]
+
+[[geology.accessory]]       # bromine: the last salts of a drying sea
+material = "bittern salt"
+host = ["rock salt"]
+grid_m = 50
+chance = 0.15
+radius_m = [3, 8]
+
+[[geology.accessory]]       # iodine: nitrate crust in dry ground
+material = "caliche"
+host = ["sand", "red dust", "gravel"]
+grid_m = 70
+chance = 0.05
+radius_m = [2, 6]
+depth_m = [0, 60]
+
+[[geology.accessory]]       # yttrium in placer sands
+material = "xenotime"
+host = ["sand"]
+grid_m = 90
+chance = 0.02
+radius_m = [1.5, 3]
+
+[[geology.hydrothermal]]    # vanadium where lead veins weather
+material = "vanadinite"
+kind = "felsic"
+zone = [0.55, 0.85]
+weight = 0.25
+
+[[geology.accessory]]       # boron: borate beds in dried lakes
+material = "borax"
+host = ["rock salt", "gypsum", "clay"]
+grid_m = 70
+chance = 0.05
+radius_m = [2, 6]
+
+# ---- abundance pass: the common ores of the commonest minor elements ----
+[[geology.hydrothermal]]    # fluorite: the commonest vein gangue after quartz
+material = "fluorite"
+kind = "felsic"
+zone = [0.25, 0.75]
+weight = 1.0
+
+[[geology.hydrothermal]]
+material = "rhodochrosite"
+kind = "felsic"
+zone = [0.35, 0.8]
+weight = 0.5
+
+[[geology.hydrothermal]]    # nickel-copper sulfide at the base of mafic bodies
+material = "pentlandite"
+kind = "mafic"
+zone = [0.0, 0.4]
+weight = 1.5
+
+[[geology.cumulate]]
+material = "pentlandite"
+weight = 0.6
+
+[[geology.accessory]]       # apatite: phosphorus in granite and phosphate beds
+material = "apatite"
+host = ["granite", "gneiss", "limestone", "shale"]
+grid_m = 70
+chance = 0.04
+radius_m = [2, 6]
+
+[[geology.accessory]]       # sedimentary manganese
+material = "pyrolusite"
+host = ["limestone", "shale", "clay"]
+grid_m = 90
+chance = 0.04
+radius_m = [3, 8]
+
+# ---- scarcity: generated by tools/tune_scarcity.py (re-run it after changes) ----
+# The share of the places each ore could form where it does; the rest is
+# gangue or host rock; over 1, it is picked that much more often. Tuned so
+# ores bring each element to 0.5-3 x Earth's crust on average over the
+# bodies. Specialties raise it on their bodies.
+[geology.scarcity]
+"apatite" = 30.0
+"arsenopyrite" = 0.14
+"baryte" = 10.5
+"beryl" = 24.5
+"bismuthinite" = 0.00184
+"bittern salt" = 1.39
+"borax" = 30.0
+"braggite" = 0.0193
+"calaverite" = 0.0018
+"cassiterite" = 0.397
+"celestine" = 30.0
+"chromite" = 30.0
+"cinnabar" = 0.0751
+"clausthalite" = 0.199
+"cobaltite" = 2.89
+"columbite" = 4.78
+"fluorite" = 30.0
+"galena" = 0.423
+"gold" = 0.0018
+"greenockite" = 0.0671
+"hollingworthite" = 0.0398
+"laurite" = 1e-05
+"lepidolite" = 30.0
+"lorandite" = 0.408
+"molybdenite" = 0.0104
+"native bismuth" = 0.00184
+"native silver" = 0.00795
+"osmiridium" = 4.75
+"pentlandite" = 30.0
+"pitchblende" = 0.169
+"platinum nugget" = 1e-05
+"pollucite" = 6.27
+"pyrochlore" = 30.0
+"pyrolusite" = 30.0
+"radiogenic gas" = 1.27
+"radon gas" = 1.03
+"rhodochrosite" = 30.0
+"sperrylite" = 0.000533
+"sphalerite" = 2.49
+"spodumene" = 30.0
+"stibnite" = 0.182
+"tantalite" = 4.78
+"thorite" = 2.49
+"thortveitite" = 30.0
+"uraninite" = 0.169
+"vanadinite" = 23.8
+"wolframite" = 0.437
+"xenotime" = 30.0
+"zircon" = 4.26

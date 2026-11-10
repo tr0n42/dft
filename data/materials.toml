@@ -1,0 +1,383 @@
+# The Dark Forest Theory: material table.
+# density is kg per cubic metre, which is also the mass of one 1 m cell.
+# composition gives element mass fractions and must sum to 1.
+# Phase changes (melts_to, freezes_to, boils_to, condenses_to) must go to a
+# material of the same density: a cell keeps its mass whatever it becomes.
+# multiplier is the processing bonus applied when the swarm refines this material.
+# colour is the surface colour; underground cells draw darker.
+
+[[material]]
+name = "vacuum"
+state = "gas"
+density = 0
+hardness = 0
+colour = [0, 0, 0]
+multiplier = 1.0
+composition = {}
+
+[[material]]
+name = "regolith"
+state = "powder"
+density = 1500
+hardness = 1
+colour = [150, 140, 128]
+multiplier = 1.0
+composition = { O = 0.448844, Si = 0.209461, Fe = 0.099743, Mg = 0.079795, Al = 0.06982, Ca = 0.059846, Ti = 0.029923, Mn = 0.0013, P = 0.001, V = 0.00025, Ga = 1.8e-05 }
+melts_at_k = 1400
+boils_at_k = 3000
+latent_boil_k = 5000
+
+[[material]]
+name = "chondrite"
+state = "solid"
+density = 3200
+hardness = 3
+colour = [112, 104, 96]
+multiplier = 1.0
+composition = { O = 0.3560105, Fe = 0.217562, Si = 0.178006, Mg = 0.138449, S = 0.039557, Ca = 0.024723, Al = 0.019778, Ni = 0.014834, Na = 0.005, Cr = 0.00265, Mn = 0.00193, P = 0.001, Co = 0.0005, Ir = 5e-07 }
+melts_at_k = 1450
+boils_at_k = 3000
+latent_boil_k = 5000
+
+[[material]]
+name = "basalt"
+state = "solid"
+density = 2900
+hardness = 4
+colour = [70, 72, 78]
+multiplier = 1.0
+composition = { O = 0.438869, Si = 0.229409, Fe = 0.089769, Al = 0.079795, Ca = 0.06982, Mg = 0.049872, Na = 0.019949, Ti = 0.019949, Mn = 0.0013, P = 0.001, V = 0.00025, Ga = 1.8e-05 }
+melts_at_k = 1450
+boils_at_k = 3000
+latent_boil_k = 5000
+
+[[material]]
+name = "peridotite"
+state = "solid"
+density = 3300
+hardness = 5
+colour = [96, 112, 72]
+multiplier = 1.0
+composition = { O = 0.437505, Mg = 0.248583, Si = 0.208809, Fe = 0.069603, Ca = 0.014915, Al = 0.014915, Cr = 0.0025, Ni = 0.002, Mn = 0.001, Co = 0.00011, V = 6e-05 }
+melts_at_k = 1700
+boils_at_k = 3200
+latent_boil_k = 5000
+
+[[material]]
+name = "ice"
+state = "solid"
+density = 920
+hardness = 2
+colour = [190, 220, 235]
+multiplier = 1.0
+composition = { H = 0.112, O = 0.888 }
+melts_at_k = 273
+melts_to = "water"
+conduct = 0.3
+latent_melt_k = 80
+
+[[material]]
+name = "iron-nickel"
+state = "solid"
+density = 7900
+hardness = 7
+colour = [150, 150, 160]
+multiplier = 1.5
+composition = { Fe = 0.8950375, Ni = 0.089009, Cr = 0.009, Co = 0.004945, P = 0.002, Pt = 5.7e-06, Os = 2.8e-06 }
+melts_at_k = 1730
+boils_at_k = 3100
+latent_melt_k = 550
+latent_boil_k = 6000
+
+[[material]]
+name = "molten-iron"
+state = "liquid"
+density = 7000
+hardness = 0
+colour = [255, 150, 40]
+multiplier = 1.2
+composition = { Fe = 0.8385185, Ni = 0.078919, S = 0.069054, Cr = 0.009, Co = 0.0025, P = 0.002, Pt = 5.7e-06, Os = 2.8e-06 }
+freezes_at_k = 1750           # hardens into cast iron below this
+freezes_to = "cast-iron"
+flow = 0.5
+conduct = 0.1
+boils_at_k = 3100
+latent_boil_k = 6000
+
+[[material]]
+name = "magma"
+state = "liquid"
+density = 2700
+hardness = 0
+colour = [235, 80, 20]
+multiplier = 1.0
+composition = { O = 0.438869, Si = 0.229409, Fe = 0.089769, Al = 0.079795, Ca = 0.06982, Mg = 0.049872, Na = 0.019949, Ti = 0.019949, Mn = 0.0013, P = 0.001, V = 0.00025, Ga = 1.8e-05 }
+freezes_at_k = 1300           # hardens into lava-rock below this
+freezes_to = "lava-rock"
+flow = 0.3                     # thick and slow
+conduct = 0.05                 # holds its heat: a flow runs a while before it crusts over
+boils_at_k = 3000
+latent_boil_k = 5000
+
+[[material]]
+name = "volcanic-gas"
+state = "gas"
+density = 2
+hardness = 0
+colour = [200, 190, 90]
+multiplier = 1.0
+composition = { S = 0.5, O = 0.5 }
+
+[[material]]
+name = "sulfur"
+state = "solid"
+density = 2070
+hardness = 2
+colour = [230, 210, 60]
+multiplier = 1.5
+composition = { S = 1.0 }
+melts_at_k = 388
+boils_at_k = 718
+latent_melt_k = 76
+latent_boil_k = 400
+
+[[material]]
+name = "pyrite"
+state = "solid"
+density = 5000
+hardness = 6
+colour = [200, 170, 90]
+multiplier = 1.5
+composition = { Fe = 0.465, S = 0.535 }
+melts_at_k = 1450
+boils_at_k = 3000
+latent_boil_k = 5000
+
+[[material]]
+name = "gold-quartz"
+state = "solid"
+density = 2800
+hardness = 5
+colour = [235, 215, 150]
+multiplier = 2.0
+composition = { O = 0.52, Si = 0.4795, Au = 0.0005 }
+melts_at_k = 1900
+boils_at_k = 3000
+latent_boil_k = 5000
+
+[[material]]
+name = "gold"
+state = "solid"
+density = 19300
+hardness = 3
+colour = [255, 200, 40]
+multiplier = 3.0
+composition = { Au = 1.0 }
+melts_at_k = 1337
+boils_at_k = 3129
+latent_melt_k = 500
+latent_boil_k = 13000
+
+[[material]]
+name = "sperrylite"
+state = "solid"
+density = 10600
+hardness = 6
+colour = [190, 195, 210]
+multiplier = 3.0
+composition = { Pt = 0.57, As = 0.43 }
+melts_at_k = 1700
+boils_at_k = 3500
+latent_boil_k = 5000
+
+[[material]]
+name = "kimberlite"
+state = "solid"
+density = 2900
+hardness = 4
+colour = [60, 90, 80]
+multiplier = 1.0
+composition = { O = 0.427561, Mg = 0.218753, Si = 0.178979, Fe = 0.069603, Ca = 0.049717, C = 0.049717, Cr = 0.0025, Ni = 0.002, Mn = 0.001, Co = 0.00011, V = 6e-05 }
+melts_at_k = 1500
+boils_at_k = 3000
+latent_boil_k = 5000
+
+[[material]]
+name = "diamond"
+state = "solid"
+density = 3510
+hardness = 10
+colour = [210, 245, 255]
+multiplier = 3.0
+composition = { C = 1.0 }
+melts_at_k = 4000
+boils_at_k = 4800
+latent_boil_k = 10000
+
+[[material]]
+name = "heart"
+state = "solid"
+density = 0
+hardness = 10
+colour = [255, 40, 160]
+multiplier = 1.0
+composition = {}
+
+# Solids that form when exposed lava cools. Same density and makeup as the
+# liquid, so cooling never creates or destroys matter.
+
+[[material]]
+name = "lava-rock"
+state = "solid"
+density = 2700
+hardness = 4
+colour = [70, 55, 50]
+multiplier = 1.0
+composition = { O = 0.438869, Si = 0.229409, Fe = 0.089769, Al = 0.079795, Ca = 0.06982, Mg = 0.049872, Na = 0.019949, Ti = 0.019949, Mn = 0.0013, P = 0.001, V = 0.00025, Ga = 1.8e-05 }
+melts_at_k = 1650              # remelts only if heated well past where magma freezes
+melts_to = "magma"
+
+[[material]]
+name = "cast-iron"
+state = "solid"
+density = 7000
+hardness = 6
+colour = [95, 90, 88]
+multiplier = 1.2
+composition = { Fe = 0.8385185, Ni = 0.078919, S = 0.069054, Cr = 0.009, Co = 0.0025, P = 0.002, Pt = 5.7e-06, Os = 2.8e-06 }
+melts_at_k = 2100
+melts_to = "molten-iron"
+
+# Water as it comes from melted ice: a cell holds the 920 kg of the ice it was.
+
+[[material]]
+name = "water"
+state = "liquid"
+density = 920
+hardness = 0
+colour = [60, 110, 200]
+multiplier = 1.0
+composition = { H = 0.112, O = 0.888 }
+freezes_at_k = 260
+freezes_to = "ice"
+boils_at_k = 373
+boils_to = "steam"
+conduct = 0.2
+flow = 0.9
+latent_melt_k = 80
+latent_boil_k = 540
+
+# A steam cell holds the vapour of one cell of water.
+
+[[material]]
+name = "steam"
+state = "gas"
+density = 920
+hardness = 0
+colour = [210, 215, 225]
+multiplier = 1.0
+composition = { H = 0.112, O = 0.888 }
+condenses_at_k = 360
+condenses_to = "water"
+conduct = 0.2
+latent_boil_k = 540
+
+# Methane, for cold worlds (Titan-like lakes and frosts). Nothing about its
+# boiling is written: its vapour is generated like any other. Like water, a
+# frozen cell holds the mass of the liquid cell it was.
+[[material]]
+name = "methane ice"
+state = "solid"
+density = 422
+hardness = 1
+colour = [215, 225, 230]
+multiplier = 1.0
+composition = { C = 0.749, H = 0.251 }
+melts_at_k = 91
+melts_to = "liquid methane"
+latent_melt_k = 25
+conduct = 0.3
+
+[[material]]
+name = "liquid methane"
+state = "liquid"
+density = 422
+hardness = 0
+colour = [150, 120, 70]
+multiplier = 1.0
+composition = { C = 0.749, H = 0.251 }
+freezes_at_k = 89
+freezes_to = "methane ice"
+boils_at_k = 112
+latent_melt_k = 25
+latent_boil_k = 230
+conduct = 0.2
+flow = 0.95
+
+# What a wrecked drone leaves where it fell: scrap that can be mined again
+# (Necromancers may one day raise it). A cell holds about one drone.
+
+[[material]]
+name = "drone-scrap"
+state = "powder"
+density = 100
+hardness = 2
+colour = [150, 160, 175]
+multiplier = 1.0
+composition = { Fe = 0.45, Al = 0.3, Si = 0.15, Cu = 0.1 }
+melts_at_k = 950
+melts_to = "molten drone-scrap"
+latent_boil_k = 5000
+
+# Melted scrap (a cell is one drone's worth, so it weighs what the scrap does
+# and floats on lava as a thin film). It sets again well below its melting
+# point, so scrap sitting on a lava flow, warmed from below and cooling to
+# space above, doesn't flick between molten and solid every few ticks.
+[[material]]
+name = "molten drone-scrap"
+state = "liquid"
+density = 100
+hardness = 0
+colour = [255, 140, 70]
+multiplier = 1.0
+composition = { Fe = 0.45, Al = 0.3, Si = 0.15, Cu = 0.1 }
+freezes_at_k = 850
+freezes_to = "drone-scrap"
+boils_at_k = 2700
+latent_boil_k = 5000
+flow = 0.6
+conduct = 0.4
+
+# Reactions between touching cells: overrides only. Most of what happens comes
+# from heat and phase changes (water touching lava boils, and the lava crusts
+# over) with no row written for it. Rows here are for tuning and the exotic;
+# inputs and outputs must weigh the same. Example:
+#   [[reaction]]
+#   name = "..."
+#   a = "magma"
+#   b = "water"
+#   a_to = "lava-rock"
+#   b_to = "steam"
+#   chance = 0.3
+#   heat_k = -150
+
+# Heat and motion in the sandbox.
+[physics]
+ticks_per_s = 10             # the sandbox steps with the logic tick
+space_k = 200                # open space pulls hot cells toward 200 K...
+radiate = 0.02               # ...by 2% of the difference per tick per open face, times twice the material's conduct
+conduct = 0.02               # share of a temperature difference crossing between touching cells per tick
+wake_gradient_k = 25         # a neighbour this far off starts tracking heat
+settle_k = 0.05              # a cell that changed less than this, and did nothing else, sleeps
+sunlight = 0.1               # a sunlit open face closes 10% of the gap to the Sun's warmth per tick
+melt_margin_k = 100          # generated liquids start this far above freezing; depth holds melting points this far above the local heat
+
+# Loose rigid bodies: chunks of rock cut free, and wrecked drones.
+gravity_m_s2 = 3.0           # pull toward the centre on loose bodies (game value; real asteroids barely pull at all)
+island_max_cells = 120       # solid rock cut off from everything, up to this many cells, breaks free and falls...
+island_min_cells = 8         # ...if it has at least this many; smaller specks cling where they are
+settle_s = 1.0               # a body still this long sets down into the ground
+crush_speed_m_s = 6.0        # a body moving faster than this wrecks drones working where it passes (a fall of about 6 m)
+lava_kill_k = 1000           # a drone working beside a liquid this hot (lava, molten metal) is in danger...
+lava_kill_chance = 0.2       # ...and is wrecked one time in five; the rest get away
+

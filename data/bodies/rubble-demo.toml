@@ -1,0 +1,73 @@
+# G3 demo: a 1 km rubble-pile asteroid built from packed boulders of
+# different rock, with dust-filled gaps, rather than noise caves.
+name = "Rubble demo"
+archetype = "rubble-asteroid"
+seed = 3001
+radius_m = 1000
+heart = false
+regolith_depth_m = 4
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+
+[shape]
+roughness = 0.14
+wavelength_m = 700
+
+[[layer]]
+name = "rubble"
+outer = 1.0
+material = "chondrite"
+temperature_k = 180
+
+[rubble]
+boulder_m = 38
+gap_m = 1.2
+gap_material = "regolith"
+voids = 0.07
+r_min = 0.0
+r_max = 1.0
+
+[[rubble.rock]]
+material = "chondrite"
+weight = 6
+
+[[rubble.rock]]
+material = "basalt"
+weight = 1
+
+[[rubble.rock]]
+material = "dirty ice"
+weight = 0.7
+
+[[rubble.rock]]
+material = "iron-nickel"
+weight = 0.35
+
+[[rubble.rock]]
+material = "troilite"
+weight = 0.25
+
+[[rubble.rock]]
+material = "pallasite"
+weight = 0.12
+
+[[sprinkle]]
+material = "sperrylite"
+host = ["iron-nickel"]
+chance = 0.004
+r_min = 0.0
+r_max = 1.0
+
+[[sprinkle]]
+material = "gold"
+host = ["iron-nickel"]
+chance = 0.00016
+r_min = 0.0
+r_max = 1.0
+
+[craters]
+count = 14
+radius_min_m = 20
+radius_max_m = 170
+breccia = 0.18
+melt = 0.03

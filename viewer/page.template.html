@@ -1,0 +1,875 @@
+<meta charset="utf-8">
+<title>Planet Viewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: an instrument console. Controls and readouts on the left, the cross-section fills the rest.
+   One deliberate dark look: the bodies sit in space, so the page does too. */
+:root {
+  --space: #07080d;
+  --panel: #0f121a;
+  --panel-2: #161a25;
+  --line: #262c3b;
+  --ink: #dfe3ec;
+  --ink-dim: #8a93a8;
+  --accent: #e8a33d;      /* molten-iron orange: the swarm's eye */
+  --accent-ink: #1a1206;
+  --bad: #ff6b5a;
+  --f-display: "Saira Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--space); color: var(--ink); font: 14px/1.45 var(--f-body);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+header {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+header h1 { font: 700 20px/1 var(--f-display); letter-spacing: .04em; text-transform: uppercase; margin: 0; }
+header h1 b { color: var(--accent); font-weight: 700; }
+header .sub { color: var(--ink-dim); font-size: 13px; }
+.app { flex: 1; display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
+aside {
+  background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto;
+  padding-block: 14px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px;
+  display: flex; flex-direction: column; gap: 18px; min-width: 0;
+}
+.group { display: flex; flex-direction: column; gap: 8px; }
+.label { font: 500 11px/1 var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-dim); }
+select, input[type=number], textarea, button {
+  font: inherit; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+}
+select, input[type=number] { padding: 6px 8px; width: 100%; }
+textarea { width: 100%; min-height: 220px; font: 12px/1.4 var(--f-mono); padding: 8px; resize: vertical; }
+button { padding: 6px 10px; cursor: pointer; }
+button:hover { border-color: var(--ink-dim); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.row { display: flex; gap: 6px; align-items: center; }
+.row > * { min-width: 0; }
+.seg { display: grid; grid-template-columns: repeat(5, auto); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; font-size: 11.5px; padding: 6px 2px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); }
+.check { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.pane-b[hidden] { display: none; }
+.readout { font: 12px/1.5 var(--f-mono); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; min-height: 9em; white-space: pre-wrap; word-break: break-word; }
+.readout .k { color: var(--ink-dim); }
+.size-note { font: 12px/1.4 var(--f-mono); color: var(--ink-dim); }
+.runinfo { min-height: 6em; }
+.run .row button { flex: none; }
+.run .row select { flex: 1; width: auto; }
+.runinfo b { color: var(--accent); font-weight: 500; }
+button:disabled { opacity: .45; cursor: default; }
+.legend { display: flex; flex-direction: column; gap: 2px; font: 12px/1.3 var(--f-mono); }
+.legend button { display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; text-align: left; background: transparent; border: 1px solid transparent; padding: 3px 6px; }
+.legend button[aria-pressed=true] { border-color: var(--accent); background: var(--panel-2); }
+.legend .sw { width: 12px; height: 12px; border-radius: 2px; }
+.legend .pct { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.layers { font: 12px/1.5 var(--f-mono); color: var(--ink-dim); }
+.facts { font: 12px/1.5 var(--f-mono); white-space: pre-wrap; }
+.facts .k { color: var(--ink-dim); }
+.layers td { padding: 1px 8px 1px 0; vertical-align: top; white-space: nowrap; }
+.layers td.n { white-space: normal; }
+.layers td.n { color: var(--ink); }
+.error { color: var(--bad); font: 12px/1.4 var(--f-mono); white-space: pre-wrap; }
+details summary { cursor: pointer; }
+main { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; min-width: 0; min-height: 0; gap: 1px; background: var(--line); }
+.view { position: relative; background: var(--space); min-width: 0; min-height: 0; overflow: hidden; touch-action: none; cursor: crosshair; }
+.view canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.view canvas.img { image-rendering: pixelated; }
+.view .tag { position: absolute; left: 10px; top: 8px; font: 500 12px/1.3 var(--f-mono); color: var(--ink); background: color-mix(in srgb, var(--space) 70%, transparent); padding: 3px 6px; border-radius: 3px; pointer-events: none; }
+.view .tag .p { color: var(--accent); }
+.hud { position: absolute; right: calc(10px + env(safe-area-inset-right, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 6px; align-items: end; }
+.hud button { width: 32px; height: 32px; padding: 0; font: 500 16px/1 var(--f-mono); background: var(--panel); }
+.hud .fit { width: auto; padding: 0 10px; font-size: 12px; }
+.scale { position: absolute; left: 12px; bottom: 12px; font: 11px/1 var(--f-mono); color: var(--ink); pointer-events: none; }
+.scale i { display: block; height: 6px; border: 1px solid var(--ink); border-top: 0; margin-top: 4px; }
+.busy { position: absolute; left: 0; top: 0; height: 2px; background: var(--accent); width: 0; transition: width .1s; }
+@media (max-width: 760px) {
+  body { overflow: auto; }
+  .app { grid-template-columns: 1fr; }
+  aside { order: 2; border-right: 0; border-top: 1px solid var(--line); padding-right: max(16px, env(safe-area-inset-right, 0px)); overflow: visible; }
+  main { height: 62vh; grid-auto-flow: row; grid-auto-rows: 1fr; grid-auto-columns: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .busy { transition: none; } }
+</style>
+
+<header>
+  <h1>Planet <b>Viewer</b></h1>
+  <span class="sub">The Dark Forest Theory · the game's own generator, cell for cell</span>
+</header>
+<div class="app">
+  <aside>
+    <div class="group">
+      <span class="label">Body</span>
+      <select id="bodyA" aria-label="Body"></select>
+      <div class="row">
+        <input id="seedA" type="number" min="0" step="1" aria-label="Seed">
+        <button id="rerollA" title="Pick a new random seed">Reroll</button>
+      </div>
+      <label class="label" for="sizeA">Size</label>
+      <select id="sizeA" aria-label="Size class"></select>
+      <div class="size-note" id="sizeNote"></div>
+      <label class="label" for="glamour">Glamour <span id="glamourVal">0.40</span></label>
+      <input id="glamour" type="range" min="0" max="1" step="0.05" value="0.4" aria-label="Glamour: from realistic (0) to science fiction (1)" title="0 is the realistic model as locked in; higher adds eye candy to the interior, toward science fiction at 1">
+      <label class="check"><input id="looks" type="checkbox" checked> Block textures and dig backdrop</label>
+    </div>
+
+    <div class="group">
+      <span class="label">Colour by</span>
+      <div class="seg" role="group" aria-label="Colour by">
+        <button id="m-mat" aria-pressed="true">Material</button>
+        <button id="m-temp" aria-pressed="false">Heat</button>
+        <button id="m-pres" aria-pressed="false">Pressure</button>
+        <button id="m-hard" aria-pressed="false">Hardness</button>
+        <button id="m-val" aria-pressed="false">Value</button>
+      </div>
+    </div>
+
+    <div class="group run">
+      <span class="label">Run the sim</span>
+      <div class="row">
+        <button class="primary" id="runBtn">Run</button>
+        <button id="resetBtn" disabled>Reset</button>
+        <select id="speed" aria-label="Speed">
+          <option value="1">1×</option><option value="5">5×</option><option value="20" selected>20×</option>
+          <option value="60">60×</option><option value="0">Max</option>
+        </select>
+      </div>
+      <div class="row"><button id="benchBtn" title="Time drawing and the simulation on this machine, for the body shown">Benchmark</button><button id="benchCopy" hidden>Copy results</button></div>
+      <pre class="readout" id="benchOut" hidden></pre>
+      <div class="readout runinfo" id="runInfo">The idle player plays this body from the seed swarm to launch, in the game's own simulation. Drones show as dots: cyan cutting, amber carrying a load home.</div>
+    </div>
+
+    <div class="group">
+      <label class="check"><input id="compare" type="checkbox"> Compare side by side</label>
+      <div class="pane-b group" id="paneB" hidden>
+        <select id="bodyB" aria-label="Second body"></select>
+        <div class="row">
+          <input id="seedB" type="number" min="0" step="1" aria-label="Second seed">
+          <button id="rerollB">Reroll</button>
+        </div>
+        <label class="check"><input id="link" type="checkbox" checked> Move both views together</label>
+      </div>
+    </div>
+
+    <div class="group">
+      <span class="label">Under the cursor</span>
+      <div class="readout" id="readout">Move over the body to read a cell.</div>
+    </div>
+
+    <div class="group">
+      <span class="label">In view <span id="legendNote"></span></span>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="group">
+      <span class="label">Physics</span>
+      <div class="facts" id="bodyFacts"></div>
+      <span class="label">Layers · outer radius · temperature</span>
+      <table class="layers" id="layers"></table>
+    </div>
+
+    <details class="group" id="specBox">
+      <summary class="label">Edit spec</summary>
+      <textarea id="spec" spellcheck="false" aria-label="Body spec"></textarea>
+      <div class="row"><button class="primary" id="apply">Apply</button><button id="revert">Revert</button></div>
+      <div class="error" id="specErr"></div>
+    </details>
+  </aside>
+  <main id="main">
+    <div class="view" id="viewA">
+      <canvas class="img"></canvas><canvas class="ov"></canvas>
+      <div class="tag"></div><div class="scale"></div><div class="busy"></div>
+      <div class="hud"><button class="fit">Fit</button><button class="out" aria-label="Zoom out">−</button><button class="in" aria-label="Zoom in">+</button></div>
+    </div>
+    <div class="view" id="viewB" hidden>
+      <canvas class="img"></canvas><canvas class="ov"></canvas>
+      <div class="tag"></div><div class="scale"></div><div class="busy"></div>
+      <div class="hud"><button class="fit">Fit</button><button class="out" aria-label="Zoom out">−</button><button class="in" aria-label="Zoom in">+</button></div>
+    </div>
+  </main>
+</div>
+
+<script type="application/json" id="data">/*DATA*/</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const WASM = Uint8Array.from(atob(DATA.wasm), c => c.charCodeAt(0));
+const enc = new TextEncoder(), dec = new TextDecoder();
+const $ = id => document.getElementById(id);
+let mode = "mat";
+
+// ---- the generator, one WebAssembly instance per view ----
+async function makeGen() {
+  const { instance } = await WebAssembly.instantiate(WASM, {});
+  const e = instance.exports;
+  const put = s => { const b = enc.encode(s); const p = e.alloc(b.length); new Uint8Array(e.memory.buffer, p, b.length).set(b); return [p, b.length]; };
+  const text = () => dec.decode(new Uint8Array(e.memory.buffer, e.text_ptr(), e.text_len()));
+  const [mp, ml] = put(DATA.materials), [ep, el] = put(DATA.elements);
+  if (!e.set_tables(mp, ml, ep, el)) throw new Error(text());
+  e.dealloc(mp, ml); e.dealloc(ep, el);
+  return {
+    setBody(spec, seed) {
+      const [p, n] = put(spec);
+      const ok = e.set_body(p, n, seed);
+      e.dealloc(p, n);
+      if (!ok) throw new Error(text());
+      e.info();
+      return JSON.parse(text());
+    },
+    render(xl, yt, mpp, w, h, field) {
+      const n = e.render(xl, yt, mpp, w, h, field);
+      return {
+        rgba: new Uint8ClampedArray(e.memory.buffer, e.rgba_ptr(), n * 4),
+        ids: new Uint16Array(e.memory.buffer, e.ids_ptr(), n),
+        field: field ? new Float32Array(e.memory.buffer, e.field_ptr(), n) : null,
+      };
+    },
+    setLooks: on => e.set_looks(on ? 1 : 0),
+    resize(spec, radius) {
+      const [p, n] = put(spec);
+      const ok = e.resize_spec(p, n, radius);
+      e.dealloc(p, n);
+      if (!ok) throw new Error(text());
+      return text();
+    },
+    cell: (x, y) => e.cell(x, y),
+    cellPa: (x, y) => e.cell_pa(x, y),
+    cellK: (x, y) => e.cell_k(x, y),
+  };
+}
+
+// ---- colour ramps for the data modes ----
+function ramp(stops, t) {
+  t = Math.min(1, Math.max(0, t));
+  const i = Math.min(stops.length - 2, Math.floor(t * (stops.length - 1)));
+  const f = t * (stops.length - 1) - i, a = stops[i], b = stops[i + 1];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+const HEAT = [[20, 30, 90], [30, 110, 170], [70, 180, 160], [230, 210, 90], [240, 120, 40], [200, 40, 30], [255, 240, 220]];
+const HARD = [[40, 44, 56], [90, 110, 130], [120, 190, 210], [230, 250, 255]];
+const VAL = [[30, 28, 34], [90, 70, 50], [190, 140, 50], [255, 215, 90], [255, 255, 220]];
+const heatT = k => Math.log(Math.max(k, 20) / 20) / Math.log(3500 / 20);
+const PRES = [[25, 25, 45], [60, 40, 110], [150, 50, 130], [230, 90, 80], [250, 190, 90], [255, 250, 210]];
+const presT = (pa, top) => pa <= 0 || !top ? 0 : pa / top;
+const fmtPa = pa => pa < 1e3 ? `${Math.round(pa)} Pa` : pa < 1e6 ? `${(pa / 1e3).toPrecision(3)} kPa` : pa < 1e9 ? `${(pa / 1e6).toPrecision(3)} MPa` : `${(pa / 1e9).toPrecision(3)} GPa`;
+const fmtK = k => `${Math.round(k).toLocaleString()} K`;
+const fmtM = m => Math.abs(m) >= 10000 ? `${(m / 1000).toFixed(m >= 100000 ? 0 : 1)} km` : `${Math.round(m).toLocaleString()} m`;
+
+// ---- one view: a body, a camera, a canvas ----
+class View {
+  constructor(root, side) {
+    this.root = root; this.side = side;
+    [this.img, this.ov] = root.querySelectorAll("canvas");
+    this.tag = root.querySelector(".tag"); this.scaleEl = root.querySelector(".scale"); this.busy = root.querySelector(".busy");
+    this.cx = 0; this.cy = 0; this.mpp = 10; this.job = 0; this.info = null; this.counts = null;
+    this.highlight = -1;
+    root.querySelector(".fit").onclick = () => { this.fit(); sync(this); };
+    root.querySelector(".in").onclick = () => { this.zoomAt(0.5, this.w / 2, this.h / 2); sync(this); };
+    root.querySelector(".out").onclick = () => { this.zoomAt(2, this.w / 2, this.h / 2); sync(this); };
+    this.bindPointer();
+    new ResizeObserver(() => this.resize()).observe(root);
+  }
+  async ensureGen() {
+    if (!this.gen) this.gen = await makeGen();
+    return this.gen;
+  }
+  async load(spec, seed) {
+    if (!this.gen) this.gen = await makeGen();
+    this.gen.setLooks($("looks").checked);
+    this.info = this.gen.setBody(spec, seed);
+    this.spec = spec;
+    this.lut();
+    return this.info;
+  }
+  lut() {
+    const ms = this.info.materials;
+    const maxH = Math.max(1, ...ms.map(m => m.hardness));
+    const vals = ms.map(m => m.value).filter(v => v > 0);
+    const vmin = Math.min(...vals), vmax = Math.max(...vals);
+    this.hardC = ms.map(m => ramp(HARD, m.hardness / maxH));
+    this.valC = ms.map(m => m.value > 0 ? ramp(VAL, Math.log(m.value / vmin) / Math.log(vmax / vmin || 2)) : [30, 28, 34]);
+  }
+  resize() {
+    const r = this.root.getBoundingClientRect();
+    this.w = Math.max(1, Math.round(r.width)); this.h = Math.max(1, Math.round(r.height));
+    for (const c of [this.img, this.ov]) { c.width = this.w; c.height = this.h; }
+    if (!this.fitted && this.info) this.fit();
+    this.draw();
+  }
+  fit() {
+    if (!this.info || !this.w) return;
+    const span = 2 * (this.info.max_radius + this.info.atmosphere_m) * 1.06;
+    this.cx = 0; this.cy = 0; this.mpp = span / Math.min(this.w, this.h); this.fitted = true;
+  }
+  zoomAt(f, px, py) {
+    const wx = this.cx + (px - this.w / 2) * this.mpp, wy = this.cy - (py - this.h / 2) * this.mpp;
+    this.mpp = Math.min(Math.max(this.mpp * f, 1 / 64), 1e6);
+    this.cx = wx - (px - this.w / 2) * this.mpp; this.cy = wy + (py - this.h / 2) * this.mpp;
+  }
+  toWorld(px, py) {
+    return [Math.floor(this.cx + (px - this.w / 2) * this.mpp), Math.floor(this.cy - (py - this.h / 2) * this.mpp)];
+  }
+  bindPointer() {
+    const pts = new Map(); let last = null, pinch = null;
+    const el = this.root;
+    el.addEventListener("pointerdown", e => {
+      if (e.target.closest("button")) return;
+      el.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]); last = [e.offsetX, e.offsetY];
+      if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = Math.hypot(a[0] - b[0], a[1] - b[1]); }
+    });
+    el.addEventListener("pointermove", e => {
+      if (!pts.has(e.pointerId)) { this.hover(e.offsetX, e.offsetY); return; }
+      pts.set(e.pointerId, [e.offsetX, e.offsetY]);
+      if (pts.size === 2) {
+        const [a, b] = [...pts.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        if (pinch) { this.zoomAt(pinch / d, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2); pinch = d; this.shiftPreview(); sync(this, true); }
+        return;
+      }
+      const dx = e.offsetX - last[0], dy = e.offsetY - last[1]; last = [e.offsetX, e.offsetY];
+      this.cx -= dx * this.mpp; this.cy += dy * this.mpp; this.pan = (this.pan || [0, 0]); this.pan[0] += dx; this.pan[1] += dy;
+      this.shiftPreview(); sync(this, true);
+    });
+    const end = e => { if (!pts.delete(e.pointerId)) return; pinch = null; if (!pts.size) { this.pan = null; this.draw(); sync(this); } };
+    el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+    el.addEventListener("wheel", e => {
+      e.preventDefault();
+      this.zoomAt(Math.pow(1.0015, e.deltaY), e.offsetX, e.offsetY);
+      this.draw(); sync(this);
+    }, { passive: false });
+    el.addEventListener("pointerleave", () => { $("readout").textContent = "Move over the body to read a cell."; });
+  }
+  // While dragging, slide the last image instead of regenerating every frame.
+  shiftPreview() {
+    if (this.side === "A" && RUN.active) { RUN.paint(); RUN.viewSoon(); return; }
+    if (!this.pan || !this.snap) return;
+    const g = this.img.getContext("2d");
+    g.fillStyle = "#07080d"; g.fillRect(0, 0, this.w, this.h);
+    g.drawImage(this.snap, this.pan[0], this.pan[1]);
+    this.overlay();
+  }
+  draw() {
+    if (!this.info || !this.w) return;
+    if (this.side === "A" && RUN.active) { RUN.view(); this.overlay(); return; }
+    const job = ++this.job, W = this.w, H = this.h;
+    const xl = this.cx - W / 2 * this.mpp, yt = this.cy + H / 2 * this.mpp, mpp = this.mpp;
+    const g = this.img.getContext("2d");
+    const out = g.createImageData(W, H);
+    const counts = new Float64Array(this.info.materials.length);
+    const field = mode === "temp" ? 1 : mode === "pres" ? 2 : 0;
+    const top = this.info.centre_pa;
+    const STRIP = Math.max(8, Math.floor(60000 / W));
+    let row = 0;
+    const t0all = performance.now();
+    let finish; this.drawn = new Promise(r => { finish = r; });
+    // A quick pass at a quarter of the resolution first, so a big view shows
+    // at once; the full pass then fills in over it.
+    if (W * H > 200000) {
+      const q = 4, qw = Math.ceil(W / q), qh = Math.ceil(H / q);
+      const r = this.gen.render(xl, yt, mpp * q, qw, qh, field);
+      const small = new ImageData(qw, qh);
+      this.colourize(r, small.data, 0, qw * qh, new Float64Array(this.info.materials.length), top);
+      createImageBitmap(small).then(b => {
+        if (job !== this.job || row >= H) return;
+        g.imageSmoothingEnabled = false;
+        const sy = Math.floor(row / q);
+        g.drawImage(b, 0, sy, qw, qh - sy, 0, sy * q, qw * q, (qh - sy) * q);
+      });
+    }
+    const step = () => {
+      if (job !== this.job) return;
+      const t0 = performance.now();
+      while (row < H && performance.now() - t0 < 24) {
+        const rows = Math.min(STRIP, H - row);
+        const r = this.gen.render(xl, yt - row * mpp, mpp, W, rows, field);
+        const base = row * W * 4, d = out.data;
+        this.colourize(r, d, base, rows * W, counts, top);
+        row += rows;
+      }
+      g.putImageData(out, 0, 0, 0, 0, W, row);
+      this.busy.style.width = `${(row / H) * 100}%`;
+      if (row < H) { requestAnimationFrame(step); return; }
+      this.busy.style.width = "0";
+      this.counts = counts;
+      this.drawMs = performance.now() - t0all;
+      this.overlay();
+      finish(this.drawMs);
+      createImageBitmap(out).then(b => { if (job === this.job) this.snap = b; });
+      if (this.side === "A") legend();
+    };
+    this.overlay();
+    requestAnimationFrame(step);
+  }
+  // Colour n pixels of a rendered strip into d (from byte offset base) by the
+  // current mode, counting materials into counts.
+  colourize(r, d, base, n, counts, top) {
+    for (let i = 0; i < n; i++) {
+      const id = r.ids[i]; counts[id]++;
+      let c0 = r.rgba[i * 4], c1 = r.rgba[i * 4 + 1], c2 = r.rgba[i * 4 + 2];
+      if (id !== 0 && mode !== "mat") {
+        const c = mode === "temp" ? ramp(HEAT, heatT(r.field[i])) : mode === "pres" ? ramp(PRES, presT(r.field[i], top)) : mode === "hard" ? this.hardC[id] : this.valC[id];
+        c0 = c[0]; c1 = c[1]; c2 = c[2];
+      }
+      if (this.highlight >= 0 && id !== this.highlight && id !== 0) { c0 *= .22; c1 *= .22; c2 *= .25; }
+      const o = base + i * 4; d[o] = c0; d[o + 1] = c1; d[o + 2] = c2; d[o + 3] = 255;
+    }
+  }
+  overlay() {
+    const g = this.ov.getContext("2d"); g.clearRect(0, 0, this.w, this.h);
+    if (this.side === "A" && RUN.active) RUN.drawDrones(g);
+    const px = 1 / this.mpp;
+    // Cell grid once cells are big enough to tell apart (the block
+    // textures draw their own edges, so only without them).
+    if (px >= 8 && !$("looks").checked) {
+      g.strokeStyle = `rgba(0,0,0,${Math.min(0.45, (px - 8) / 30 + 0.15)})`; g.lineWidth = 1; g.beginPath();
+      const x0 = this.cx - this.w / 2 * this.mpp, y0 = this.cy + this.h / 2 * this.mpp;
+      for (let x = Math.ceil(x0); (x - x0) * px <= this.w; x++) { const s = Math.round((x - x0) * px) + .5; g.moveTo(s, 0); g.lineTo(s, this.h); }
+      for (let y = Math.floor(y0); (y0 - y) * px <= this.h; y--) { const s = Math.round((y0 - y) * px) + .5; g.moveTo(0, s); g.lineTo(this.w, s); }
+      g.stroke();
+    }
+    // Scale bar: the longest 1-2-5 length under 120 px.
+    let len = 1e-3; for (const k of [1, 2, 5, 10, 20, 50, 100, 200, 500, 1e3, 2e3, 5e3, 1e4, 2e4, 5e4, 1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 1e7]) if (k / this.mpp <= 120) len = k;
+    this.scaleEl.innerHTML = `${len >= 1000 ? len / 1000 + " km" : len + " m"}<i style="width:${len / this.mpp}px"></i>`;
+    const i = this.info;
+    const cellPx = 1 / this.mpp;
+    this.tag.innerHTML = `${i.name} · ${sizeClass(i.radius)}, ${fmtR(i.radius)} · seed <span class="p">${i.seed}</span> · ${i.scheme === "natural" ? "natural colours" : `${i.scheme} palette, base hue ${i.hue}°`} · ${cellPx >= 1 ? `${cellPx.toFixed(cellPx < 10 ? 1 : 0)} px per cell` : `${fmtM(this.mpp)} per px`}${this.drawMs && !(this.side === "A" && RUN.active) ? ` · drawn in ${this.drawMs < 1000 ? Math.round(this.drawMs) + " ms" : (this.drawMs / 1000).toFixed(1) + " s"}` : ""}`;
+  }
+  hover(px, py) {
+    if (!this.info) return;
+    const [x, y] = this.toWorld(px, py);
+    const live = this.side === "A" && RUN.active ? RUN.idAt(px, py) : -1;
+    const id = live >= 0 ? live : this.gen.cell(x, y), m = this.info.materials[id];
+    const r = Math.hypot(x + .5, y + .5);
+    let s = `<span class="k">cell</span>  ${x.toLocaleString()}, ${y.toLocaleString()}\n<span class="k">from centre</span> ${fmtM(r)} (${(r / this.info.radius * 100).toFixed(1)}% of radius)\n`;
+    if (id === 0) { $("readout").innerHTML = s + `<span class="k">vacuum</span>`; return; }
+    const comp = Object.entries(m.composition).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, f]) => `${k} ${(f * 100).toFixed(f < .1 ? 1 : 0)}%`).join(", ");
+    s += `<b>${m.name}</b> · ${m.state}\n<span class="k">hardness</span> ${m.hardness}  <span class="k">density</span> ${m.density.toLocaleString()} kg/m³\n<span class="k">value</span> ${m.value ? m.value.toPrecision(3) + " /kg" : "none"}\n<span class="k">starts at</span> ${fmtK(this.gen.cellK(x, y))}  <span class="k">pressure</span> ${fmtPa(this.gen.cellPa(x, y))}`;
+    if (m.melts_at_k) s += `  <span class="k">melts</span> ${fmtK(m.melts_at_k)}`;
+    if (comp) s += `\n<span class="k">made of</span> ${comp}`;
+    if (live >= 0) s += `\n<span class="k">live, as the swarm left it</span>`;
+    $("readout").innerHTML = s;
+  }
+}
+
+const A = new View($("viewA"), "A"), B = new View($("viewB"), "B");
+const views = () => $("compare").checked ? [A, B] : [A];
+
+function sync(from, previewOnly) {
+  if (!$("compare").checked || !$("link").checked) return;
+  const to = from === A ? B : A;
+  to.cx = from.cx; to.cy = from.cy; to.mpp = from.mpp;
+  if (previewOnly) { to.pan = from.pan ? [...from.pan] : null; to.shiftPreview(); } else { to.pan = null; to.draw(); }
+}
+
+// ---- legend: what's in view, by share of pixels ----
+function legend() {
+  const v = A, ms = v.info.materials, n = v.counts;
+  const total = n.reduce((a, b, i) => a + (i ? b : 0), 0) || 1;
+  const rows = [...n.keys()].filter(i => i && n[i] > 0).sort((a, b) => n[b] - n[a]);
+  $("legendNote").textContent = "· % of body on screen";
+  const box = $("legend"); box.innerHTML = "";
+  for (const i of rows) {
+    const m = ms[i], b = document.createElement("button");
+    const p = n[i] / total * 100;
+    b.setAttribute("aria-pressed", v.highlight === i);
+    b.title = "Click to highlight this material";
+    b.innerHTML = `<span class="sw" style="background:rgb(${m.colour})"></span><span>${m.name}</span><span class="pct">${p >= 0.1 ? p.toFixed(1) : "<0.1"}%</span>`;
+    b.onclick = () => { v.highlight = v.highlight === i ? -1 : i; if ($("compare").checked) B.highlight = -1; v.draw(); };
+    box.append(b);
+  }
+}
+
+function layersTable(info) {
+  $("bodyFacts").innerHTML = `<span class="k">real gravity</span> ${info.real_g.toPrecision(3)} m/s² (game uses ${info.game_g})\n<span class="k">centre pressure</span> ${fmtPa(info.centre_pa)}`;
+  $("layers").innerHTML = info.layers.slice().reverse().map(l =>
+    `<tr><td class="n">${l.name}<br>${l.material}</td><td>${fmtM(l.outer * info.radius)}</td><td>${fmtK(l.temperature_k)}</td></tr>`).join("");
+}
+
+// ---- controls ----
+for (const sel of [$("bodyA"), $("bodyB")]) {
+  const groups = {};
+  DATA.bodies.forEach((b, i) => {
+    if (!groups[b.group]) { groups[b.group] = document.createElement("optgroup"); groups[b.group].label = b.group; sel.add(groups[b.group]); }
+    groups[b.group].appendChild(new Option(b.label, i));
+  });
+}
+$("bodyB").value = String(Math.min(1, DATA.bodies.length - 1));
+const specs = DATA.bodies.map(b => b.text);
+
+// ---- size classes: each a range of radii; the seed picks the exact size ----
+const SIZES = [
+  ["Asteroid", 500, 3000], ["Large asteroid", 3000, 10000], ["Tiny planetoid", 10000, 30000],
+  ["Planetoid", 30000, 100000], ["Dwarf planet", 100000, 500000], ["Small planet", 500000, 2000000],
+  ["Planet", 2000000, 8000000],
+];
+const fmtR = m => m >= 100000 ? `${Math.round(m / 1000).toLocaleString()} km` : m >= 10000 ? `${(m / 1000).toFixed(0)} km` : `${(m / 1000).toFixed(1)} km`;
+const sizeClass = m => (SIZES.find(([, lo, hi]) => m >= lo && m < hi) || SIZES[SIZES.length - 1])[0];
+$("sizeA").add(new Option("As designed", "native"));
+SIZES.forEach(([n, lo, hi], i) => $("sizeA").add(new Option(`${n} · ${fmtR(lo)} to ${fmtR(hi)}`, i)));
+// The seed picks a size inside the class, evenly on a log scale, so every
+// reroll gives a new size as well as a new body.
+function sizeFor(seed) {
+  const k = $("sizeA").value;
+  if (k === "native") return 0;
+  const [, lo, hi] = SIZES[+k];
+  let h = Math.imul((seed >>> 0) ^ 0x9e3779b9, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  const u = (h >>> 0) / 4294967296;
+  return Math.round(Math.exp(Math.log(lo) + (Math.log(hi) - Math.log(lo)) * u));
+}
+const specSeed = t => +((t.match(/^seed\s*=\s*(\d+)/m) || [0, 0])[1]);
+// The spec to build: the body type at the chosen size, with the glamour setting.
+async function specFor(view, i, seed) {
+  const base = specs[i];
+  const r = sizeFor(seed ?? specSeed(base));
+  const t = r ? (await view.ensureGen()).resize(base, r) : base;
+  return withGlamour(t);
+}
+function sizeNote(info) {
+  const b = DATA.bodies[$("bodyA").value];
+  $("sizeNote").textContent = `${sizeClass(info.radius)}, ${fmtR(info.radius)} radius` + ($("sizeA").value === "native" ? "" : ` · designed at ${fmtR(b.radius_m)}`);
+}
+
+// The glamour setting goes into the spec as a top-level key (first, before
+// any table), replacing one the spec may already have.
+const withGlamour = t => `glamour = ${(+$("glamour").value).toFixed(2)}\n` + t.replace(/^glamour\s*=.*$/m, "");
+async function loadA(seed) {
+  RUN.stop();
+  try {
+    const t = await specFor(A, $("bodyA").value, seed);
+    const info = await A.load(t, seed ?? -1);
+    sizeNote(info);
+    $("seedA").value = info.seed; $("spec").value = specs[$("bodyA").value]; $("specErr").textContent = "";
+    layersTable(info); A.highlight = -1; A.fitted = false; A.fit(); A.draw();
+  } catch (e) { $("specErr").textContent = e.message; $("specBox").open = true; }
+}
+async function loadB(seed) {
+  try {
+    const t = await specFor(B, $("bodyB").value, seed);
+    const info = await B.load(t, seed ?? -1); $("seedB").value = info.seed;
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    B.resize(); A.resize();
+    if ($("link").checked) { B.cx = A.cx; B.cy = A.cy; B.mpp = A.mpp; B.fitted = true; } else { B.fitted = false; B.fit(); }
+    B.draw();
+  }
+  catch (e) { $("specErr").textContent = e.message; }
+}
+const rand = () => Math.floor(Math.random() * 1e6);
+$("bodyA").onchange = () => loadA();
+$("seedA").onchange = () => loadA(Math.max(0, Math.floor(+$("seedA").value || 0)));
+$("rerollA").onclick = () => loadA(rand());
+$("sizeA").onchange = () => { loadA(+$("seedA").value); if ($("compare").checked) loadB(+$("seedB").value); };
+$("bodyB").onchange = () => loadB();
+$("seedB").onchange = () => loadB(Math.max(0, Math.floor(+$("seedB").value || 0)));
+$("rerollB").onclick = () => loadB(rand());
+$("compare").onchange = () => {
+  if (RUN.active) { $("compare").checked = false; return; }
+  const on = $("compare").checked; $("paneB").hidden = !on; $("viewB").hidden = !on;
+  if (on) loadB(); else requestAnimationFrame(() => A.resize());
+};
+$("link").onchange = () => sync(A);
+$("glamour").oninput = () => { $("glamourVal").textContent = (+$("glamour").value).toFixed(2); };
+$("glamour").onchange = () => { const s = +$("seedA").value; loadA(s); if ($("compare").checked) loadB(+$("seedB").value); };
+$("looks").onchange = () => {
+  const on = $("looks").checked;
+  for (const v of views()) if (v.gen) v.gen.setLooks(on);
+  if (RUN.worker) RUN.worker.postMessage({ type: "looks", on });
+  for (const v of views()) v.draw();
+};
+for (const [id, m] of [["m-mat", "mat"], ["m-temp", "temp"], ["m-pres", "pres"], ["m-hard", "hard"], ["m-val", "val"]])
+  $(id).onclick = () => {
+    mode = m; for (const b of document.querySelectorAll(".seg button")) b.setAttribute("aria-pressed", b.id === id);
+    for (const v of views()) v.draw();
+  };
+$("apply").onclick = async () => {
+  const t = $("spec").value;
+  try { const info = await A.load(withGlamour(t), -1); specs[$("bodyA").value] = t; $("seedA").value = info.seed; $("specErr").textContent = ""; layersTable(info); A.draw(); }
+  catch (e) { $("specErr").textContent = e.message; }
+};
+$("revert").onclick = () => { specs[$("bodyA").value] = DATA.bodies[$("bodyA").value].text; loadA(); };
+
+// ---- Run mode: the full simulation in a background worker ----
+// The worker owns its own copy of the WebAssembly module. It steps the sim in
+// short slices (so it can answer at any time), and sends a frame of the
+// current view about four times a second while running, at once when the
+// view changes. Frames above 400k pixels are rendered at reduced resolution;
+// drones are drawn from their positions on the main thread every frame.
+const WORKER_SRC = `
+let e, enc = new TextEncoder(), dec = new TextDecoder();
+let running = false, speed = 20, view = null, want = false, field = 0, lastReal = 0, owed = 0, lastFrame = 0;
+let rate = 0, rateT = 0, rateTicks = 0;
+// What things cost: time inside the simulation and inside drawing a frame.
+let simMs = 0, simTicks = 0, frameMs = 0, frames = true, cost = { sim: 0, frame: 0 };
+// Share of the worker's time in the last second: simulating, drawing.
+let frameAcc = 0, simAcc = 0, split = { sim: 0, draw: 0 };
+const put = s => { const b = enc.encode(s); const p = e.alloc(b.length); new Uint8Array(e.memory.buffer, p, b.length).set(b); return [p, b.length]; };
+const text = () => dec.decode(new Uint8Array(e.memory.buffer, e.text_ptr(), e.text_len()));
+function frame() {
+  if (!view) return;
+  const v = view;
+  const f0 = performance.now();
+  const n = e.run_render(v.xl, v.yt, v.mpp, v.w, v.h, field);
+  frameMs = performance.now() - f0;
+  frameAcc += frameMs;
+  const rgba = new Uint8ClampedArray(e.memory.buffer, e.rgba_ptr(), n * 4).slice();
+  const ids = new Uint16Array(e.memory.buffer, e.ids_ptr(), n).slice();
+  const fl = field ? new Float32Array(e.memory.buffer, e.field_ptr(), n).slice() : null;
+  const nd = e.run_drones();
+  const drones = new Float32Array(e.memory.buffer, e.points_ptr(), nd * 3).slice();
+  const nh = e.run_hubs();
+  const hubs = new Float32Array(e.memory.buffer, e.points_ptr(), nh * 3).slice();
+  e.run_info();
+  const info = JSON.parse(text());
+  info.rate = rate;
+  info.running = running;
+  info.simCost = cost.sim;
+  info.split = split;
+  info.frameMs = frameMs;
+  if (info.launched_at !== null) info.hash = (e.run_hash_hi() >>> 0).toString(16).padStart(8, "0") + (e.run_hash_lo() >>> 0).toString(16).padStart(8, "0");
+  const tr = [rgba.buffer, ids.buffer, drones.buffer, hubs.buffer];
+  if (fl) tr.push(fl.buffer);
+  postMessage({ type: "frame", view: v, rgba, ids, field: fl, drones, hubs, info }, tr);
+  lastFrame = performance.now();
+  want = false;
+}
+function loop() {
+  const now = performance.now();
+  if (running) {
+    const dt = Math.min(0.25, (now - lastReal) / 1000);
+    lastReal = now;
+    owed = speed === 0 ? 1e9 : Math.min(owed + dt * speed * 10, 600);
+    let done = 0;
+    while (owed >= 1 && performance.now() - now < 30) {
+      const k = Math.min(Math.floor(owed), 20);
+      const s0 = performance.now();
+      const ran = e.run_ticks(k);
+      const ds = performance.now() - s0;
+      simMs += ds; simAcc += ds; simTicks += ran;
+      owed -= k; done += ran;
+      if (ran < k) { running = false; owed = 0; break; }
+    }
+    if (speed === 0) owed = 0;
+    rateTicks += done;
+    if (now - rateT > 1000) {
+      const span = now - rateT;
+      split = { sim: simAcc / span, draw: frameAcc / span }; simAcc = 0; frameAcc = 0;
+      rate = rateTicks / 10 / (span / 1000); rateT = now; rateTicks = 0;
+      // Milliseconds of simulation per second of game time.
+      if (simTicks > 0) cost.sim = simMs / (simTicks / 10);
+      simMs = 0; simTicks = 0;
+      if (!frames) postMessage({ type: "stats", rate, simCost: cost.sim, split });
+    }
+    // A new frame four times a second, or less often if frames are slow to
+    // draw, so drawing never takes more than about a quarter of the time.
+    if (frames && (now - lastFrame > Math.max(250, 3 * frameMs) || !running)) want = true;
+  }
+  if (want) frame();
+  setTimeout(loop, running ? 0 : 50);
+}
+onmessage = async (m) => {
+  const d = m.data;
+  if (d.type === "init") {
+    const inst = await WebAssembly.instantiate(d.module, {});
+    e = inst.exports;
+    const [mp, ml] = put(d.materials), [ep, el] = put(d.elements);
+    if (!e.set_tables(mp, ml, ep, el)) { postMessage({ type: "error", msg: text() }); return; }
+    const [sp, sl] = put(d.spec);
+    if (!e.set_body(sp, sl, d.seed)) { postMessage({ type: "error", msg: text() }); return; }
+    const [cp, cl] = put(d.economy);
+    if (!e.run_new(cp, cl)) { postMessage({ type: "error", msg: text() }); return; }
+    e.set_looks(d.looks ? 1 : 0);
+    view = d.view; field = d.field; want = true;
+    postMessage({ type: "ready" });
+    loop();
+  } else if (d.type === "view") { view = d.view; field = d.field; want = true; }
+  else if (d.type === "speed") { speed = d.speed; }
+  else if (d.type === "frames") { frames = d.on; want = d.on; }
+  else if (d.type === "looks") { e.set_looks(d.on ? 1 : 0); want = true; }
+  else if (d.type === "run") { running = d.on; lastReal = performance.now(); rateT = lastReal; rateTicks = 0; owed = 0; want = true; }
+};`;
+
+const RUN = {
+  active: false, worker: null, module: null, frame: null, running: false,
+  async start() {
+    if (!this.module) this.module = await WebAssembly.compile(WASM);
+    const url = URL.createObjectURL(new Blob([WORKER_SRC], { type: "text/javascript" }));
+    this.worker = new Worker(url);
+    this.worker.onmessage = m => this.onMessage(m.data);
+    this.active = true;
+    $("compare").checked = false; $("paneB").hidden = true; $("viewB").hidden = true;
+    $("resetBtn").disabled = false;
+    $("runInfo").textContent = "Building the world…";
+    this.worker.postMessage({ type: "init", module: this.module, materials: DATA.materials, elements: DATA.elements, economy: DATA.economy,
+      spec: A.spec, seed: A.info.seed, view: this.viewMsg(), field: this.field(), looks: $("looks").checked });
+    this.worker.postMessage({ type: "speed", speed: +$("speed").value });
+    this.setRunning(true);
+    $("legendNote").textContent = "· as generated, before the swarm";
+  },
+  stop() {
+    if (this.worker) this.worker.terminate();
+    this.worker = null; this.active = false; this.frame = null; this.running = false;
+    $("runBtn").textContent = "Run"; $("resetBtn").disabled = true;
+    $("runInfo").textContent = "The idle player plays this body from the seed swarm to launch, in the game's own simulation. Drones show as dots: cyan cutting, amber carrying a load home.";
+  },
+  setRunning(on) {
+    this.running = on;
+    $("runBtn").textContent = on ? "Pause" : "Run";
+    this.worker.postMessage({ type: "run", on });
+  },
+  field() { return mode === "temp" ? 1 : mode === "pres" ? 2 : 0; },
+  // Render size: the canvas, scaled down so a frame stays under 400k pixels.
+  viewMsg() {
+    const s = Math.max(1, Math.sqrt(A.w * A.h / 400000));
+    const w = Math.ceil(A.w / s), h = Math.ceil(A.h / s), mpp = A.mpp * s;
+    return { xl: A.cx - A.w / 2 * A.mpp, yt: A.cy + A.h / 2 * A.mpp, mpp, w, h, s };
+  },
+  view() { if (this.worker) this.worker.postMessage({ type: "view", view: this.viewMsg(), field: this.field() }); },
+  onMessage(d) {
+    if (d.type === "error") { $("runInfo").textContent = "Couldn't start: " + d.msg; return; }
+    if (d.type === "stats") { this.stats = d; if (this.onStats) this.onStats(d); return; }
+    if (d.type !== "frame") return;
+    this.stats = { rate: d.info.rate, simCost: d.info.simCost, split: d.info.split };
+    if (this.onStats) this.onStats(this.stats);
+    this.frame = d;
+    const c0 = performance.now();
+    if (d.info.launched_at !== null && this.running) { this.running = false; $("runBtn").textContent = "Run"; }
+    const v = d.view, img = new ImageData(v.w, v.h);
+    A.colourize({ rgba: d.rgba, ids: d.ids, field: d.field }, img.data, 0, v.w * v.h, new Float64Array(A.info.materials.length), A.info.centre_pa);
+    createImageBitmap(img).then(bmp => {
+      if (this.frame !== d) return;
+      this.bmp = bmp;
+      this.paint();
+      this.pageMs = performance.now() - c0;
+    });
+    this.readout(d.info);
+  },
+  // Draw the latest frame where its view sits under the current camera, so
+  // panning and zooming move it at once while the next frame is made.
+  paint() {
+    const f = this.frame; if (!f || !this.bmp) return;
+    const v = f.view, g = A.img.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    g.fillStyle = "#07080d"; g.fillRect(0, 0, A.w, A.h);
+    const k = v.mpp / A.mpp;
+    const ox = (v.xl - (A.cx - A.w / 2 * A.mpp)) / A.mpp, oy = ((A.cy + A.h / 2 * A.mpp) - v.yt) / A.mpp;
+    g.drawImage(this.bmp, ox, oy, v.w * k, v.h * k);
+    A.overlay();
+  },
+  viewSoon() {
+    if (this.pending) return;
+    this.pending = setTimeout(() => { this.pending = null; this.view(); }, 100);
+  },
+  idAt(px, py) {
+    const f = this.frame; if (!f) return -1;
+    const v = f.view;
+    const wx = A.cx + (px - A.w / 2) * A.mpp, wy = A.cy - (py - A.h / 2) * A.mpp;
+    const c = Math.floor((wx - v.xl) / v.mpp), r = Math.floor((v.yt - wy) / v.mpp);
+    if (c < 0 || r < 0 || c >= v.w || r >= v.h) return -1;
+    return f.ids[r * v.w + c];
+  },
+  drawDrones(g) {
+    const f = this.frame; if (!f) return;
+    const x0 = A.cx - A.w / 2 * A.mpp, y0 = A.cy + A.h / 2 * A.mpp, k = 1 / A.mpp;
+    const size = Math.max(1.6, Math.min(6, 0.9 * k));
+    const col = ["rgba(150,160,180,.7)", "rgba(110,235,255,.9)", "rgba(255,190,80,.95)"];
+    for (let s = 0; s < 3; s++) {
+      g.fillStyle = col[s];
+      for (let i = 0; i < f.drones.length; i += 3) {
+        if (f.drones[i + 2] !== s) continue;
+        const x = (f.drones[i] - x0) * k, y = (y0 - f.drones[i + 1]) * k;
+        if (x < -4 || y < -4 || x > A.w + 4 || y > A.h + 4) continue;
+        g.fillRect(x - size / 2, y - size / 2, size, size);
+      }
+    }
+    g.strokeStyle = "rgba(232,163,61,.95)"; g.lineWidth = 1.5;
+    for (let i = 0; i < f.hubs.length; i += 3) {
+      const x = (f.hubs[i] - x0) * k, y = (y0 - f.hubs[i + 1]) * k, r = f.hubs[i + 2] === 1 ? 6 : 4;
+      g.beginPath(); g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y); g.closePath(); g.stroke();
+    }
+  },
+  readout(i) {
+    const mm = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+    let s = `<span class="k">game time</span> <b>${mm(i.t)}</b>   <span class="k">sim speed</span> ${i.rate ? Math.round(i.rate) + "×" : "–"}\n`;
+    s += `<span class="k">drones</span> ${i.drones.toLocaleString()}${i.packet ? " + " + i.packet.toLocaleString() + " in packets" : ""}\n`;
+    s += `<span class="k">consumed</span> ${(i.consumed * 100).toFixed(1)}%   <span class="k">purchases</span> ${i.purchases}\n`;
+    s += `<span class="k">crushed</span> ${i.crushed}  <span class="k">burned</span> ${i.burned}  <span class="k">awake cells</span> ${i.awake}  <span class="k">loose rock</span> ${i.loose}`;
+    // Where the time goes: the simulation, and drawing (in the worker, then on the page).
+    if (i.simCost) s += `\n<span class="k">sim</span> ${i.simCost.toFixed(1)} ms per game s (could run ~${Math.round(1000 / i.simCost)}×)  <span class="k">frame</span> ${Math.round(i.frameMs)} + ${Math.round(this.pageMs || 0)} ms` + (i.split ? `\n<span class="k">worker time</span> ${Math.round(i.split.sim * 100)}% simulating, ${Math.round(i.split.draw * 100)}% drawing` : "");
+    if (i.ready_at !== null) s += `\n<span class="k">ready to launch at</span> ${mm(i.ready_at)}`;
+    if (i.launched_at !== null) s += `\n<b>launched at ${mm(i.launched_at)}</b> · Seed Mass ${Math.round(i.seed_mass).toLocaleString()}\n<span class="k">fingerprint</span> ${i.hash}`;
+    $("runInfo").innerHTML = s;
+  },
+};
+// ---- Benchmark: drawing and simulation cost on this machine ----
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function benchmark() {
+  const out = $("benchOut"); out.hidden = false; $("benchCopy").hidden = true;
+  const lines = [];
+  const say = t => { lines.push(t); out.textContent = lines.join("\n"); };
+  RUN.stop(); await loadA(+$("seedA").value);
+  const i = A.info;
+  say(`${i.name}, ${fmtR(i.radius)} radius, seed ${i.seed}, glamour ${(+$("glamour").value).toFixed(2)}, textures ${$("looks").checked ? "on" : "off"}`);
+  say(`${navigator.hardwareConcurrency || "?"} threads · view ${A.w} × ${A.h} px · ${navigator.userAgent.match(/(Chrome|Firefox|Edg|Safari)\/[\d.]+/g)?.join(" ") || ""}`);
+  say("");
+  say("Drawing the generated body (main page):");
+  const views = [["whole body", null], ["surface, 1 m per px", 1], ["surface, 4 px per m", 0.25]];
+  for (const [name, mpp] of views) {
+    if (mpp === null) A.fit(); else { A.cx = 0; A.cy = i.radius * 0.97; A.mpp = mpp; A.fitted = true; }
+    A.draw(); const ms = await A.drawn;
+    say(`  ${name.padEnd(22)} ${Math.round(ms).toString().padStart(6)} ms  (${(ms * 1e6 / (A.w * A.h)).toFixed(0)} ns per px)`);
+  }
+  say("");
+  say("Running the simulation at Max speed:");
+  A.fit(); A.draw(); await A.drawn;
+  $("speed").value = "0";
+  await RUN.start();
+  const collect = async secs => {
+    const got = [];
+    RUN.onStats = st => { if (st.rate > 0) got.push(st); };
+    await sleep(secs * 1000);
+    RUN.onStats = null;
+    const tail = got.slice(Math.floor(got.length / 3));
+    const avg = k => tail.reduce((a, b) => a + (b[k] || 0), 0) / Math.max(1, tail.length);
+    const avgS = k => tail.reduce((a, b) => a + ((b.split && b.split[k]) || 0), 0) / Math.max(1, tail.length);
+    return { rate: avg("rate"), cost: avg("simCost"), sim: avgS("sim"), draw: avgS("draw") };
+  };
+  await sleep(1500);
+  RUN.worker.postMessage({ type: "speed", speed: 0 });
+  RUN.worker.postMessage({ type: "frames", on: false });
+  const a = await collect(15);
+  say(`  without drawing: ${a.rate.toFixed(0)}× real time, sim ${a.cost.toFixed(1)} ms per game s (${(a.cost * 60 / 1000).toFixed(2)} s per game min)`);
+  RUN.worker.postMessage({ type: "frames", on: true });
+  const b = await collect(15);
+  const f = RUN.frame ? Math.round(RUN.frame.info.frameMs) : 0;
+  say(`  with drawing:    ${b.rate.toFixed(0)}× real time, sim ${b.cost.toFixed(1)} ms per game s, frame ${f} ms in the worker + ${Math.round(RUN.pageMs || 0)} ms on the page`);
+  const t = RUN.frame ? RUN.frame.info.t : 0;
+  say(`  game time reached ${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}, ${RUN.frame ? RUN.frame.info.drones.toLocaleString() : "?"} drones, ${RUN.frame ? RUN.frame.info.awake.toLocaleString() : "?"} cells awake`);
+  say("");
+  say(`  worker time with drawing: ${Math.round(b.sim * 100)}% simulating, ${Math.round(b.draw * 100)}% drawing`);
+  say("");
+  say(b.draw > 0.35 ? `Drawing takes ${Math.round(b.draw * 100)}% of the time: the viewer's drawing is holding the speed back.`
+                    : `Drawing takes ${Math.round(b.draw * 100)}% of the time: the simulation itself sets the speed (${a.cost.toFixed(0)} to ${b.cost.toFixed(0)} ms of simulation per game second).`);
+  RUN.setRunning(false);
+  $("benchCopy").hidden = false;
+}
+$("benchBtn").onclick = () => { $("benchBtn").disabled = true; benchmark().catch(e => { $("benchOut").textContent += "\nStopped: " + e.message; }).finally(() => { $("benchBtn").disabled = false; }); };
+$("benchCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("benchOut").textContent); $("benchCopy").textContent = "Copied"; }
+  catch { const r = document.createRange(); r.selectNodeContents($("benchOut")); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); $("benchCopy").textContent = "Selected: press Ctrl+C"; }
+  setTimeout(() => { $("benchCopy").textContent = "Copy results"; }, 2500);
+};
+$("runBtn").onclick = () => {
+  if (!RUN.active) RUN.start(); else RUN.setRunning(!RUN.running);
+};
+$("resetBtn").onclick = () => { RUN.stop(); A.draw(); };
+$("speed").onchange = () => { if (RUN.worker) RUN.worker.postMessage({ type: "speed", speed: +$("speed").value }); };
+
+loadA();
+</script>

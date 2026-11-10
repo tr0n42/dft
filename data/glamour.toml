@@ -1,0 +1,198 @@
+# The glamour pass: eye candy over the interior, on top of the realistic
+# generation. A body's `glamour` (0 to 1) sets how much of it there is and how
+# far it strays from real geology: 0 is the locked realistic model, around 0.3
+# stays plausible, 1 is science fiction.
+#
+# Everything here is placed by density (per area), never by count, so a big
+# planet's deep interior is as varied as a small one's. Each entry with a
+# `glamour` only appears at or above that setting.
+
+[glamour]
+# How far below the surface the pass starts (the crust and its geology stay
+# as generated): a share of the radius, between these bounds in metres.
+skin = 0.03
+skin_m = [60, 600]
+
+# ---- Provinces: regions of the mantle (or crust, ice, core) made of a
+# different rock, each with smaller mottles inside it. ----
+[glamour.provinces]
+size = 0.05                 # province size as a share of the radius...
+size_m = [350, 2500]        # ...within these bounds
+mottle = 0.25               # mottles: this share of the province size
+change = 0.75               # chance a province differs from its host, at glamour 1
+blend_m = 0.12              # how wavy their edges are (share of the size)
+
+[[glamour.provinces.host]]
+host = ["peridotite"]
+rocks = [
+  { material = "harzburgite", weight = 3 },
+  { material = "lherzolite", weight = 3 },
+  { material = "dunite", weight = 2 },
+  { material = "pyroxenite", weight = 1.5 },
+  { material = "serpentinite", weight = 1, glamour = 0.2 },
+  { material = "eclogite", weight = 1, glamour = 0.3 },
+  { material = "jade", weight = 0.4, glamour = 0.7 },
+  { material = "void glass", weight = 0.3, glamour = 0.9 },
+]
+
+[[glamour.provinces.host]]
+host = ["ringwoodite rock"]
+rocks = [
+  { material = "majorite", weight = 3 },
+  { material = "eclogite", weight = 2 },
+  { material = "harzburgite", weight = 1 },
+  { material = "lapis", weight = 0.4, glamour = 0.7 },
+]
+
+[[glamour.provinces.host]]
+host = ["perovskite rock"]
+rocks = [
+  { material = "ferropericlase", weight = 3 },
+  { material = "deep pile rock", weight = 2 },
+  { material = "majorite", weight = 1 },
+  { material = "prismatic crystal", weight = 0.3, glamour = 0.85 },
+]
+
+[[glamour.provinces.host]]
+host = ["basalt", "gabbro", "lava-rock"]
+rocks = [
+  { material = "gabbro", weight = 3 },
+  { material = "dolerite", weight = 2 },
+  { material = "pyroxenite", weight = 1 },
+  { material = "serpentinite", weight = 1, glamour = 0.3 },
+]
+
+[[glamour.provinces.host]]
+host = ["granite", "gneiss", "anorthosite", "schist"]
+rocks = [
+  { material = "gneiss", weight = 3 },
+  { material = "granite", weight = 2 },
+  { material = "schist", weight = 2 },
+  { material = "marble", weight = 1 },
+  { material = "quartzite", weight = 1 },
+  { material = "lapis", weight = 0.3, glamour = 0.6 },
+]
+
+[[glamour.provinces.host]]
+host = ["ice", "dirty ice", "sea ice", "pressure ice", "hot ice"]
+rocks = [
+  { material = "dirty ice", weight = 3 },
+  { material = "sea ice", weight = 2 },
+  { material = "pressure ice", weight = 1 },
+  { material = "rock salt", weight = 0.5, glamour = 0.3 },
+]
+
+[[glamour.provinces.host]]
+host = ["chondrite", "regolith"]
+rocks = [
+  { material = "chondrite", weight = 3 },
+  { material = "olivine", weight = 1 },
+  { material = "troilite", weight = 0.5 },
+  { material = "pallasite", weight = 0.5, glamour = 0.4 },
+]
+
+[[glamour.provinces.host]]
+host = ["iron-nickel", "kamacite", "cast-iron"]
+rocks = [
+  { material = "kamacite", weight = 3 },
+  { material = "taenite", weight = 2 },
+  { material = "plessite", weight = 2 },
+  { material = "troilite", weight = 0.5 },
+  { material = "platinum-iron alloy", weight = 0.2, glamour = 0.6 },
+]
+
+# ---- Geodes: hollow pockets lined with crystal, richer the deeper they lie. ----
+[glamour.geodes]
+spacing_m = 60              # one chance per square this wide
+chance = 0.3                # at glamour 1
+radius_m = [3, 10]          # plus up to `grow_m` more at glamour 1
+grow_m = 8
+shell = "agate"
+
+# Crystal linings by depth (a share of the radius below the surface).
+[[glamour.geodes.lining]]
+depth = [0.0, 0.25]
+crystals = [
+  { material = "quartz crystal", weight = 3 },
+  { material = "amethyst", weight = 3 },
+  { material = "opal", weight = 0.5, glamour = 0.5 },
+]
+
+[[glamour.geodes.lining]]
+depth = [0.25, 0.55]
+crystals = [
+  { material = "olivine", weight = 3 },
+  { material = "garnet", weight = 2 },
+  { material = "jade", weight = 1, glamour = 0.4 },
+  { material = "emerald", weight = 0.5, glamour = 0.5 },
+]
+
+[[glamour.geodes.lining]]
+depth = [0.55, 1.0]
+crystals = [
+  { material = "ruby", weight = 2 },
+  { material = "diamond", weight = 1 },
+  { material = "emerald", weight = 1 },
+  { material = "resonant crystal", weight = 1, glamour = 0.7 },
+  { material = "prismatic crystal", weight = 1, glamour = 0.85 },
+]
+
+# ---- Ribbons: winding seams of ore and gem, by depth. ----
+[glamour.ribbons]
+scale_m = 260               # how far a seam winds before turning
+width = 0.025               # thickness at glamour 1 (share of the noise range)
+
+[[glamour.ribbons.band]]
+depth = [0.0, 0.2]
+seams = [
+  { material = "gold-quartz", weight = 2 },
+  { material = "native silver", weight = 1 },
+  { material = "chalcopyrite", weight = 2 },
+  { material = "galena", weight = 1 },
+]
+
+[[glamour.ribbons.band]]
+depth = [0.2, 0.5]
+seams = [
+  { material = "chromite", weight = 2 },
+  { material = "magnetite", weight = 2 },
+  { material = "native copper", weight = 1 },
+  { material = "garnet", weight = 1 },
+]
+
+[[glamour.ribbons.band]]
+depth = [0.5, 1.0]
+seams = [
+  { material = "sperrylite", weight = 1 },
+  { material = "kimberlite", weight = 2 },
+  { material = "platinum-iron alloy", weight = 1 },
+  { material = "resonant crystal", weight = 1, glamour = 0.75 },
+]
+
+# ---- Crystal caverns: great hollows with crystal beams growing from the
+# walls (like the Cave of Crystals). Bolder settings only. ----
+[glamour.caverns]
+from_glamour = 0.35
+spacing_m = 600
+chance = 0.35               # at glamour 1, rising from zero at `from_glamour`
+radius_m = [18, 55]
+beams = [5, 11]
+beam_width_m = [1.5, 4.5]
+crystals = [
+  { material = "quartz crystal", weight = 3 },
+  { material = "amethyst", weight = 1 },
+  { material = "resonant crystal", weight = 1, glamour = 0.6 },
+  { material = "prismatic crystal", weight = 1, glamour = 0.8 },
+]
+
+# ---- Cores: growth rings in a solid core. ----
+[glamour.core]
+hosts = ["iron-nickel", "iron crystal"]
+ring_m = [12, 60]           # ring thickness: a share of the radius between these
+ring = 0.008
+rings = [
+  { material = "kamacite", weight = 3 },
+  { material = "taenite", weight = 2 },
+  { material = "plessite", weight = 1 },
+  { material = "platinum-iron alloy", weight = 0.4, glamour = 0.5 },
+]

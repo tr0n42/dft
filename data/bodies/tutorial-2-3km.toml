@@ -1,0 +1,122 @@
+# Tutorial asteroid 2, small (3 km): a tutorial body. Loose, porous, low gravity, no Heart.
+name = "Tutorial asteroid 2, small (3 km)"
+archetype = "rubble-asteroid"
+seed = 3002
+radius_m = 1500
+heart = false
+regolith_depth_m = 6
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+
+[shape]
+roughness = 0.16        # surface height variation, as a fraction of radius
+wavelength_m = 960     # size of the lumps
+
+[[layer]]
+name = "rubble"
+outer = 1.0             # fraction of radius
+material = "chondrite"
+temperature_k = 180
+
+[rubble]                # packed boulders in a matrix of crushed rock (G3)
+boulder_m = 38
+gap_m = 1.2
+gap_material = "impact breccia"   # regolith breccia: crushed rock cemented between boulders
+voids = 0.38
+r_min = 0.0
+r_max = 1.0
+
+[[rubble.rock]]
+material = "chondrite"
+weight = 30
+
+[[rubble.rock]]
+material = "basalt"       # pieces of an older, melted parent body
+weight = 4
+
+[[rubble.rock]]
+material = "pallasite"    # metal and olivine from a parent body's core edge
+largest = "medium"
+weight = 0.5
+
+[[rubble.rock]]
+material = "troilite"     # iron sulfide, as real chondrites carry
+largest = "medium"
+weight = 0.75
+
+[[rubble.rock]]
+material = "iron-nickel"  # metal boulders
+largest = "medium"
+weight = 0.4
+
+[[rubble.rock]]
+material = "ice"
+largest = "medium"
+weight = 0.3
+
+[[sprinkle]]            # platinum grains inside metal boulders
+material = "sperrylite"
+host = ["iron-nickel"]
+chance = 0.004
+r_min = 0.0
+r_max = 1.0
+
+[[sprinkle]]            # rare gold nuggets inside metal boulders
+material = "gold"
+host = ["iron-nickel"]
+chance = 0.00016
+r_min = 0.0
+r_max = 1.0
+
+[craters]
+count = 9
+radius_min_m = 25
+radius_max_m = 252
+breccia = 0.15
+melt = 0.03
+rim = 0.05              # raised rims and a blanket of crushed rock (G5)
+
+# ---- surface (G5): each seed draws its own ----
+[[relief]]              # an old giant impact scar
+kind = "basin"
+chance = 0.6
+width_m = [225, 390]
+height_m = [37.5, 75]
+extra = 6               # rim height (m)
+
+[[relief.material]]
+material = "impact breccia"
+
+[[relief]]              # "seas": low spots where fine grit has settled
+kind = "basin"
+chance = 0.6
+count = [1, 2]
+width_m = [60, 135]
+height_m = [9, 18]
+fill_m = 12
+
+[[relief.material]]
+material = "regolith"
+
+[[relief]]              # boulders resting on the surface
+kind = "boulders"
+count = [180, 300]
+width_m = [3, 14]       # boulder radius
+height_m = [0, 0]
+extra = 0.35            # share sunk into the ground
+
+[[relief.material]]
+material = "chondrite"
+weight = 30
+
+[[relief.material]]
+material = "basalt"
+weight = 4
+
+[[relief.material]]
+material = "iron-nickel"
+weight = 0.6
+
+[[relief.material]]
+material = "pallasite"
+weight = 0.4

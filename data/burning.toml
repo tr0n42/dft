@@ -1,0 +1,104 @@
+# Burning: what burns, and what it takes.
+#
+# A material burns once it is hot enough (ignite_k) and has enough to burn
+# with: open space on a body whose air holds oxygen (the body's `oxygen`
+# share; none on most bodies), or a touching oxidizer (below). While it
+# burns it holds at its flame temperature (flame_k), and the heat flows into
+# its neighbours, which may catch in turn. Each second it burns away with
+# chance `rate` (at full exposure: all four sides open to air), its mass
+# going off as smoke and gas (booked as vented).
+#
+# Sources of ignition are anything hot enough: lava, glowing rock, burning
+# neighbours, and the swarm's explosions.
+
+[[burn]]
+material = "coal"
+ignite_k = 700
+flame_k = 1500
+rate = 0.1
+
+[[burn]]
+material = "crude oil"
+ignite_k = 520
+flame_k = 1400
+rate = 0.3
+
+[[burn]]
+material = "tar"
+ignite_k = 600
+flame_k = 1300
+rate = 0.15
+
+[[burn]]
+material = "graphite"
+ignite_k = 950
+flame_k = 1600
+rate = 0.025
+
+[[burn]]
+material = "diamond"
+ignite_k = 1100
+flame_k = 1700
+rate = 0.015
+
+[[burn]]
+material = "molten sulfur"
+ignite_k = 520
+flame_k = 1100
+rate = 0.25
+
+[[burn]]
+material = "sulfur vapour"
+ignite_k = 520
+flame_k = 1100
+rate = 1.5
+
+[[burn]]
+material = "liquid methane"
+ignite_k = 850
+flame_k = 1900
+rate = 1.0
+
+[[burn]]
+material = "methane vapour"
+ignite_k = 850
+flame_k = 1900
+rate = 2.5
+
+[[burn]]
+material = "hydrogen"
+ignite_k = 850
+flame_k = 2300
+rate = 2.5
+
+[[burn]]
+material = "carbon monoxide"
+ignite_k = 900
+flame_k = 1800
+rate = 1.5
+
+# Touching one of these is as good as open air (even with no atmosphere).
+[[oxidizer]]
+material = "liquid oxygen"
+
+[[oxidizer]]
+material = "oxygen ice"
+
+[[oxidizer]]
+material = "liquid air"
+
+[[oxidizer]]
+material = "air snow"
+
+# Vapours boiled off burning liquids burn too (faster).
+[[burn]]
+material = "crude oil vapour"
+ignite_k = 520
+flame_k = 1400
+rate = 2.0
+
+[[burn]]
+material = "tar vapour"
+ignite_k = 600
+flame_k = 1300
+rate = 1.5

@@ -1,0 +1,44 @@
+# Sandbox demo: a small basalt body with magma and water pockets, for
+# watching the cell physics and reactions at work. Not a body you mine.
+name = "Sandbox demo"
+archetype = "active-planetoid"
+seed = 5001
+radius_m = 160
+heart = false
+regolith_depth_m = 10
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+
+[shape]
+roughness = 0.01
+wavelength_m = 80
+
+[[layer]]
+name = "rock"
+outer = 1.0
+material = "basalt"
+temperature_k = 330
+
+[[blob]]
+material = "magma"
+count = 2
+radius_min_m = 14
+radius_max_m = 20
+r_min = 0.25
+r_max = 0.55
+
+[[blob]]
+material = "water"
+count = 2
+radius_min_m = 12
+radius_max_m = 18
+r_min = 0.25
+r_max = 0.55
+
+[[blob]]
+material = "ice"
+count = 1
+radius_min_m = 10
+radius_max_m = 14
+r_min = 0.4
+r_max = 0.7

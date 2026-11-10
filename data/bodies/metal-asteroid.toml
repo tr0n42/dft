@@ -1,0 +1,163 @@
+# Metal asteroid: the exposed iron core of a shattered parent body (like 16
+# Psyche). A slowly cooled iron-nickel core showing the Widmanstätten
+# structure, wrapped in the pallasite of the old core-mantle boundary and a
+# broken shell of mantle rock. Dense, hard and rich. No Heart.
+name = "Metal asteroid"
+archetype = "metal-asteroid"
+seed = 5001
+radius_m = 3000
+heart = false
+regolith_depth_m = 3
+regolith_material = "metal grit"
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+
+[shape]
+roughness = 0.12        # surface height variation, as a fraction of radius
+wavelength_m = 1800     # size of the lumps
+
+[[layer]]
+name = "iron core"
+outer = 0.80
+material = "iron-nickel"
+temperature_k = 170
+
+[[layer]]
+name = "core-mantle boundary"
+outer = 0.90
+material = "pallasite"
+temperature_k = 160
+
+[[layer]]
+name = "mantle shell"
+outer = 1.0
+material = "harzburgite"
+temperature_k = 150
+
+# The iron's crystal structure: big parent crystals, each with plates of
+# kamacite edged with taenite, plessite where plates crowd together.
+[widmanstatten]
+host = ["iron-nickel"]
+grain_m = 140
+spacing_m = 12
+taenite_m = 1.2
+kamacite = "kamacite"
+taenite = "taenite"
+plessite = "plessite"
+r_min = 0.0
+r_max = 0.86
+
+# The old mantle broke up in the collision that stripped it: a shell of
+# boulders with metal grit between them.
+[rubble]
+boulder_m = 30
+gap_m = 1.0
+gap_material = "metal grit"
+voids = 0.15
+r_min = 0.88
+r_max = 1.0
+
+[[rubble.rock]]
+material = "harzburgite"
+weight = 10
+
+[[rubble.rock]]
+material = "pallasite"
+weight = 4
+
+[[rubble.rock]]
+material = "iron-nickel"
+largest = "medium"
+weight = 3
+
+[[rubble.rock]]
+material = "pyroxenite"
+weight = 2
+
+# Troilite and graphite nodules in the iron, as in real iron meteorites.
+[[blob]]
+material = "troilite"
+count = 140
+radius_min_m = 3
+radius_max_m = 16
+r_min = 0.05
+r_max = 0.8
+
+[[blob]]
+material = "graphite"
+count = 50
+radius_min_m = 2
+radius_max_m = 8
+r_min = 0.05
+r_max = 0.8
+
+# Olivine crystals in the pallasite: gem-quality peridot set in metal.
+[[blob]]
+material = "olivine"
+count = 1400
+radius_min_m = 2.5
+radius_max_m = 8
+r_min = 0.80
+r_max = 0.90
+
+# Schreibersite needles through the kamacite.
+[[vein]]
+material = "schreibersite"
+host = ["kamacite", "plessite"]
+scale_m = 40
+width = 0.02
+r_min = 0.0
+r_max = 0.86
+
+[[sprinkle]]            # platinum metals concentrate in the core
+material = "platinum nugget"
+host = ["kamacite", "taenite", "plessite"]
+chance = 0.0015
+r_min = 0.0
+r_max = 0.86
+
+[[sprinkle]]
+material = "gold"
+host = ["taenite"]
+chance = 0.0004
+r_min = 0.0
+r_max = 0.86
+
+[craters]
+count = 22
+radius_min_m = 30
+radius_max_m = 520
+breccia = 0.12
+melt = 0.05
+melt_material = "cast-iron"     # impact-melted iron, refrozen
+rim = 0.05
+
+# ---- surface (G5) ----
+[[relief]]              # the scar of the collision that stripped the mantle
+kind = "basin"
+chance = 0.8
+width_m = [500, 1000]
+height_m = [90, 220]
+extra = 25
+
+[[relief.material]]
+material = "metal grit"
+
+[[relief]]              # metal and rock boulders resting on the surface
+kind = "boulders"
+count = [200, 320]
+width_m = [3, 16]
+height_m = [0, 0]
+extra = 0.35
+
+[[relief.material]]
+material = "iron-nickel"
+weight = 4
+
+[[relief.material]]
+material = "harzburgite"
+weight = 5
+
+[[relief.material]]
+material = "pallasite"
+weight = 2

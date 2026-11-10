@@ -1,0 +1,230 @@
+# The Dark Forest Theory: economy and swarm numbers.
+# Mass is kilograms. Energy is in abstract units (E). Times are seconds of game time.
+# Tuned for an idle game: the player checks in now and then and buys a little.
+
+tick_s = 0.1                 # logic tick: 10 per second of game time
+individual_cap = 100000000  # drones simulated one by one (no limit: the rest would work as a packet)
+
+[player]                     # the scripted idle player used for balance runs
+check_in_every_s = 600       # looks in every 10 minutes
+buys_per_check_in = 2        # and buys at most two things
+
+[seed_swarm]
+start_harvesters = 1000     # the mother swarm arrives with this many cutters (upgrades add more)
+start_energy = 400
+base_power = 2.0             # E per second that never stops, so the swarm can always recover
+free_build_every_s = 60      # a free Harvester at least this often, whatever happens
+processing_energy_per_tonne = 12.0   # E made by processing 1,000 kg of delivered mass
+hover_m = 20                 # height of landing points above the ground
+hub_ring = 64                # landing points spaced around the body
+orbit_period_s = 600         # (no longer used: the mother swarm grows instead of circling)
+peel = 3.0                   # drones prefer higher ground: 1 m higher is worth 3 m of extra flight
+full_survey_m = 25000        # bodies up to this circumference are surveyed whole at the start
+zone_m = 500                 # bigger ones: the ground this far either side of each landing point opens up as it lands
+mother_start_m = 400         # the mother swarm arrives this long, high over one spot...
+mother_kg_per_m = 20000      # ...and grows a metre longer (both ways around the body) for every 20 t put into it
+mother_growth_share = 0.25   # the share of every delivery it puts into growing
+
+[harvester]
+mass_cost = 100
+energy_cost = 50               # (with the parts from the stockpile: a cutter pays for itself and two more in its life)
+energy_cost_growth = 1.0      # each Harvester costs the same: the swarm has no cap
+cargo_kg = 3500              # carried per trip: about one cell of rock; dense ore takes two trips
+upkeep = 0.1                 # E per second while working
+speed = 20.0                 # metres per second
+dig_s = 13.0                 # seconds to cut one load of hardness-3 rock (chondrite)
+hardness_step = 1.6          # each point of hardness multiplies dig time: basalt (4) 23 s, iron (7) 94 s, diamond (10) 386 s
+life_s = 900                 # seconds of work before apoptosis
+search_m = 160               # farthest a drone looks for work from its landing point
+hold_kg = 10000              # a cutter's hold: it cuts cell after cell until this full, then flies to its hauler
+tank_e = 10                  # energy each cutter carries; it burns part of its cargo to stay topped up and is lost if it runs dry
+chain_m = 24                 # how far it looks from the cell it just cut for the next one
+heat_capacity_kg = 500       # heat it can soak up, as kg of rock warming alike
+heat_sink = 25               # how fast it sheds heat (kg-worth per s per kelvin of difference) in flight...
+contact_sink = 20            # ...and pressed against the ground it cuts (hot ground heats it as fast)
+damage_k = 500               # inside hotter than this, it wears...
+heat_wear = 1.0              # ...losing this many seconds of life per second per 100 K over
+melt_k = 1300                # inside hotter than this, it melts
+sip_kg = 300                 # it drinks molten rock in sips this big (the sip freezes inside it)
+cold_ref_k = 250             # below this, cold ground makes it cut faster and wear quicker...
+cold_gain = 0.6              # ...by up to this much more at absolute zero
+
+[hauler]                     # big drones over each flock: fill up from the cutters, carry it up to the mother swarm
+capacity_kg = 1000000        # lifts off when this full (1,000 t)...
+max_stay_s = 600             # ...or after this long at its flock
+speed = 40.0                 # metres per second
+unload_s = 30                # seconds unloading at the mother swarm
+life_s = 3600                # seconds of service before it breaks down
+mass_cost = 2000
+energy_cost = 1000
+max_per_flock = 12
+wait_trigger = 6             # another hauler is sent when this many cutters wait with nowhere to unload
+wait_share = 0.1             # (or this share of the flock, if more)
+mother_alt_m = 400           # the mother swarm circles this high above the highest ground on the body; haulers unload at its nearest point
+
+[flock]                      # how flocks decide among themselves (every 5 s)
+memory_s = 60                # how long a flock remembers where and how fast it cut
+follow = 0.3                 # its hauler drifts this share of the way toward the work each time
+hover_m = 8                  # ...hovering this far out from the face
+split_cutters = 300          # a flock this big splits...
+split_m = 200                # ...and the new one goes this far along the surface, away from the others
+merge_m = 40                 # flocks this close merge
+comm_m = 500                 # flocks talk to others this close
+dry_merge = 3                # a flock whose searches keep coming up empty merges into a neighbour
+hard_factor = 2.0            # hard going: this many times slower per tonne than a neighbour...
+help_share = 0.2             # ...and the neighbour sends this share of its cutters to help
+calm_s = 60                  # after a split, merge or help, a flock waits this long before the next
+spare_hauler_s = 120         # a spare hauler standing empty this long blows itself up
+
+[scout]
+unlock_cost = 50000000       # kg of Mass to unlock the class (50 kt)
+mass_cost = 100
+energy_cost = 300
+upkeep = 0.2
+per_harvesters = 40          # the swarm keeps about one Scout per this many Harvesters
+search_bonus_m = 25
+
+[refiner]
+unlock_cost = 400000000      # 400 kt
+mass_cost = 20000
+energy_cost = 30000
+upkeep = 4.0
+energy_bonus = 0.35          # extra share of processing energy for mass delivered to a Refiner
+min_haul_m = 250             # the swarm builds one when the average haul gets this long
+spacing_m = 250              # no closer than this to another delivery point
+swarm_kg_per_s = 50000       # raw stockpile the mother swarm refines into pure elements each second (until refiner ships)
+
+[intelligence]               # how well drones judge what to dig (0 = blind, 1 = exact)
+# Entry n is used at "swarm intelligence" level n. Drones first learn effort
+# (how hard and how heavy a cell is), then value (what it refines into).
+effort = [0.0, 0.6, 1.0, 1.0, 1.0, 1.0]
+value  = [0.0, 0.0, 0.4, 0.7, 0.9, 1.0]
+scout_bonus_levels = 1       # Scouts have a better nose: the swarm chooses a level smarter, and smells ore further off
+patience = 0.35              # a drone that judges effort skips cells paying under 35% of ordinary rock
+scent_weight = 1.0           # how strongly the smell of ore behind a cell draws drones (and tunnels)
+typical_hardness = 3.0       # what a blind drone assumes every cell is like
+typical_load_kg = 2500
+
+[lava]                       # liquids can't be dug; an exposed face cools into rock
+max_liquid_neighbours = 1    # a drone may swallow lava only at the tip of a pocket
+life_cost_s = 300            # ...and it burns a third of a new drone's life
+
+[tunneler]                   # big boring machines: open the way down, earn little
+unlock_cost = 1200000000     # 1.2 Mt
+mass_cost = 50000
+energy_cost = 20000
+upkeep = 5.0                 # E per second while boring
+per_harvesters = 1500        # about one per this many Harvesters
+max_count = 3
+bore_m = 3.0                 # a shaft 3 m wide
+drill_power = 25.0           # cuts rock 25 times faster than a Harvester
+energy_per_tonne = 60.0      # five times what processing a tonne gives back
+spoil_recovery = 0.2         # most of what it cuts is crushed to waste
+fracture_m = 4.0             # rock within 4 m of the shaft is cracked...
+fracture_dig = 0.5           # ...and Harvesters cut it in half the time, at no depth penalty
+max_length_m = 600
+min_radius = 0.3             # stays out of the core
+max_deviation_deg = 25       # mostly straight down
+turn_deg_per_m = 0.5         # unwieldy: turns half a degree per metre at most
+aim_depth_m = 200            # looks this far ahead for ore to aim at
+relocate_s = 120
+hub_every_m = 150            # leaves a staging point for Harvesters every 150 m down the shaft
+
+[launch]
+threshold = 0.5              # share of the body's physical mass that must be consumed
+seed_mass_k = 1.0            # Seed Mass = k * sqrt(Mass credited at launch, in tonnes)
+
+# Upgrades bought with Mass. Each level multiplies the ability by `effect`
+# and costs `cost_growth` times the last, so each one is a real decision.
+[[upgrade]]
+name = "fabrication"         # each level makes Harvesters cheaper to build in energy
+base_cost = 600000000
+cost_growth = 8.0
+effect = 1.5
+
+[[upgrade]]
+name = "dig speed"
+base_cost = 375000000
+cost_growth = 8.0
+effect = 1.5
+
+[[upgrade]]
+name = "flight speed"
+base_cost = 450000000
+cost_growth = 8.0
+effect = 1.5
+
+[[upgrade]]
+name = "drone lifespan"
+base_cost = 300000000
+cost_growth = 8.0
+effect = 1.5
+
+[[upgrade]]
+name = "swarm intelligence"  # each level: drones judge effort, then value, better
+base_cost = 400000000
+cost_growth = 8.0
+effect = 1.0                 # levels read the [intelligence] table instead
+
+[[upgrade]]
+name = "processing yield"
+base_cost = 750000000
+cost_growth = 8.0
+effect = 1.5
+
+# Starting advantages bought with Seed Mass between bodies (prestige).
+[[perk]]
+name = "Mk II drones"         # the big prestige jump: twice the speed and dig rate, so the second asteroid takes about half the time
+cost = 1200
+speed = 2.0
+dig = 2.0
+
+[[perk]]
+name = "larger seed swarm"
+cost = 400
+start_extra = 100
+
+[[perk]]
+name = "efficient fabrication"
+cost = 600
+energy_cost = 0.5
+
+# ---- What cutters and haulers are made of (economy on) ----
+# Every element delivered to the mother swarm goes into its stockpile. Each
+# part lists the elements it can be made of, best first; x is the kg of that
+# element that stands in for 1 kg of the part (a worse stand-in takes more).
+# Building takes the best on hand, then the next, so a world short of copper
+# builds wiring from aluminium instead: slower, never stuck. A part with no
+# list takes anything solid in the stockpile, the most plentiful first.
+# Choices run rarest first (the best) to commonest (a steep markup), and
+# every part ends with "*": anything solid, so no world can stall a build.
+
+# ---- recipes: generated by tools/recipes.py (edit the script, not these) ----
+# Each part's elements run rarest first; x is kg of that element per kg of
+# part, rising by 0.5 for every tenfold more common it is in Earth's crust.
+# "*" is anything solid in the stockpile, most plentiful first.
+
+[recipe.harvester]              # a cutter: 100 kg of parts
+parts = [
+  { name = "frame", kg = 36, of = [{ el = "Be" }, { el = "Ti", x = 2.65 }, { el = "Mg", x = 2.96 }, { el = "Fe", x = 3.15 }, { el = "Al", x = 3.25 }, { el = "*", x = 5.25 }] },
+  { name = "motors", kg = 8, of = [{ el = "Co" }, { el = "Ni", x = 1.26 }, { el = "Fe", x = 2.68 }, { el = "*", x = 4.68 }] },
+  { name = "wiring", kg = 10, of = [{ el = "Au" }, { el = "Ag", x = 1.64 }, { el = "Cu", x = 3.09 }, { el = "Al", x = 4.66 }, { el = "*", x = 6.66 }] },
+  { name = "electronics", kg = 6, of = [{ el = "In" }, { el = "Ge", x = 1.39 }, { el = "Ga", x = 1.94 }, { el = "Si", x = 4.03 }, { el = "*", x = 6.03 }] },
+  { name = "battery", kg = 6, of = [{ el = "Li" }, { el = "Zn", x = 1.27 }, { el = "Mg", x = 2.53 }, { el = "Na", x = 2.63 }, { el = "*", x = 4.63 }] },
+  { name = "electrodes", kg = 4, of = [{ el = "Co" }, { el = "Ni", x = 1.26 }, { el = "Mn", x = 1.79 }, { el = "Fe", x = 2.68 }, { el = "*", x = 4.68 }] },
+  { name = "cutting head", kg = 4, of = [{ el = "Mo" }, { el = "W", x = 1.1 }, { el = "Ta", x = 1.2 }, { el = "Cr", x = 1.96 }, { el = "C", x = 2.11 }, { el = "Ti", x = 2.84 }, { el = "Fe", x = 3.34 }, { el = "*", x = 5.34 }] },
+  { name = "composites", kg = 8, of = [{ el = "C" }, { el = "Al", x = 2.31 }, { el = "Si", x = 2.57 }, { el = "*", x = 4.57 }] },
+  { name = "bulk", kg = 18 },
+]
+
+[recipe.hauler]              # a hauler: 2,000 kg of parts (more frame and cargo bay, no cutting head)
+parts = [
+  { name = "frame", kg = 760, of = [{ el = "Be" }, { el = "Ti", x = 2.65 }, { el = "Mg", x = 2.96 }, { el = "Fe", x = 3.15 }, { el = "Al", x = 3.25 }, { el = "*", x = 5.25 }] },
+  { name = "motors", kg = 160, of = [{ el = "Co" }, { el = "Ni", x = 1.26 }, { el = "Fe", x = 2.68 }, { el = "*", x = 4.68 }] },
+  { name = "wiring", kg = 120, of = [{ el = "Au" }, { el = "Ag", x = 1.64 }, { el = "Cu", x = 3.09 }, { el = "Al", x = 4.66 }, { el = "*", x = 6.66 }] },
+  { name = "electronics", kg = 60, of = [{ el = "In" }, { el = "Ge", x = 1.39 }, { el = "Ga", x = 1.94 }, { el = "Si", x = 4.03 }, { el = "*", x = 6.03 }] },
+  { name = "battery", kg = 140, of = [{ el = "Li" }, { el = "Zn", x = 1.27 }, { el = "Mg", x = 2.53 }, { el = "Na", x = 2.63 }, { el = "*", x = 4.63 }] },
+  { name = "electrodes", kg = 80, of = [{ el = "Co" }, { el = "Ni", x = 1.26 }, { el = "Mn", x = 1.79 }, { el = "Fe", x = 2.68 }, { el = "*", x = 4.68 }] },
+  { name = "composites", kg = 280, of = [{ el = "C" }, { el = "Al", x = 2.31 }, { el = "Si", x = 2.57 }, { el = "*", x = 4.57 }] },
+  { name = "bulk", kg = 400 },
+]

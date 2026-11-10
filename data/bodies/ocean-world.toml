@@ -1,0 +1,149 @@
+# Ocean world: a water world where the ocean is most of the planet. Hundreds
+# of kilometres of water (here, scaled to the body) under a thin floating
+# crust of ice, over mantles of ice so compressed it stays solid even hot,
+# around a small rock core. There is little to mine on the way down; the
+# prize is the rock and metal at the bottom. No Heart.
+name = "Ocean world"
+archetype = "ocean-world"
+seed = 13001
+radius_m = 40000
+heart = false
+regolith_depth_m = 2
+regolith_material = "sea ice"
+atmosphere_m = 300
+atmosphere_colour = [120, 150, 190]
+
+[sun]
+day_k = 210
+day_s = 1500
+start_deg = 0
+
+[shape]
+roughness = 0.001
+wavelength_m = 9000
+
+[[layer]]
+name = "iron core"
+outer = 0.15
+material = "iron-nickel"
+temperature_k = 1600
+
+[[layer]]
+name = "rock core"
+outer = 0.33
+material = "peridotite"
+temperature_k = 1000
+
+[[layer]]
+name = "hot ice mantle"
+outer = 0.50
+material = "hot ice"
+temperature_k = 600
+
+[[layer]]
+name = "pressure ice"
+outer = 0.60
+material = "pressure ice"
+temperature_k = 330
+
+[[layer]]
+name = "global ocean"
+outer = 0.985
+material = "water"
+temperature_k = 278
+
+[[layer]]
+name = "ice crust"
+outer = 1.0
+material = "ice"
+temperature_k = 120
+
+# Brine and slush pockets in the crust, salt in the cracks.
+[[blob]]
+material = "brine"
+count = 150
+radius_min_m = 10
+radius_max_m = 50
+r_min = 0.987
+r_max = 0.997
+
+[[vein]]
+material = "sea ice"
+host = ["ice"]
+scale_m = 400
+width = 0.05
+r_min = 0.985
+r_max = 1.0
+
+# Where the ocean floor meets the rock: mineral chimneys and metal-rich
+# sediments, the swarm's real target.
+[[blob]]
+material = "chalcopyrite"
+count = 200
+radius_min_m = 30
+radius_max_m = 120
+r_min = 0.33
+r_max = 0.36
+
+[[blob]]
+material = "magnetite"
+count = 200
+radius_min_m = 30
+radius_max_m = 120
+r_min = 0.32
+r_max = 0.35
+
+[[deep.streaks]]
+host = ["hot ice", "pressure ice"]
+r_min = 0.34
+r_max = 0.6
+cells = 10
+bands = 10
+width = 0.3
+fraction = 0.4
+warp = 0.5
+
+[[deep.streaks.rock]]
+material = "rock salt"
+weight = 1
+
+[[deep.streaks.rock]]
+material = "dirty ice"
+weight = 2
+
+[deep.inner_core]
+host = "iron-nickel"
+grain_m = 800
+alt = "iron crystal"
+precious = "platinum-iron alloy"
+precious_centre = 0.3
+precious_edge = 0.02
+boundary_m = 30
+
+[craters]
+count = 0
+radius_min_m = 10
+radius_max_m = 10
+
+# ---- surface (G5) ----
+[[relief]]              # pressure ridges where floes of crust pushed together
+kind = "range"
+chance = 1.0
+count = [4, 9]
+width_m = [200, 600]
+height_m = [40, 150]
+
+[[relief]]              # icebergs frozen into the crust
+kind = "boulders"
+count = [600, 900]
+width_m = [10, 40]
+height_m = [0, 0]
+extra = 0.5
+
+[[relief.material]]
+material = "ice"
+weight = 3
+
+[[relief.material]]
+material = "sea ice"
+weight = 1

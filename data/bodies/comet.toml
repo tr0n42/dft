@@ -1,0 +1,198 @@
+# Comet: a dark, dusty, porous nucleus of ices from the outer solar system
+# (like 67P). Layered like an onion, with a crust of dark dust; the deep
+# interior is cold enough to hold carbon monoxide ice, and pockets of gas are
+# trapped in it. Low gravity, no Heart. Ices are cheap; the organics and the
+# rare crystalline dust are what pay.
+name = "Comet"
+archetype = "comet"
+seed = 6001
+radius_m = 2500
+heart = false
+regolith_depth_m = 4
+regolith_material = "comet dust"
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+
+# Sunlight: a 10-minute day. Bare ground in full sun heads for 250 K; water
+# ice holds (it stays below 273 K), but dry ice, ammonia, methane and CO ice
+# turn to gas and vent.
+[sun]
+day_k = 250
+day_s = 600
+start_deg = 0
+
+[shape]
+roughness = 0.22        # comets are lumpy
+wavelength_m = 2600
+
+# The deep interior has never been warmed: CO ice can survive there.
+[[layer]]
+name = "pristine core"
+outer = 0.55
+material = "dirty ice"
+temperature_k = 35
+
+[[layer]]
+name = "nucleus"
+outer = 1.0
+material = "dirty ice"
+temperature_k = 110
+
+# Inside, the nucleus is still the heap of icy pebbles it grew from: big
+# lumps of different ices, packed with dust between them.
+[rubble]
+boulder_m = 110
+gap_m = 0.8
+gap_material = "comet dust"
+voids = 0.05
+r_min = 0.0
+r_max = 0.8
+
+[[rubble.rock]]
+material = "dirty ice"
+weight = 10
+
+[[rubble.rock]]
+material = "ice"
+weight = 2
+
+[[rubble.rock]]
+material = "dry ice"
+weight = 1.5
+
+[[rubble.rock]]
+material = "ammonia ice"
+weight = 0.8
+
+[[rubble.rock]]
+material = "tholin"
+largest = "medium"
+weight = 0.8
+
+# Onion-like layers laid down as the nucleus grew, warped and pinched.
+[strata]
+depth_m = 600
+fold_amplitude_m = 35
+fold_wavelength_m = 900
+pinch = 0.5
+pinch_wavelength_m = 500
+
+[[strata.band]]
+material = "dirty ice"
+thickness_m = [8, 30]
+weight = 5
+
+[[strata.band]]
+material = "ice"
+thickness_m = [3, 12]
+weight = 2
+
+[[strata.band]]
+material = "comet dust"   # loose dust beds: they pour out when cut into
+thickness_m = [1, 4]
+weight = 1.5
+
+[[strata.band]]
+material = "dry ice"
+thickness_m = [2, 8]
+weight = 1
+
+[[strata.band]]
+material = "ammonia ice"
+thickness_m = [1, 5]
+weight = 0.6
+
+[[strata.band]]
+material = "tholin"       # dark organics
+thickness_m = [1, 3]
+weight = 0.6
+
+[[strata.lens]]           # organic-rich pods in the tholin
+host = "tholin"
+material = "graphite"
+position = "middle"
+length_m = [20, 80]
+thickness = 0.5
+spacing_m = 400
+
+# Deep ices too volatile to survive near the surface, and trapped gas.
+[[blob]]
+material = "carbon monoxide ice"
+count = 60
+radius_min_m = 8
+radius_max_m = 40
+r_min = 0.05
+r_max = 0.5
+
+[[blob]]
+material = "dry ice"
+count = 80
+radius_min_m = 6
+radius_max_m = 25
+r_min = 0.3
+r_max = 0.85
+
+[[blob]]
+material = "carbon monoxide"   # gas pockets: they vent when breached
+count = 40
+radius_min_m = 4
+radius_max_m = 14
+r_min = 0.3
+r_max = 0.85
+
+[[blob]]
+material = "olivine"           # crystalline dust from near the young Sun
+count = 120
+radius_min_m = 1
+radius_max_m = 3
+r_min = 0.1
+r_max = 0.95
+
+[[sprinkle]]
+material = "silicon carbide"   # presolar grains: rare and valuable
+host = ["comet dust", "dirty ice"]
+chance = 0.0006
+r_min = 0.0
+r_max = 1.0
+
+[craters]
+count = 6
+radius_min_m = 30
+radius_max_m = 260
+breccia = 0.0
+melt = 0.0
+rim = 0.0
+
+# ---- surface (G5) ----
+[[relief]]              # collapse pits where buried ice sublimated away
+kind = "basin"
+chance = 1.0
+count = [3, 7]
+width_m = [60, 200]
+height_m = [50, 140]
+extra = 4
+
+[[relief.material]]
+material = "comet dust"
+
+[[relief]]              # terraces and cliffs of exposed layers
+kind = "plateau"
+chance = 0.8
+count = [1, 3]
+width_m = [250, 600]
+height_m = [40, 120]
+
+[[relief]]              # ice boulders on the dust
+kind = "boulders"
+count = [120, 220]
+width_m = [3, 12]
+height_m = [0, 0]
+extra = 0.3
+
+[[relief.material]]
+material = "dirty ice"
+weight = 5
+
+[[relief.material]]
+material = "ice"
+weight = 1

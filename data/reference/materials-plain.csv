@@ -1,0 +1,649 @@
+body,material,whole_ppm,skin_ppm
+active-planetoid,regolith,8.122334e1,4.176926e3
+active-planetoid,basalt,9.478289e4,6.321998e5
+active-planetoid,peridotite,2.044277e5,0.000000e0
+active-planetoid,iron-nickel,3.376726e4,0.000000e0
+active-planetoid,molten-iron,1.182582e5,0.000000e0
+active-planetoid,magma,2.545732e4,1.547756e4
+active-planetoid,volcanic-gas,4.160029e-1,1.939504e0
+active-planetoid,sulfur,2.799095e2,7.965698e2
+active-planetoid,pyrite,6.580803e1,1.112186e0
+active-planetoid,gold-quartz,7.235876e0,1.847711e1
+active-planetoid,gold,1.795532e-5,4.584964e-5
+active-planetoid,kimberlite,2.293488e3,3.884337e3
+active-planetoid,diamond,2.229112e1,1.437005e1
+active-planetoid,granite,3.284596e3,0.000000e0
+active-planetoid,andesite,6.545486e3,1.787030e5
+active-planetoid,gabbro,2.051462e4,1.033888e3
+active-planetoid,obsidian,9.261444e2,2.111107e4
+active-planetoid,tuff,5.122101e3,1.022368e5
+active-planetoid,impact breccia,1.009225e3,2.621983e4
+active-planetoid,perovskite rock,1.753010e5,0.000000e0
+active-planetoid,harzburgite,1.763868e4,0.000000e0
+active-planetoid,pyroxenite,8.464136e3,0.000000e0
+active-planetoid,plume rock,3.361817e4,0.000000e0
+active-planetoid,ringwoodite rock,8.607822e4,0.000000e0
+active-planetoid,deep pile rock,7.689804e3,0.000000e0
+active-planetoid,eclogite,2.764822e4,0.000000e0
+active-planetoid,conglomerate,3.670526e2,1.621753e3
+active-planetoid,banded iron,3.771720e3,6.649093e2
+active-planetoid,quartzite,4.054319e3,5.556629e2
+active-planetoid,slate,1.936523e4,3.451069e3
+active-planetoid,schist,4.749631e4,3.802757e3
+active-planetoid,chalcopyrite,1.052568e2,0.000000e0
+active-planetoid,native copper,7.538776e0,0.000000e0
+active-planetoid,galena,5.937748e0,1.127015e0
+active-planetoid,sphalerite,3.212874e1,2.162090e1
+active-planetoid,cassiterite,4.594543e0,0.000000e0
+active-planetoid,cinnabar,4.867991e-1,0.000000e0
+active-planetoid,chromite,1.258941e3,0.000000e0
+active-planetoid,wolframite,6.580803e0,0.000000e0
+active-planetoid,stibnite,0.000000e0,2.387493e0
+active-planetoid,arsenopyrite,0.000000e0,1.356867e0
+active-planetoid,cobaltite,1.930970e1,0.000000e0
+active-planetoid,spodumene,4.051251e1,0.000000e0
+active-planetoid,troilite,1.080514e1,0.000000e0
+active-planetoid,iron crystal,3.285901e4,0.000000e0
+active-planetoid,platinum-iron alloy,4.760896e2,0.000000e0
+active-planetoid,sulfur-rich core melt,1.299156e4,0.000000e0
+active-planetoid,quartz crystal,4.540544e2,2.351940e2
+active-planetoid,beryl,1.973880e1,0.000000e0
+active-planetoid,dolerite,1.675223e3,3.289698e3
+active-planetoid,zircon,1.872374e1,0.000000e0
+active-planetoid,thorite,5.637254e0,0.000000e0
+active-planetoid,pitchblende,4.807893e-1,0.000000e0
+active-planetoid,columbite,1.051126e1,0.000000e0
+active-planetoid,tantalite,2.848676e0,0.000000e0
+active-planetoid,pyrochlore,8.011151e0,0.000000e0
+active-planetoid,pollucite,2.091433e0,0.000000e0
+active-planetoid,lepidolite,4.625433e1,0.000000e0
+active-planetoid,thortveitite,6.100014e0,0.000000e0
+active-planetoid,xenotime,3.333072e1,0.000000e0
+active-planetoid,baryte,1.514486e2,1.498115e2
+active-planetoid,vanadinite,3.607723e1,8.543813e1
+active-planetoid,fluorite,2.564746e2,1.320387e2
+active-planetoid,apatite,2.108862e1,0.000000e0
+active-planetoid,rhodochrosite,1.004591e2,1.067031e2
+active-planetoid,pentlandite,8.660758e2,0.000000e0
+active-planetoid,osmiridium,1.274693e2,0.000000e0
+active-planetoid,radiogenic gas,2.578233e-1,2.747099e0
+active-planetoid,radon gas,9.014799e-2,0.000000e0
+barren-world,regolith,1.282193e2,7.014302e3
+barren-world,basalt,6.455379e3,2.592837e5
+barren-world,peridotite,3.275751e5,1.101775e2
+barren-world,iron-nickel,7.967631e4,0.000000e0
+barren-world,molten-iron,4.205191e5,0.000000e0
+barren-world,obsidian,1.521293e3,3.613099e4
+barren-world,impact breccia,1.635282e4,3.480014e5
+barren-world,ilmenite,7.900731e2,3.075385e4
+barren-world,uraninite,6.645009e0,1.792503e2
+barren-world,troilite,1.819575e2,1.768862e3
+barren-world,iron crystal,7.797463e4,0.000000e0
+barren-world,platinum-iron alloy,9.740323e2,0.000000e0
+barren-world,platinum nugget,8.466353e-5,8.230390e-4
+barren-world,anorthosite,6.784445e4,3.167574e5
+carbon-world,iron-nickel,1.101706e5,0.000000e0
+carbon-world,kimberlite,3.348500e3,4.807984e3
+carbon-world,diamond,1.108637e5,0.000000e0
+carbon-world,impact breccia,4.465555e3,8.612092e4
+carbon-world,sandstone,6.264317e2,1.715654e4
+carbon-world,coal,2.142890e3,2.050748e4
+carbon-world,crude oil,7.280701e1,6.357529e2
+carbon-world,tar,1.260803e2,3.501935e3
+carbon-world,iron crystal,1.108425e5,0.000000e0
+carbon-world,platinum-iron alloy,3.125197e3,0.000000e0
+carbon-world,graphite,3.105326e5,1.602968e5
+carbon-world,silicon carbide,3.436172e5,7.065959e5
+carbon-world,carbon monoxide,6.306132e1,3.221619e2
+carbon-world,zircon,2.890311e0,5.431955e1
+carbon-world,radiogenic gas,7.345853e-3,1.874829e-1
+comet,ice,1.156971e5,1.985379e5
+comet,olivine,3.079732e2,9.506051e1
+comet,graphite,4.578903e2,1.213153e3
+comet,silicon carbide,1.171261e3,1.001042e3
+comet,ammonia ice,2.020070e4,1.314412e4
+comet,dirty ice,6.601662e5,6.158950e5
+comet,dry ice,1.432524e5,1.192098e5
+comet,carbon monoxide ice,4.786460e3,0.000000e0
+comet,carbon monoxide,4.388457e2,5.917303e1
+comet,comet dust,2.581711e4,3.395108e4
+comet,tholin,2.770410e4,1.689361e4
+dry-world,basalt,6.661673e4,4.591636e5
+dry-world,peridotite,3.565448e5,1.955230e4
+dry-world,iron-nickel,3.803867e4,0.000000e0
+dry-world,molten-iron,3.707991e5,0.000000e0
+dry-world,magma,2.470238e3,0.000000e0
+dry-world,gabbro,8.090007e3,3.840548e2
+dry-world,obsidian,4.829219e2,1.124582e4
+dry-world,volcanic ash,8.502907e2,1.225476e4
+dry-world,impact breccia,2.166378e4,1.057566e5
+dry-world,harzburgite,3.236460e4,0.000000e0
+dry-world,pyroxenite,1.733190e4,0.000000e0
+dry-world,plume rock,1.603827e4,0.000000e0
+dry-world,gravel,7.380422e0,4.049120e2
+dry-world,clay,1.947550e2,2.856478e3
+dry-world,sandstone,5.047168e3,2.189790e5
+dry-world,conglomerate,1.993509e2,1.528810e4
+dry-world,rock salt,2.576293e1,3.624209e2
+dry-world,gypsum,6.770282e1,5.491638e2
+dry-world,schist,1.904110e4,2.223395e3
+dry-world,hematite,9.399451e1,7.125830e3
+dry-world,chalcopyrite,2.827326e0,0.000000e0
+dry-world,native copper,1.644990e0,0.000000e0
+dry-world,chromite,2.027780e2,0.000000e0
+dry-world,cobaltite,5.783166e0,0.000000e0
+dry-world,troilite,4.231809e0,0.000000e0
+dry-world,iron crystal,4.041343e4,0.000000e0
+dry-world,platinum-iron alloy,5.353560e2,0.000000e0
+dry-world,quartz crystal,1.118997e1,0.000000e0
+dry-world,dirty ice,1.828943e3,1.345815e5
+dry-world,dolerite,7.188812e2,2.172578e2
+dry-world,red dust,1.015267e2,8.043256e3
+dry-world,zircon,2.191177e1,9.278983e2
+dry-world,pitchblende,4.895802e-1,0.000000e0
+dry-world,pyrochlore,3.420942e0,0.000000e0
+dry-world,baryte,1.101555e0,0.000000e0
+dry-world,celestine,7.251907e-1,4.400976e0
+dry-world,bittern salt,0.000000e0,1.247872e0
+dry-world,borax,1.270461e0,2.679247e1
+dry-world,pyrolusite,3.365864e0,4.679518e1
+dry-world,pentlandite,1.613289e2,0.000000e0
+dry-world,osmiridium,1.028118e1,0.000000e0
+dry-world,hollingworthite,9.791604e-1,0.000000e0
+dry-world,radiogenic gas,1.034238e-1,4.475625e0
+earth-test,basalt,3.743859e1,8.369853e3
+earth-test,peridotite,9.564895e4,0.000000e0
+earth-test,ice,3.266195e1,1.146004e5
+earth-test,iron-nickel,2.913833e4,0.000000e0
+earth-test,molten-iron,3.565409e5,0.000000e0
+earth-test,magma,4.713221e2,0.000000e0
+earth-test,diamond,9.973919e0,0.000000e0
+earth-test,granite,5.411396e3,0.000000e0
+earth-test,andesite,9.296502e-2,0.000000e0
+earth-test,obsidian,9.598200e0,8.917970e2
+earth-test,impact breccia,5.582111e1,9.233590e3
+earth-test,perovskite rock,3.166696e5,0.000000e0
+earth-test,harzburgite,3.195619e4,0.000000e0
+earth-test,pyroxenite,2.252447e4,0.000000e0
+earth-test,plume rock,1.958830e4,0.000000e0
+earth-test,ringwoodite rock,3.280223e4,0.000000e0
+earth-test,deep pile rock,1.435531e4,0.000000e0
+earth-test,eclogite,1.099388e4,0.000000e0
+earth-test,soil,1.824219e-1,2.219410e3
+earth-test,sandstone,2.336685e2,3.053094e5
+earth-test,shale,1.630396e2,2.283080e5
+earth-test,limestone,2.237405e2,3.003314e5
+earth-test,rock salt,8.830625e0,1.213563e4
+earth-test,chalcopyrite,4.420224e-1,0.000000e0
+earth-test,spodumene,1.105056e-1,0.000000e0
+earth-test,iron crystal,2.994370e4,0.000000e0
+earth-test,platinum-iron alloy,6.254301e2,0.000000e0
+earth-test,sulfur-rich core melt,3.248456e4,0.000000e0
+earth-test,quartz crystal,1.022615e0,0.000000e0
+earth-test,beryl,1.936479e-1,0.000000e0
+earth-test,zircon,1.761775e1,1.100809e3
+earth-test,thorite,3.055567e0,0.000000e0
+earth-test,pitchblende,0.000000e0,6.329290e0
+earth-test,columbite,1.859300e-1,0.000000e0
+earth-test,xenotime,3.297627e-1,0.000000e0
+earth-test,baryte,2.210112e0,3.650418e3
+earth-test,celestine,1.385705e0,2.371941e3
+earth-test,bittern salt,1.122597e-1,7.567018e1
+earth-test,borax,0.000000e0,5.915864e1
+earth-test,fluorite,7.809062e-1,0.000000e0
+earth-test,apatite,3.838473e1,4.104267e3
+earth-test,rhodochrosite,1.294494e-1,0.000000e0
+earth-test,pyrolusite,4.385143e0,7.216709e3
+earth-test,radiogenic gas,1.824219e-2,1.503910e1
+hothouse-world,basalt,7.209462e4,6.246110e5
+hothouse-world,peridotite,1.308176e5,0.000000e0
+hothouse-world,iron-nickel,3.230421e4,0.000000e0
+hothouse-world,molten-iron,3.297073e5,0.000000e0
+hothouse-world,magma,1.833875e4,1.353925e3
+hothouse-world,volcanic-gas,9.947054e-2,2.757311e-1
+hothouse-world,pyrite,3.890763e3,3.354239e4
+hothouse-world,gold-quartz,1.052002e0,2.104192e0
+hothouse-world,lava-rock,7.398114e3,1.816954e5
+hothouse-world,granite,2.051432e3,0.000000e0
+hothouse-world,andesite,6.876171e2,2.506895e4
+hothouse-world,gabbro,6.580695e3,0.000000e0
+hothouse-world,obsidian,4.825307e2,1.737057e4
+hothouse-world,tuff,3.993474e2,1.294357e4
+hothouse-world,volcanic ash,1.052472e1,5.511002e2
+hothouse-world,impact breccia,5.849882e2,1.598869e4
+hothouse-world,perovskite rock,1.775374e5,0.000000e0
+hothouse-world,harzburgite,2.803880e4,0.000000e0
+hothouse-world,plume rock,6.730731e4,0.000000e0
+hothouse-world,eclogite,1.139828e4,0.000000e0
+hothouse-world,marble,4.737770e3,6.930471e3
+hothouse-world,schist,2.470140e4,2.808159e4
+hothouse-world,gneiss,3.719966e4,3.533821e4
+hothouse-world,magnetite,5.804796e0,0.000000e0
+hothouse-world,chalcopyrite,3.550506e1,0.000000e0
+hothouse-world,galena,3.856263e3,1.236462e4
+hothouse-world,sphalerite,8.749462e0,0.000000e0
+hothouse-world,cassiterite,9.792071e-1,0.000000e0
+hothouse-world,wolframite,2.057039e0,0.000000e0
+hothouse-world,stibnite,2.160361e-1,0.000000e0
+hothouse-world,spodumene,1.109533e1,0.000000e0
+hothouse-world,iron crystal,3.703989e4,0.000000e0
+hothouse-world,platinum-iron alloy,5.314347e2,0.000000e0
+hothouse-world,quartz crystal,1.242067e2,6.517530e0
+hothouse-world,beryl,6.092218e0,0.000000e0
+hothouse-world,garnet,5.128509e0,0.000000e0
+hothouse-world,dolerite,1.524271e3,3.771580e3
+hothouse-world,zircon,1.231688e2,9.562118e1
+hothouse-world,thorite,2.265561e1,2.563288e1
+hothouse-world,pitchblende,1.127145e0,0.000000e0
+hothouse-world,columbite,3.733667e0,0.000000e0
+hothouse-world,pollucite,8.171800e-1,0.000000e0
+hothouse-world,lepidolite,1.627221e1,0.000000e0
+hothouse-world,thortveitite,9.862518e-1,0.000000e0
+hothouse-world,xenotime,6.180511e0,0.000000e0
+hothouse-world,baryte,5.917511e0,3.074307e0
+hothouse-world,celestine,3.060903e1,4.317693e1
+hothouse-world,vanadinite,9.721625e0,1.414181e0
+hothouse-world,fluorite,7.586812e1,0.000000e0
+hothouse-world,apatite,2.513918e2,2.092168e2
+hothouse-world,rhodochrosite,2.963405e1,5.041863e-1
+hothouse-world,radiogenic gas,0.000000e0,3.641345e-1
+hothouse-world,radon gas,4.226793e-2,0.000000e0
+ice-moon,peridotite,5.532121e5,0.000000e0
+ice-moon,ice,3.069434e4,7.012358e5
+ice-moon,iron-nickel,9.996719e4,0.000000e0
+ice-moon,pyrite,5.642686e2,0.000000e0
+ice-moon,rock salt,9.152341e2,2.910221e4
+ice-moon,chalcopyrite,5.951993e2,0.000000e0
+ice-moon,iron crystal,2.092152e5,0.000000e0
+ice-moon,platinum-iron alloy,5.443223e3,0.000000e0
+ice-moon,brine,8.754530e4,1.104311e4
+ice-moon,sea ice,1.023818e4,2.244690e5
+ice-moon,dirty ice,1.601679e3,3.386800e4
+ice-moon,bittern salt,4.680673e0,1.708612e2
+ice-moon,borax,3.406427e0,1.109624e2
+iron-world,regolith,4.060172e1,4.341162e3
+iron-world,basalt,1.085146e4,5.804776e5
+iron-world,peridotite,9.626298e4,3.704574e4
+iron-world,iron-nickel,1.354336e5,0.000000e0
+iron-world,molten-iron,4.972185e5,0.000000e0
+iron-world,sulfur,4.161034e1,3.093327e3
+iron-world,gabbro,5.314619e3,9.928864e4
+iron-world,obsidian,9.765665e2,3.765766e4
+iron-world,impact breccia,7.666100e3,2.146381e5
+iron-world,chromite,8.016583e3,1.159916e4
+iron-world,troilite,2.632559e4,0.000000e0
+iron-world,iron crystal,1.320889e5,0.000000e0
+iron-world,platinum-iron alloy,4.209490e3,0.000000e0
+iron-world,sulfur-rich core melt,7.511232e4,0.000000e0
+iron-world,platinum nugget,4.902189e-3,0.000000e0
+iron-world,graphite,4.410666e2,1.185868e4
+lava-world,molten-iron,3.249149e5,0.000000e0
+lava-world,magma,2.774230e5,7.116397e4
+lava-world,lava-rock,1.666588e4,4.869746e5
+lava-world,obsidian,1.457528e4,4.249638e5
+lava-world,pumice,9.606227e1,2.965582e3
+lava-world,volcanic ash,4.007921e2,1.173550e4
+lava-world,perovskite rock,3.177872e5,0.000000e0
+lava-world,deep pile rock,1.625118e4,0.000000e0
+lava-world,eclogite,2.742347e4,0.000000e0
+lava-world,chromite,4.027932e3,0.000000e0
+lava-world,platinum nugget,3.676560e-3,0.000000e0
+lava-world,dolerite,4.343612e2,2.196557e3
+living-world,basalt,3.094062e4,1.084382e5
+living-world,peridotite,8.188990e4,0.000000e0
+living-world,ice,4.686533e2,4.270227e4
+living-world,iron-nickel,3.441988e4,0.000000e0
+living-world,molten-iron,2.568329e5,0.000000e0
+living-world,magma,6.112298e3,2.238213e3
+living-world,pyrite,5.961391e1,0.000000e0
+living-world,gold-quartz,3.283650e0,1.780674e0
+living-world,gold,8.148147e-6,4.418617e-6
+living-world,kimberlite,1.082558e3,3.482886e3
+living-world,diamond,2.358155e1,1.453164e1
+living-world,water,1.023337e4,2.818991e5
+living-world,granite,8.305410e3,0.000000e0
+living-world,andesite,1.733602e3,3.900640e4
+living-world,gabbro,1.033090e4,6.226002e2
+living-world,tuff,1.041826e3,2.015756e4
+living-world,impact breccia,1.665280e1,2.655749e2
+living-world,perovskite rock,2.256112e5,0.000000e0
+living-world,harzburgite,3.218823e4,0.000000e0
+living-world,pyroxenite,1.228621e4,0.000000e0
+living-world,plume rock,2.382189e4,0.000000e0
+living-world,ringwoodite rock,8.580907e4,0.000000e0
+living-world,deep pile rock,1.071027e4,0.000000e0
+living-world,eclogite,1.637522e4,0.000000e0
+living-world,gravel,9.252861e1,3.681418e3
+living-world,clay,5.546488e2,9.576235e3
+living-world,soil,2.509159e1,2.109983e3
+living-world,sandstone,7.050029e3,1.594147e5
+living-world,shale,4.568527e3,1.249832e5
+living-world,limestone,3.735281e3,9.728381e4
+living-world,conglomerate,1.193500e3,3.564211e4
+living-world,coal,4.465913e1,2.783528e3
+living-world,rock salt,3.290253e2,8.261737e3
+living-world,gypsum,1.847640e2,5.245476e3
+living-world,banded iron,1.722510e3,0.000000e0
+living-world,crude oil,9.939203e1,2.533474e3
+living-world,marble,5.936959e0,0.000000e0
+living-world,quartzite,3.174688e3,5.617605e-1
+living-world,slate,9.987774e0,0.000000e0
+living-world,schist,1.570694e4,1.513574e2
+living-world,gneiss,4.152422e4,2.873988e2
+living-world,magnetite,3.774733e0,0.000000e0
+living-world,chalcopyrite,9.337884e1,0.000000e0
+living-world,native copper,5.691663e0,0.000000e0
+living-world,galena,5.199115e0,0.000000e0
+living-world,sphalerite,2.275834e1,0.000000e0
+living-world,cassiterite,3.056435e0,0.000000e0
+living-world,chromite,6.765788e2,0.000000e0
+living-world,molybdenite,2.296602e-1,0.000000e0
+living-world,wolframite,4.280474e0,0.000000e0
+living-world,arsenopyrite,2.980696e-1,0.000000e0
+living-world,cobaltite,8.927428e0,0.000000e0
+living-world,spodumene,2.816757e1,0.000000e0
+living-world,troilite,7.658922e0,0.000000e0
+living-world,iron crystal,3.573931e4,0.000000e0
+living-world,platinum-iron alloy,4.725820e2,0.000000e0
+living-world,sulfur-rich core melt,2.846213e4,0.000000e0
+living-world,quartz crystal,3.137524e2,1.348225e1
+living-world,beryl,1.564425e1,0.000000e0
+living-world,garnet,2.286829e0,0.000000e0
+living-world,graphite,2.150010e-1,0.000000e0
+living-world,dolerite,4.232197e2,2.440764e3
+living-world,aquifer sandstone,1.717054e3,3.884640e4
+living-world,zircon,1.860907e2,5.406733e2
+living-world,thorite,3.044707e1,0.000000e0
+living-world,pitchblende,2.736376e0,5.087642e0
+living-world,columbite,9.064247e0,0.000000e0
+living-world,tantalite,3.088196e0,0.000000e0
+living-world,pyrochlore,3.782063e0,0.000000e0
+living-world,pollucite,2.267283e0,0.000000e0
+living-world,lepidolite,3.261174e1,0.000000e0
+living-world,thortveitite,3.762517e0,0.000000e0
+living-world,xenotime,2.021009e1,0.000000e0
+living-world,baryte,7.981912e1,1.592591e3
+living-world,celestine,3.281208e1,7.816579e2
+living-world,bittern salt,2.189101e0,4.918054e1
+living-world,borax,4.480328e0,1.133209e2
+living-world,vanadinite,1.888100e1,2.925394e0
+living-world,fluorite,1.830460e2,3.033507e0
+living-world,apatite,3.921833e2,1.687200e3
+living-world,rhodochrosite,7.392614e1,4.302237e0
+living-world,pyrolusite,1.155630e2,3.125720e3
+living-world,pentlandite,4.355285e2,0.000000e0
+living-world,osmiridium,4.207179e1,0.000000e0
+living-world,radiogenic gas,4.065473e-1,9.548868e0
+living-world,radon gas,7.329579e-2,0.000000e0
+metal-asteroid,iron-nickel,1.819921e4,1.006475e5
+metal-asteroid,gold,3.821086e-1,5.565023e-3
+metal-asteroid,cast-iron,2.798019e3,1.579075e4
+metal-asteroid,impact breccia,1.890308e3,1.048489e4
+metal-asteroid,harzburgite,6.331168e4,3.493994e5
+metal-asteroid,pyroxenite,8.340918e3,4.593736e4
+metal-asteroid,troilite,1.156935e3,0.000000e0
+metal-asteroid,pallasite,1.180143e5,3.151494e5
+metal-asteroid,platinum nugget,2.956515e-2,4.236022e-4
+metal-asteroid,olivine,2.280523e3,5.729628e3
+metal-asteroid,graphite,6.083654e1,0.000000e0
+metal-asteroid,kamacite,4.457923e5,6.289283e3
+metal-asteroid,taenite,2.241064e5,3.263882e3
+metal-asteroid,plessite,6.215485e4,9.376866e2
+metal-asteroid,schreibersite,2.553169e4,3.851425e2
+metal-asteroid,metal grit,2.636161e4,1.459850e5
+methane-world,peridotite,4.850789e5,0.000000e0
+methane-world,ice,1.789972e5,6.650680e5
+methane-world,liquid methane,1.586655e2,9.103894e3
+methane-world,harzburgite,5.133635e4,0.000000e0
+methane-world,pyroxenite,1.877791e4,0.000000e0
+methane-world,rock salt,5.841704e2,0.000000e0
+methane-world,ammonia ice,7.518424e3,3.225962e4
+methane-world,liquid ethane,2.525555e2,8.439525e3
+methane-world,brine,7.656038e4,0.000000e0
+methane-world,sea ice,1.404588e2,0.000000e0
+methane-world,dirty ice,3.106282e4,1.913010e5
+methane-world,pressure ice,1.467565e5,0.000000e0
+methane-world,tholin,2.769837e3,9.382798e4
+methane-world,bittern salt,3.442043e0,0.000000e0
+methane-world,borax,2.368360e0,0.000000e0
+ocean-world,peridotite,1.846770e5,0.000000e0
+ocean-world,ice,1.541753e4,8.305186e5
+ocean-world,iron-nickel,5.741289e4,0.000000e0
+ocean-world,water,3.650997e5,0.000000e0
+ocean-world,rock salt,1.458128e4,0.000000e0
+ocean-world,magnetite,2.522948e3,0.000000e0
+ocean-world,chalcopyrite,2.161369e3,0.000000e0
+ocean-world,iron crystal,5.635441e4,0.000000e0
+ocean-world,platinum-iron alloy,1.755050e3,0.000000e0
+ocean-world,brine,7.980035e1,4.764641e3
+ocean-world,sea ice,3.078089e3,1.647168e5
+ocean-world,dirty ice,1.075502e4,0.000000e0
+ocean-world,pressure ice,1.043863e5,0.000000e0
+ocean-world,hot ice,1.815642e5,0.000000e0
+ocean-world,bittern salt,8.820039e1,0.000000e0
+ocean-world,borax,6.622686e1,0.000000e0
+rogue-world,peridotite,4.688795e5,0.000000e0
+rogue-world,ice,7.330469e4,1.522958e5
+rogue-world,iron-nickel,9.778751e4,0.000000e0
+rogue-world,methane ice,8.704431e1,1.107144e4
+rogue-world,harzburgite,4.081821e4,0.000000e0
+rogue-world,pyroxenite,1.829140e4,0.000000e0
+rogue-world,rock salt,7.103385e3,0.000000e0
+rogue-world,iron crystal,1.388954e5,0.000000e0
+rogue-world,platinum-iron alloy,3.447714e3,0.000000e0
+rogue-world,nitrogen ice,7.848505e3,5.961145e5
+rogue-world,oxygen ice,1.113434e2,1.342924e4
+rogue-world,air snow,6.631134e1,8.992926e3
+rogue-world,ammonia ice,7.498995e2,1.352524e4
+rogue-world,brine,3.034556e4,8.468837e2
+rogue-world,sea ice,1.507416e4,1.955099e4
+rogue-world,dirty ice,1.105997e4,1.804808e5
+rogue-world,pressure ice,8.584148e4,0.000000e0
+rogue-world,carbon monoxide ice,1.088567e2,3.692201e3
+rogue-world,tholin,1.025544e2,0.000000e0
+rogue-world,bittern salt,4.582390e1,0.000000e0
+rogue-world,borax,3.066597e1,0.000000e0
+rubble-asteroid,regolith,1.835097e3,5.046132e3
+rubble-asteroid,chondrite,7.267925e5,7.301224e5
+rubble-asteroid,basalt,7.282575e4,6.372106e4
+rubble-asteroid,ice,1.357961e3,1.596632e3
+rubble-asteroid,iron-nickel,1.378547e4,8.302571e3
+rubble-asteroid,gold,9.699389e-3,5.841648e-3
+rubble-asteroid,sperrylite,3.943561e-2,2.375087e-2
+rubble-asteroid,obsidian,1.903033e3,5.492522e3
+rubble-asteroid,impact breccia,1.561054e5,1.604735e5
+rubble-asteroid,troilite,1.332707e4,1.355416e4
+rubble-asteroid,pallasite,1.206772e4,1.169103e4
+rubble-demo,regolith,7.817090e4,7.632265e4
+rubble-demo,chondrite,6.332751e5,6.167379e5
+rubble-demo,basalt,9.173691e4,9.521809e4
+rubble-demo,iron-nickel,1.034092e5,1.129798e5
+rubble-demo,gold,7.275821e-2,7.949207e-2
+rubble-demo,sperrylite,2.958191e-1,3.231975e-1
+rubble-demo,obsidian,7.705520e2,1.031546e3
+rubble-demo,impact breccia,4.424141e3,5.821301e3
+rubble-demo,troilite,4.260313e4,4.635908e4
+rubble-demo,pallasite,1.570450e4,1.500123e4
+rubble-demo,dirty ice,2.990523e4,3.052797e4
+sandbox-demo,regolith,6.788541e4,6.715382e4
+sandbox-demo,basalt,9.013214e5,9.019791e5
+sandbox-demo,ice,2.270877e3,2.300087e3
+sandbox-demo,magma,2.176669e4,2.182481e4
+sandbox-demo,water,6.755617e3,6.742215e3
+strata-demo,basalt,1.025082e4,2.837342e4
+strata-demo,peridotite,2.531046e5,1.942879e4
+strata-demo,ice,3.609898e3,1.027228e4
+strata-demo,iron-nickel,1.069031e4,0.000000e0
+strata-demo,molten-iron,4.913098e4,0.000000e0
+strata-demo,magma,4.193113e3,6.951117e3
+strata-demo,pyrite,8.726248e1,2.754440e2
+strata-demo,gold-quartz,3.744597e0,1.041493e1
+strata-demo,diamond,3.755296e0,0.000000e0
+strata-demo,granite,1.936866e4,5.622052e4
+strata-demo,andesite,1.507438e3,4.145711e3
+strata-demo,gabbro,6.548899e3,1.869819e4
+strata-demo,obsidian,4.397227e1,1.302122e2
+strata-demo,tuff,2.298795e3,6.321873e3
+strata-demo,impact breccia,2.052574e2,5.742575e2
+strata-demo,perovskite rock,1.215233e5,0.000000e0
+strata-demo,harzburgite,3.474571e4,2.381933e3
+strata-demo,pyroxenite,1.276594e4,0.000000e0
+strata-demo,plume rock,2.998985e4,0.000000e0
+strata-demo,ringwoodite rock,7.448671e4,0.000000e0
+strata-demo,deep pile rock,6.468256e3,0.000000e0
+strata-demo,eclogite,2.086050e4,5.855683e3
+strata-demo,gravel,7.147098e2,2.041031e3
+strata-demo,soil,5.759859e2,1.502590e3
+strata-demo,sandstone,2.447785e4,6.948142e4
+strata-demo,limestone,2.271189e4,6.484341e4
+strata-demo,conglomerate,6.894237e3,1.939203e4
+strata-demo,rock salt,1.667090e3,4.879402e3
+strata-demo,gypsum,1.450603e3,4.136695e3
+strata-demo,banded iron,1.066504e4,3.038863e4
+strata-demo,marble,2.291326e4,6.462128e4
+strata-demo,quartzite,3.020510e4,8.604671e4
+strata-demo,slate,8.558931e4,2.435310e5
+strata-demo,schist,2.921010e4,8.328044e4
+strata-demo,gneiss,7.286905e4,1.499837e5
+strata-demo,magnetite,2.944356e2,8.177641e2
+strata-demo,chalcopyrite,1.249759e2,3.399216e2
+strata-demo,native copper,2.456456e1,6.435706e1
+strata-demo,galena,1.016391e0,4.873980e-1
+strata-demo,sphalerite,3.195612e1,6.804974e1
+strata-demo,cassiterite,2.788387e0,9.805679e0
+strata-demo,chromite,4.893319e2,1.146290e3
+strata-demo,molybdenite,2.514229e0,6.329761e0
+strata-demo,wolframite,2.440675e0,7.958697e0
+strata-demo,cobaltite,2.401223e1,6.464437e1
+strata-demo,spodumene,4.676065e1,1.286827e2
+strata-demo,troilite,1.664607e1,3.340793e1
+strata-demo,iron crystal,1.360786e4,0.000000e0
+strata-demo,platinum-iron alloy,9.808905e2,0.000000e0
+strata-demo,sulfur-rich core melt,7.483644e3,0.000000e0
+strata-demo,quartz crystal,3.969273e2,1.176040e3
+strata-demo,beryl,2.030106e1,5.610977e1
+strata-demo,garnet,2.193197e2,6.395367e2
+strata-demo,dolerite,1.044097e3,2.743596e3
+strata-demo,zircon,3.917784e2,1.000795e3
+strata-demo,thorite,5.241767e1,1.035528e2
+strata-demo,columbite,5.670389e0,1.461553e1
+strata-demo,tantalite,5.282556e-1,5.573012e0
+strata-demo,pollucite,6.011415e0,2.213172e1
+strata-demo,lepidolite,8.355800e1,2.336766e2
+strata-demo,thortveitite,2.106336e0,9.876223e0
+strata-demo,xenotime,1.508538e1,4.069132e1
+strata-demo,baryte,7.718216e2,2.238023e3
+strata-demo,celestine,3.695148e2,1.046206e3
+strata-demo,bittern salt,8.987032e0,2.749951e1
+strata-demo,borax,1.179949e1,3.350605e1
+strata-demo,vanadinite,1.660996e1,3.097543e1
+strata-demo,fluorite,1.667095e2,4.902660e2
+strata-demo,apatite,7.698296e2,1.835687e3
+strata-demo,rhodochrosite,7.204872e1,2.103770e2
+strata-demo,pyrolusite,2.678055e2,7.166675e2
+strata-demo,pentlandite,3.391200e2,8.632268e2
+strata-demo,radiogenic gas,1.790720e0,4.735457e0
+strata-demo,radon gas,3.209654e-1,8.272940e-1
+sulfur-world,basalt,8.740581e4,3.783647e5
+sulfur-world,peridotite,4.254541e5,0.000000e0
+sulfur-world,molten-iron,2.335139e5,0.000000e0
+sulfur-world,magma,4.859958e4,3.650871e4
+sulfur-world,sulfur,2.647580e4,3.153798e5
+sulfur-world,pyrite,1.285837e4,5.554736e4
+sulfur-world,gold,8.933997e-3,3.859431e-2
+sulfur-world,lava-rock,9.830458e3,1.378528e5
+sulfur-world,gabbro,1.207964e3,0.000000e0
+sulfur-world,tuff,3.893992e3,2.865299e4
+sulfur-world,volcanic ash,7.895252e1,2.857342e3
+sulfur-world,harzburgite,4.277758e4,0.000000e0
+sulfur-world,plume rock,1.032293e5,0.000000e0
+sulfur-world,sulfur dioxide frost,3.478657e3,4.194214e4
+sulfur-world,dolerite,1.195275e3,2.893351e3
+sulfur-world,radiogenic gas,1.605250e-1,8.209523e-1
+test-planetoid-3km,regolith,2.533718e3,5.266999e3
+test-planetoid-3km,basalt,1.611457e5,3.382443e5
+test-planetoid-3km,peridotite,2.513645e5,3.379511e5
+test-planetoid-3km,iron-nickel,1.574517e4,0.000000e0
+test-planetoid-3km,molten-iron,7.020138e4,0.000000e0
+test-planetoid-3km,magma,2.594501e4,2.980642e4
+test-planetoid-3km,sulfur,2.229632e3,4.727381e3
+test-planetoid-3km,pyrite,1.055570e3,2.350373e3
+test-planetoid-3km,gold-quartz,8.145854e1,1.887007e2
+test-planetoid-3km,gold,2.021336e-4,4.682476e-4
+test-planetoid-3km,kimberlite,2.946352e3,3.877157e3
+test-planetoid-3km,diamond,2.099838e1,1.853626e1
+test-planetoid-3km,granite,1.072093e4,2.335447e4
+test-planetoid-3km,andesite,5.041809e4,1.071173e5
+test-planetoid-3km,gabbro,3.522212e4,1.422463e4
+test-planetoid-3km,obsidian,1.525435e3,3.287348e3
+test-planetoid-3km,tuff,1.379500e4,2.897668e4
+test-planetoid-3km,impact breccia,2.016239e3,4.476055e3
+test-planetoid-3km,perovskite rock,1.279075e5,0.000000e0
+test-planetoid-3km,harzburgite,2.572824e4,1.917085e4
+test-planetoid-3km,pyroxenite,1.034554e4,1.041438e4
+test-planetoid-3km,plume rock,2.445917e4,6.106747e3
+test-planetoid-3km,ringwoodite rock,9.411098e4,0.000000e0
+test-planetoid-3km,deep pile rock,5.868797e3,0.000000e0
+test-planetoid-3km,eclogite,1.734364e4,1.615330e4
+test-planetoid-3km,conglomerate,1.540183e2,3.687154e2
+test-planetoid-3km,schist,1.071594e2,2.599878e2
+test-planetoid-3km,chalcopyrite,1.559692e3,3.360887e3
+test-planetoid-3km,native copper,8.293963e1,5.099115e1
+test-planetoid-3km,galena,7.508003e1,1.607132e2
+test-planetoid-3km,sphalerite,5.012245e2,1.116758e3
+test-planetoid-3km,cassiterite,2.703099e1,7.910457e1
+test-planetoid-3km,cinnabar,2.520299e0,4.852306e0
+test-planetoid-3km,chromite,1.613754e3,9.234957e1
+test-planetoid-3km,molybdenite,7.677579e0,1.858254e1
+test-planetoid-3km,wolframite,7.041281e1,1.508708e2
+test-planetoid-3km,stibnite,3.220383e0,7.440203e0
+test-planetoid-3km,arsenopyrite,2.847005e0,6.212150e0
+test-planetoid-3km,cobaltite,1.862221e2,1.954940e2
+test-planetoid-3km,spodumene,5.694476e2,1.278637e3
+test-planetoid-3km,troilite,1.161858e2,1.248253e2
+test-planetoid-3km,iron crystal,1.221538e4,0.000000e0
+test-planetoid-3km,platinum-iron alloy,1.778701e3,0.000000e0
+test-planetoid-3km,sulfur-rich core melt,8.841700e3,0.000000e0
+test-planetoid-3km,quartz crystal,6.045545e3,1.280813e4
+test-planetoid-3km,beryl,2.827496e2,6.148914e2
+test-planetoid-3km,dolerite,3.948290e3,7.168815e3
+test-planetoid-3km,zircon,1.005553e2,2.387245e2
+test-planetoid-3km,thorite,1.667754e1,3.812954e1
+test-planetoid-3km,pitchblende,2.489185e0,9.584803e0
+test-planetoid-3km,columbite,1.710925e2,3.759160e2
+test-planetoid-3km,tantalite,7.066951e1,1.452876e2
+test-planetoid-3km,pyrochlore,1.110487e2,1.259623e2
+test-planetoid-3km,pollucite,4.150715e1,9.815437e1
+test-planetoid-3km,lepidolite,5.746003e2,1.276147e3
+test-planetoid-3km,thortveitite,5.227288e1,1.404773e2
+test-planetoid-3km,xenotime,3.542654e2,7.875054e2
+test-planetoid-3km,baryte,3.440909e2,7.173326e2
+test-planetoid-3km,lorandite,2.139143e0,3.953731e0
+test-planetoid-3km,vanadinite,4.669555e2,9.920271e2
+test-planetoid-3km,fluorite,3.388374e3,7.561054e3
+test-planetoid-3km,apatite,8.883433e1,1.918614e2
+test-planetoid-3km,rhodochrosite,1.452967e3,3.220691e3
+test-planetoid-3km,pentlandite,1.837936e3,4.948993e2
+test-planetoid-3km,radiogenic gas,5.764018e-1,1.284963e0
+tutorial-1-2km,regolith,5.080327e3,6.577917e3
+tutorial-1-2km,chondrite,7.218191e5,7.248923e5
+tutorial-1-2km,basalt,9.586335e4,1.024165e5
+tutorial-1-2km,ice,2.240027e3,1.834825e3
+tutorial-1-2km,iron-nickel,1.039572e4,9.102546e3
+tutorial-1-2km,gold,7.236045e-3,6.300120e-3
+tutorial-1-2km,sperrylite,2.942019e-2,2.561492e-2
+tutorial-1-2km,obsidian,3.035211e2,3.972788e2
+tutorial-1-2km,impact breccia,1.400616e5,1.328223e5
+tutorial-1-2km,troilite,1.464579e4,1.313019e4
+tutorial-1-2km,pallasite,9.590563e3,8.826092e3
+tutorial-2-3km,regolith,3.352694e3,5.736797e3
+tutorial-2-3km,chondrite,7.207613e5,7.382356e5
+tutorial-2-3km,basalt,8.772187e4,7.240019e4
+tutorial-2-3km,ice,1.498955e3,1.499683e3
+tutorial-2-3km,iron-nickel,1.616602e4,1.671316e4
+tutorial-2-3km,gold,1.129016e-2,1.161805e-2
+tutorial-2-3km,sperrylite,4.590334e-2,4.723646e-2
+tutorial-2-3km,obsidian,1.135747e2,2.117642e2
+tutorial-2-3km,impact breccia,1.457601e5,1.404544e5
+tutorial-2-3km,troilite,1.469834e4,1.427740e4
+tutorial-2-3km,pallasite,9.927144e3,1.047098e4

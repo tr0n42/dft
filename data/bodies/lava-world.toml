@@ -1,0 +1,169 @@
+# Lava world: a planet so close to its star that its rock never stopped
+# melting (like 55 Cancri e). A thin skin of glassy rock floats on an ocean
+# of magma; lava lakes and volcanoes break it everywhere; metals that sank
+# through the magma pool deep down. Almost everything is hot enough to wreck
+# drones. No Heart.
+name = "Lava world"
+archetype = "lava-world"
+seed = 14001
+radius_m = 20000
+heart = false
+regolith_depth_m = 3
+regolith_material = "volcanic ash"
+atmosphere_m = 600
+atmosphere_colour = [230, 120, 40]
+space_k = 600
+
+# A blazing day, though the glassy skin holds: what melts in it is sulfur
+# and the like, not the rock.
+[sun]
+day_k = 1150
+day_s = 1200
+start_deg = 0
+
+[shape]
+roughness = 0.004
+wavelength_m = 7000
+
+[[layer]]
+name = "iron core"
+outer = 0.40
+material = "molten-iron"
+temperature_k = 3200
+
+[[layer]]
+name = "deep mantle"
+outer = 0.72
+material = "perovskite rock"
+temperature_k = 2600
+
+[[layer]]
+name = "magma ocean"
+outer = 0.975
+material = "magma"
+temperature_k = 1900
+
+[[layer]]
+name = "glass skin"
+outer = 1.0
+material = "obsidian"
+temperature_k = 900
+
+# The skin: glass, cooled flows, ash.
+[strata]
+depth_m = 450
+fold_amplitude_m = 20
+fold_wavelength_m = 3000
+pinch = 0.6
+pinch_wavelength_m = 1500
+
+[[strata.band]]
+material = "obsidian"
+thickness_m = [10, 40]
+weight = 4
+
+[[strata.band]]
+material = "lava-rock"
+thickness_m = [10, 40]
+weight = 4
+
+[[strata.band]]
+material = "volcanic ash"
+thickness_m = [3, 12]
+weight = 1.5
+
+[[strata.band]]
+material = "pumice"
+thickness_m = [3, 15]
+weight = 1
+
+# Metals that sank through the magma pool at its bottom.
+[[blob]]
+material = "molten-iron"
+count = 220
+radius_min_m = 80
+radius_max_m = 400
+r_min = 0.72
+r_max = 0.75
+
+[[blob]]
+material = "chromite"
+count = 150
+radius_min_m = 40
+radius_max_m = 150
+r_min = 0.72
+r_max = 0.76
+
+[[blob]]
+material = "magma"             # lava pockets in the skin
+count = 300
+radius_min_m = 20
+radius_max_m = 90
+r_min = 0.98
+r_max = 0.996
+
+[[sprinkle]]
+material = "platinum nugget"
+host = ["chromite"]
+chance = 0.02
+r_min = 0.7
+r_max = 0.8
+
+[[deep.streaks]]
+host = ["perovskite rock"]
+r_min = 0.41
+r_max = 0.71
+cells = 8
+bands = 10
+width = 0.3
+fraction = 0.35
+warp = 0.4
+
+[[deep.streaks.rock]]
+material = "eclogite"
+weight = 2
+
+[[deep.streaks.rock]]
+material = "deep pile rock"
+weight = 1
+
+[craters]
+count = 0
+radius_min_m = 10
+radius_max_m = 10
+
+# ---- surface (G5) ----
+[[relief]]              # lava lakes, sealed with a skin of glass
+kind = "basin"
+chance = 1.0
+count = [5, 10]
+width_m = [400, 1500]
+height_m = [60, 200]
+extra = 20
+fill_m = 50
+crust_m = 3
+
+[[relief.material]]
+material = "magma"
+
+[[relief]]              # volcanoes everywhere
+kind = "volcano"
+chance = 1.0
+count = [4, 8]
+width_m = [800, 2500]
+height_m = [200, 800]
+extra = 0.15
+band_m = [6, 20]
+active_chance = 0.9
+
+[[relief.material]]
+material = "lava-rock"
+weight = 3
+
+[[relief.material]]
+material = "obsidian"
+weight = 2
+
+[[relief.material]]
+material = "volcanic ash"
+weight = 1

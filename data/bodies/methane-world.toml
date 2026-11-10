@@ -1,0 +1,198 @@
+# Methane world: a cold moon under a thick orange haze (like Titan). At 94 K
+# water ice is bedrock; methane and ethane are liquids that fill lakes and
+# seas, and organic soot settles out of the sky into dunes. Under the ice
+# shell lies an ocean of water, kept liquid by salts and the heat below.
+# No Heart.
+name = "Methane world"
+archetype = "methane-world"
+seed = 11001
+radius_m = 30000
+heart = false
+regolith_depth_m = 6
+regolith_material = "tholin"
+atmosphere_m = 900
+atmosphere_colour = [200, 140, 60]
+# The thick air keeps the surface at its own cold: no open-sky chill.
+space_k = 92
+
+[shape]
+roughness = 0.004
+wavelength_m = 9000
+
+[[layer]]
+name = "rock core"
+outer = 0.55
+material = "peridotite"
+temperature_k = 900
+
+[[layer]]
+name = "high-pressure ice"
+outer = 0.68
+material = "pressure ice"
+temperature_k = 280
+
+[[layer]]
+name = "buried ocean"
+outer = 0.76
+material = "brine"
+temperature_k = 262
+
+[[layer]]
+name = "ice shell"
+outer = 1.0
+material = "ice"
+temperature_k = 94
+
+# Ice bedrock with organic layers and frozen ammonia, warped by slow flow.
+[strata]
+depth_m = 900
+fold_amplitude_m = 50
+fold_wavelength_m = 5000
+pinch = 0.55
+pinch_wavelength_m = 2500
+
+[[strata.band]]
+material = "ice"
+thickness_m = [20, 70]
+weight = 5
+
+[[strata.band]]
+material = "dirty ice"
+thickness_m = [10, 40]
+weight = 3
+
+[[strata.band]]
+material = "tholin"
+thickness_m = [3, 12]
+weight = 2
+
+[[strata.band]]
+material = "ammonia ice"
+thickness_m = [3, 12]
+weight = 1
+
+[[strata.lens]]           # buried hydrocarbon pools
+host = "dirty ice"
+material = "liquid ethane"
+position = "middle"
+length_m = [60, 300]
+thickness = 0.5
+spacing_m = 800
+
+# The ice shell convects, stirring dirty ice and salt through it.
+[[deep.streaks]]
+host = ["ice"]
+r_min = 0.77
+r_max = 0.96
+cells = 12
+bands = 9
+width = 0.35
+fraction = 0.4
+warp = 0.5
+
+[[deep.streaks.rock]]
+material = "dirty ice"
+weight = 3
+
+[[deep.streaks.rock]]
+material = "ammonia ice"
+weight = 1
+
+[[deep.streaks]]
+host = ["peridotite"]
+r_min = 0.1
+r_max = 0.54
+cells = 8
+bands = 10
+width = 0.3
+fraction = 0.35
+warp = 0.4
+
+[[deep.streaks.rock]]
+material = "harzburgite"
+weight = 2
+
+[[deep.streaks.rock]]
+material = "pyroxenite"
+weight = 1
+
+[[blob]]
+material = "rock salt"
+count = 120
+radius_min_m = 20
+radius_max_m = 90
+r_min = 0.74
+r_max = 0.8
+
+[craters]
+count = 12
+radius_min_m = 80
+radius_max_m = 1500
+breccia = 0.12
+breccia_material = "dirty ice"
+melt = 0.0
+rim = 0.04
+
+# ---- surface (G5) ----
+[[relief]]              # methane seas in great basins
+kind = "basin"
+chance = 0.9
+count = [1, 2]
+width_m = [2500, 5000]
+height_m = [200, 450]
+extra = 20
+fill_m = 160
+
+[[relief.material]]
+material = "liquid methane"
+
+[[relief]]              # lakes of ethane and methane in smaller hollows
+kind = "basin"
+chance = 1.0
+count = [3, 7]
+width_m = [400, 1500]
+height_m = [40, 120]
+extra = 6
+fill_m = 30
+
+[[relief.material]]
+material = "liquid ethane"
+
+[[relief]]              # long dunes of organic soot
+kind = "boulders"
+count = [150, 300]
+width_m = [20, 60]
+height_m = [0, 0]
+extra = 0.82
+
+[[relief.material]]
+material = "tholin"
+
+[[relief]]              # water-ice mountains
+kind = "range"
+chance = 0.7
+count = [1, 2]
+width_m = [3000, 6000]
+height_m = [500, 1500]
+
+[[relief]]              # cryovolcanoes of ammonia-water slush
+kind = "volcano"
+chance = 0.6
+count = [1, 3]
+width_m = [1500, 3500]
+height_m = [300, 1000]
+steep = true
+extra = 0.08
+band_m = [6, 20]
+melt = "brine"
+chamber = "sea ice"
+dike = "ammonia ice"
+active_chance = 0.4
+
+[[relief.material]]
+material = "ice"
+weight = 3
+
+[[relief.material]]
+material = "ammonia ice"
+weight = 2

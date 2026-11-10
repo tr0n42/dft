@@ -1,0 +1,7 @@
+target/
+logs/
+saves/
+out/
+*-log.txt
+viewer/pkg/
+viewer/dist/

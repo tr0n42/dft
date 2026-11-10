@@ -1,0 +1,460 @@
+# The Dark Forest Theory: planet specialties.
+#
+# Every body rolls a few of these from its seed, so two worlds of the same
+# kind differ in what they are worth: a vein of something rare far richer
+# than usual, a trace element spread all through its rock, a whole mining
+# district that is rich in some metals and poor in others, or (rarely) a
+# jackpot lode. Each riffs on a real deposit, named in `riff`; the numbers are
+# the game's, not nature's.
+#
+# A specialty only rolls on a body that could hold what it needs (`needs`, or
+# by default the materials it boosts, enriches or lodes in).
+#
+#   boost   material -> multiplier on how often it forms (its vein, cumulate,
+#           skarn and accessory weights); under 1 cuts it.
+#   enrich  the element is put into those materials at a share (by mass)
+#           picked from the range; the rest of the material scales down.
+#   lode    `count` big pods of the material, `radius_m` across, in the
+#           listed host rock (or any solid ground with any_solid) between
+#           r = [r_min, r_max] of the body's radius.
+#   jackpot rolled separately and rarely (see [roll]).
+
+[roll]
+count_odds = [0.08, 0.5, 0.3, 0.12]   # chance of 0, 1, 2, 3 specialties
+jackpot_chance = 0.08                 # chance a body also holds one jackpot
+
+# Asteroids and comets are pit stops: small, quick to strip, and more often
+# than not holding a big chunk of one thing (their caches, below).
+[[roll.by_archetype]]
+archetype = ["rubble-asteroid", "metal-asteroid", "comet"]
+count_odds = [0.05, 0.45, 0.4, 0.1]
+jackpot_chance = 0.35
+
+# ---------------- rich veins ----------------
+
+[[specialty]]
+name = "Germanium zinc ore"
+riff = "Sphalerite at Kipushi and Tres Marias carries germanium by the percent"
+boost = { sphalerite = 3 }
+enrich = [{ materials = ["sphalerite"], element = "Ge", share = [0.01, 0.03] }]
+
+[[specialty]]
+name = "Indium tin ore"
+riff = "Tin and zinc ores at Mount Pleasant hold indium, which has no ore of its own"
+boost = { cassiterite = 4, sphalerite = 2 }
+enrich = [{ materials = ["cassiterite", "sphalerite"], element = "In", share = [0.005, 0.02] }]
+
+[[specialty]]
+name = "Rhenium molybdenite"
+riff = "Porphyry molybdenite in Chile carries rhenium, the rarest metal mined"
+boost = { molybdenite = 4 }
+enrich = [{ materials = ["molybdenite"], element = "Re", share = [0.005, 0.02] }]
+
+[[specialty]]
+name = "Gallium bauxite and zinc"
+riff = "Gallium is won as a by-product of bauxite and zinc refining"
+boost = { sphalerite = 2, bauxite = 3 }
+enrich = [{ materials = ["sphalerite", "bauxite"], element = "Ga", share = [0.005, 0.02] }]
+
+[[specialty]]
+name = "Telluride gold field"
+riff = "Cripple Creek and Kalgoorlie: gold bound to tellurium"
+boost = { calaverite = 15, "gold-quartz" = 0.5 }
+
+[[specialty]]
+name = "Selenide veins"
+riff = "Selenium ores of the Harz mountains, selenium in the copper too"
+boost = { clausthalite = 15 }
+enrich = [{ materials = ["chalcopyrite", "pyrite"], element = "Se", share = [0.003, 0.01] }]
+
+[[specialty]]
+name = "Lithium pegmatite field"
+riff = "Greenbushes and Tanco: spodumene and lepidolite by the mountain"
+boost = { spodumene = 8, lepidolite = 8, pollucite = 3 }
+
+[[specialty]]
+name = "Rare-metal pegmatites"
+riff = "Coltan: the columbite-tantalite of central Africa"
+boost = { tantalite = 10, columbite = 6 }
+
+[[specialty]]
+name = "Scandium pegmatites"
+riff = "Thortveitite, found in quantity only in Norway and Madagascar"
+boost = { thortveitite = 25 }
+
+[[specialty]]
+name = "Caesium pegmatite"
+riff = "The Tanco mine: most of the world's pollucite"
+boost = { pollucite = 15 }
+
+[[specialty]]
+name = "Tin-tungsten belt"
+riff = "Cornwall: tin and tungsten close to the granite, little lead or zinc"
+boost = { cassiterite = 5, wolframite = 5, bismuthinite = 3, galena = 0.2, sphalerite = 0.2 }
+
+[[specialty]]
+name = "Five-element veins"
+riff = "Cobalt, Ontario: silver, bismuth, cobalt, nickel and arsenic together"
+boost = { "native silver" = 5, "native bismuth" = 15, cobaltite = 6, arsenopyrite = 2, "gold-quartz" = 0.3 }
+
+[[specialty]]
+name = "Mercury-thallium belt"
+riff = "Allchar, Macedonia: cinnabar with the world's richest thallium ore"
+boost = { cinnabar = 6, lorandite = 25, stibnite = 2 }
+
+[[specialty]]
+name = "Uranium province"
+riff = "The Athabasca basin: uranium ore a hundred times richer than usual"
+boost = { pitchblende = 6, thorite = 3, "radon gas" = 3, "gold-quartz" = 0.5 }
+
+[[specialty]]
+name = "Platinum reef"
+riff = "The Merensky reef: platinum, palladium and rhodium in one layer"
+boost = { braggite = 8, osmiridium = 6, hollingworthite = 8, laurite = 8, chromite = 0.5 }
+
+[[specialty]]
+name = "Nickel-palladium camp"
+riff = "Sudbury and Norilsk: nickel sulfide with palladium"
+boost = { pentlandite = 6, chalcopyrite = 2 }
+enrich = [{ materials = ["pentlandite"], element = "Pd", share = [0.001, 0.005] }]
+
+[[specialty]]
+name = "Niobium carbonatite"
+riff = "Araxa, Brazil: pyrochlore, most of the world's niobium"
+boost = { pyrochlore = 15 }
+
+[[specialty]]
+name = "Chromite district"
+riff = "The Bushveld's chromitite seams"
+boost = { chromite = 4 }
+
+[[specialty]]
+name = "Hafnium zircons"
+weight = 0.5
+riff = "Zircon always carries hafnium; some carries much more"
+boost = { zircon = 3 }
+enrich = [{ materials = ["zircon"], element = "Hf", share = [0.03, 0.06] }]
+
+[[specialty]]
+name = "Helium field"
+riff = "The Hugoton field: natural gas rich in helium"
+boost = { "radiogenic gas" = 8 }
+enrich = [{ materials = ["radiogenic gas"], element = "He", share = [0.3, 0.7] }]
+
+[[specialty]]
+name = "Xenon traps"
+riff = "Old gas traps that kept the heavy noble gases"
+boost = { "radiogenic gas" = 3 }
+enrich = [{ materials = ["radiogenic gas"], element = "Xe", share = [0.05, 0.12] }, { materials = ["radiogenic gas"], element = "Kr", share = [0.05, 0.1] }]
+
+[[specialty]]
+name = "Strontium-barium beds"
+riff = "Celestine and baryte beds of the evaporite basins"
+boost = { celestine = 6, baryte = 6 }
+
+[[specialty]]
+name = "Fluorspar district"
+riff = "Illinois-Kentucky: fluorite veins with baryte"
+boost = { fluorite = 5, baryte = 2 }
+
+[[specialty]]
+name = "Borate playa"
+riff = "Boron, California: dried lakes of borax"
+boost = { borax = 8 }
+
+[[specialty]]
+name = "Iodine desert"
+riff = "The Atacama's nitrate fields, where iodine is mined"
+boost = { caliche = 6 }
+enrich = [{ materials = ["caliche"], element = "I", share = [0.08, 0.15] }]
+
+[[specialty]]
+name = "Manganese basin"
+riff = "The Kalahari manganese field"
+boost = { pyrolusite = 6, rhodochrosite = 3 }
+
+[[specialty]]
+name = "Vanadium-lead oxide zone"
+riff = "Weathered lead veins of Arizona, red with vanadinite"
+boost = { vanadinite = 8, galena = 1.5 }
+
+[[specialty]]
+name = "Silver bonanza veins"
+riff = "Potosi and the Comstock"
+boost = { "native silver" = 6, galena = 2, "gold-quartz" = 0.5 }
+
+# ---------------- throughout the rock ----------------
+# (The swarm gathers these slowly, from everything it digs.)
+
+[[specialty]]
+name = "Cobalt-bearing basalt"
+riff = "Cobalt is a by-product of mafic rock and its nickel ores"
+enrich = [{ materials = ["basalt", "gabbro", "magma", "lava-rock", "dolerite", "regolith"], element = "Co", share = [0.0005, 0.002] }]
+
+[[specialty]]
+name = "Lithium clays"
+riff = "Thacker Pass: volcanic lake clays with lithium all through them"
+enrich = [{ materials = ["clay", "shale", "tuff", "volcanic ash"], element = "Li", share = [0.001, 0.004] }]
+
+[[specialty]]
+name = "Rubidium granite"
+riff = "Highly evolved granites rich in rubidium and caesium"
+enrich = [{ materials = ["granite", "gneiss"], element = "Rb", share = [0.001, 0.004] }, { materials = ["granite", "gneiss"], element = "Cs", share = [0.0002, 0.001] }]
+
+[[specialty]]
+name = "Vanadium black shale"
+riff = "Black shales soak up vanadium, uranium and molybdenum from old seas"
+enrich = [{ materials = ["shale", "slate"], element = "V", share = [0.003, 0.01] }, { materials = ["shale", "slate"], element = "Mo", share = [0.0002, 0.001] }]
+
+[[specialty]]
+name = "Uranium black shale"
+riff = "The Swedish alum shales"
+enrich = [{ materials = ["shale", "slate", "coal"], element = "U", share = [0.0002, 0.0008] }]
+
+[[specialty]]
+name = "Germanium coal"
+riff = "Lincang, China: coal that is the world's germanium mine"
+enrich = [{ materials = ["coal"], element = "Ge", share = [0.0005, 0.003] }]
+
+[[specialty]]
+name = "Scandium laterite"
+riff = "Weathered ground in Australia that concentrates scandium"
+enrich = [{ materials = ["soil", "red dust", "clay", "regolith"], element = "Sc", share = [0.0002, 0.0008] }]
+
+[[specialty]]
+name = "Iridium dust layer"
+riff = "The iridium of the dinosaurs' impact, spread through the rubble"
+enrich = [{ materials = ["impact breccia", "regolith", "comet dust", "metal grit"], element = "Ir", share = [0.00002, 0.0001] }]
+
+[[specialty]]
+name = "Bromine sea"
+riff = "The Dead Sea's brine, rich in bromine"
+enrich = [{ materials = ["brine", "sea ice", "rock salt", "bittern salt"], element = "Br", share = [0.003, 0.01] }]
+
+[[specialty]]
+name = "Lithium brine"
+riff = "The Atacama's salt flats"
+enrich = [{ materials = ["brine", "sea ice", "rock salt"], element = "Li", share = [0.001, 0.003] }]
+
+[[specialty]]
+name = "Germanium-gallium iron"
+riff = "Iron meteorites are told apart by their gallium and germanium"
+enrich = [{ materials = ["kamacite", "taenite", "plessite", "iron-nickel", "iron crystal"], element = "Ge", share = [0.0003, 0.001] }, { materials = ["kamacite", "taenite", "plessite", "iron-nickel", "iron crystal"], element = "Ga", share = [0.0001, 0.0003] }]
+
+[[specialty]]
+name = "Platinum-rich iron"
+riff = "Some iron meteorites carry tens of ppm of the platinum metals"
+enrich = [{ materials = ["kamacite", "taenite", "plessite", "iron-nickel", "iron crystal", "metal grit"], element = "Pt", share = [0.00003, 0.0001] }, { materials = ["kamacite", "taenite", "plessite", "iron-nickel", "iron crystal", "metal grit"], element = "Ir", share = [0.00001, 0.00004] }]
+
+[[specialty]]
+name = "Iodine ice"
+riff = "Ocean worlds whose ice keeps the iodine of their seas"
+enrich = [{ materials = ["dirty ice", "sea ice", "muddy water"], element = "I", share = [0.00005, 0.0002] }]
+
+[[specialty]]
+name = "Noble ices"
+riff = "Comets keep argon and krypton frozen in their ice"
+enrich = [{ materials = ["nitrogen ice", "carbon monoxide ice", "dirty ice"], element = "Ar", share = [0.001, 0.005] }, { materials = ["nitrogen ice", "carbon monoxide ice", "dirty ice"], element = "Kr", share = [0.0001, 0.0005] }]
+
+[[specialty]]
+name = "Thallium-selenium soil"
+riff = "Ground over weathered sulfide ores, poisoned with thallium and selenium"
+enrich = [{ materials = ["soil", "clay", "red dust"], element = "Tl", share = [0.0001, 0.0005] }, { materials = ["soil", "clay", "red dust"], element = "Se", share = [0.0001, 0.0005] }]
+
+# ---------------- jackpots ----------------
+
+[[specialty]]
+name = "Gold mother lode"
+riff = "Bonanza pockets like the Welcome Stranger nugget, scaled up to a world"
+jackpot = true
+lode = { material = "gold", any_solid = true, count = [2, 5], radius_m = [20, 80], r = [0.5, 0.99] }
+
+[[specialty]]
+name = "Platinum mother lode"
+riff = "The metal-rich asteroids: platinum by the megaton"
+jackpot = true
+lode = { material = "platinum nugget", any_solid = true, count = [2, 4], radius_m = [15, 60], r = [0.3, 0.99] }
+
+[[specialty]]
+name = "Osmiridium hoard"
+riff = "Placer osmiridium of Tasmania, beyond all reason"
+jackpot = true
+weight = 0.5
+lode = { material = "osmiridium", any_solid = true, count = [1, 3], radius_m = [10, 40], r = [0.3, 0.99] }
+
+[[specialty]]
+name = "Silver mountain"
+riff = "Cerro Rico de Potosi, 'the mountain that eats men'"
+jackpot = true
+lode = { material = "native silver", any_solid = true, count = [2, 5], radius_m = [25, 90], r = [0.6, 0.99] }
+
+[[specialty]]
+name = "Uranium lode"
+riff = "Oklo, where uranium ore once ran as a natural reactor"
+jackpot = true
+lode = { material = "pitchblende", any_solid = true, count = [2, 4], radius_m = [20, 70], r = [0.5, 0.99] }
+
+[[specialty]]
+name = "Tellurium bonanza"
+riff = "A telluride vein system gone wild"
+jackpot = true
+weight = 0.5
+lode = { material = "calaverite", any_solid = true, count = [2, 4], radius_m = [15, 50], r = [0.5, 0.99] }
+
+# ---------------- asteroid caches ----------------
+# A big chunk of one ore in an asteroid or comet: the quick snack.
+
+[[specialty]]
+name = "Cobalt cache"
+riff = "A fragment of a shattered parent body's ore zone, rich in cobalt"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "cobaltite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Nickel cache"
+riff = "Nickel sulfide torn from a differentiated asteroid"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "pentlandite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Tungsten cache"
+riff = "A lump of tungsten ore from a broken crust"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "wolframite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Tin cache"
+riff = "Tin oxide from a shattered granite"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "cassiterite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Molybdenum cache"
+riff = "Molybdenite flakes from a porphyry long since broken up"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "molybdenite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Tantalum cache"
+riff = "A coltan-rich shard of pegmatite"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "tantalite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Lithium cache"
+riff = "Spodumene crystals metres long, from a smashed pegmatite"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "spodumene", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Beryllium cache"
+riff = "Giant beryl crystals from a broken pegmatite"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "beryl", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Niobium cache"
+riff = "A pyrochlore-rich chunk of carbonatite"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "pyrochlore", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Chromium cache"
+riff = "Chromitite from the floor of a shattered magma chamber"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "chromite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Copper cache"
+riff = "Native copper, like the Lake Superior masses"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "native copper", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Mercury cache"
+riff = "Cinnabar from a hot-spring vein system"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "cinnabar", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Antimony cache"
+riff = "Stibnite blades from a broken vein"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "stibnite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Bismuth cache"
+riff = "Native bismuth from a cobalt-silver vein"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "native bismuth", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Titanium cache"
+riff = "Ilmenite from a layered intrusion"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "ilmenite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Vanadium cache"
+riff = "Red vanadinite from a weathered lead vein"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "vanadinite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Manganese cache"
+riff = "Manganese oxide from an old sea floor"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "pyrolusite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Palladium cache"
+riff = "Platinum-palladium sulfide from a broken reef"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "braggite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Rhodium cache"
+riff = "Rhodium ore from a broken platinum reef"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "hollingworthite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Silver cache"
+riff = "Wire silver from a bonanza vein"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "native silver", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Uranium cache"
+riff = "A pitchblende lens from a broken basin"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+lode = { material = "pitchblende", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }
+
+[[specialty]]
+name = "Germanium cache"
+riff = "Germanium-rich zinc ore from a shattered vein"
+only = ["rubble-asteroid", "metal-asteroid", "comet"]
+weight = 2
+enrich = [{ materials = ["sphalerite"], element = "Ge", share = [0.01, 0.03] }]
+lode = { material = "sphalerite", any_solid = true, count = [2, 5], radius_m = [30, 150], r = [0.1, 0.95] }

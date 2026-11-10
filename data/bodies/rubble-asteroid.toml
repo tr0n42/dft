@@ -1,0 +1,76 @@
+# Rubble asteroid: the first prestige. Loose, porous, low gravity, no Heart.
+name = "Rubble asteroid"
+archetype = "rubble-asteroid"
+seed = 1001
+radius_m = 2500
+heart = false
+regolith_depth_m = 6
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+
+[shape]
+roughness = 0.16        # surface height variation, as a fraction of radius
+wavelength_m = 1600     # size of the lumps
+
+[[layer]]
+name = "rubble"
+outer = 1.0             # fraction of radius
+material = "chondrite"
+temperature_k = 180
+
+[rubble]                # packed boulders in a matrix of crushed rock (G3)
+boulder_m = 38
+gap_m = 1.2
+gap_material = "impact breccia"   # regolith breccia: crushed rock cemented between boulders
+voids = 0.38
+r_min = 0.0
+r_max = 1.0
+
+[[rubble.rock]]
+material = "chondrite"
+weight = 30
+
+[[rubble.rock]]
+material = "basalt"       # pieces of an older, melted parent body
+weight = 4
+
+[[rubble.rock]]
+material = "pallasite"    # metal and olivine from a parent body's core edge
+largest = "medium"
+weight = 0.5
+
+[[rubble.rock]]
+material = "troilite"     # iron sulfide, as real chondrites carry
+largest = "medium"
+weight = 0.75
+
+[[rubble.rock]]
+material = "iron-nickel"  # metal boulders
+largest = "medium"
+weight = 0.4
+
+[[rubble.rock]]
+material = "ice"
+largest = "medium"
+weight = 0.3
+
+[[sprinkle]]            # platinum grains inside metal boulders
+material = "sperrylite"
+host = ["iron-nickel"]
+chance = 0.004
+r_min = 0.0
+r_max = 1.0
+
+[[sprinkle]]            # rare gold nuggets inside metal boulders
+material = "gold"
+host = ["iron-nickel"]
+chance = 0.00016
+r_min = 0.0
+r_max = 1.0
+
+[craters]
+count = 26
+radius_min_m = 25
+radius_max_m = 420
+breccia = 0.15
+melt = 0.03

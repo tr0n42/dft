@@ -1,0 +1,596 @@
+body,specialty,share_of_seeds
+active-planetoid,Caesium pegmatite,0.0350
+active-planetoid,Chromite district,0.0400
+active-planetoid,Cobalt-bearing basalt,0.0450
+active-planetoid,Five-element veins,0.0350
+active-planetoid,Fluorspar district,0.0100
+active-planetoid,Gallium bauxite and zinc,0.0350
+active-planetoid,Germanium zinc ore,0.0400
+active-planetoid,Germanium-gallium iron,0.0300
+active-planetoid,Gold mother lode,0.0050
+active-planetoid,Hafnium zircons,0.0150
+active-planetoid,Helium field,0.0450
+active-planetoid,Indium tin ore,0.0700
+active-planetoid,Iridium dust layer,0.0400
+active-planetoid,Lithium clays,0.0600
+active-planetoid,Lithium pegmatite field,0.0500
+active-planetoid,Manganese basin,0.0250
+active-planetoid,Mercury-thallium belt,0.0600
+active-planetoid,Nickel-palladium camp,0.0600
+active-planetoid,Niobium carbonatite,0.0400
+active-planetoid,Osmiridium hoard,0.0100
+active-planetoid,Platinum mother lode,0.0100
+active-planetoid,Platinum reef,0.0350
+active-planetoid,Platinum-rich iron,0.0450
+active-planetoid,Rare-metal pegmatites,0.0350
+active-planetoid,Rhenium molybdenite,0.0350
+active-planetoid,Rubidium granite,0.0500
+active-planetoid,Scandium laterite,0.0600
+active-planetoid,Scandium pegmatites,0.0400
+active-planetoid,Selenide veins,0.0400
+active-planetoid,Silver bonanza veins,0.0700
+active-planetoid,Silver mountain,0.0100
+active-planetoid,Strontium-barium beds,0.0050
+active-planetoid,Telluride gold field,0.0500
+active-planetoid,Tellurium bonanza,0.0100
+active-planetoid,Tin-tungsten belt,0.0500
+active-planetoid,Uranium black shale,0.0250
+active-planetoid,Uranium lode,0.0150
+active-planetoid,Uranium province,0.0350
+active-planetoid,Vanadium black shale,0.0250
+active-planetoid,Vanadium-lead oxide zone,0.0350
+active-planetoid,Xenon traps,0.0400
+barren-world,Cobalt-bearing basalt,0.3050
+barren-world,Germanium-gallium iron,0.2700
+barren-world,Gold mother lode,0.0050
+barren-world,Iridium dust layer,0.2800
+barren-world,Osmiridium hoard,0.0100
+barren-world,Platinum mother lode,0.0100
+barren-world,Platinum-rich iron,0.2750
+barren-world,Scandium laterite,0.2800
+barren-world,Silver mountain,0.0100
+barren-world,Tellurium bonanza,0.0100
+barren-world,Uranium lode,0.0150
+carbon-world,Cobalt-bearing basalt,0.1400
+carbon-world,Germanium coal,0.1150
+carbon-world,Germanium-gallium iron,0.1150
+carbon-world,Gold mother lode,0.0050
+carbon-world,Hafnium zircons,0.0500
+carbon-world,Helium field,0.1300
+carbon-world,Iridium dust layer,0.1850
+carbon-world,Osmiridium hoard,0.0100
+carbon-world,Platinum mother lode,0.0100
+carbon-world,Platinum-rich iron,0.1350
+carbon-world,Scandium laterite,0.0750
+carbon-world,Silver mountain,0.0100
+carbon-world,Tellurium bonanza,0.0100
+carbon-world,Uranium black shale,0.1400
+carbon-world,Uranium lode,0.0150
+carbon-world,Uranium province,0.1700
+carbon-world,Xenon traps,0.1550
+comet,Antimony cache,0.0350
+comet,Beryllium cache,0.0600
+comet,Bismuth cache,0.0250
+comet,Chromium cache,0.0500
+comet,Cobalt cache,0.0650
+comet,Cobalt-bearing basalt,0.0450
+comet,Copper cache,0.0650
+comet,Germanium cache,0.0650
+comet,Gold mother lode,0.0550
+comet,Iodine ice,0.0300
+comet,Iridium dust layer,0.0550
+comet,Lithium cache,0.0800
+comet,Manganese cache,0.0750
+comet,Mercury cache,0.0550
+comet,Molybdenum cache,0.0800
+comet,Nickel cache,0.0750
+comet,Niobium cache,0.0750
+comet,Noble ices,0.0250
+comet,Osmiridium hoard,0.0200
+comet,Palladium cache,0.0700
+comet,Platinum mother lode,0.0650
+comet,Rhodium cache,0.0450
+comet,Scandium laterite,0.0200
+comet,Silver cache,0.0800
+comet,Silver mountain,0.0600
+comet,Tantalum cache,0.0350
+comet,Tellurium bonanza,0.0550
+comet,Tin cache,0.0550
+comet,Titanium cache,0.0550
+comet,Tungsten cache,0.0450
+comet,Uranium cache,0.0350
+comet,Uranium lode,0.0300
+comet,Vanadium cache,0.0950
+dry-world,Borate playa,0.0650
+dry-world,Bromine sea,0.0900
+dry-world,Chromite district,0.0550
+dry-world,Cobalt-bearing basalt,0.0450
+dry-world,Five-element veins,0.0750
+dry-world,Fluorspar district,0.0650
+dry-world,Germanium-gallium iron,0.0450
+dry-world,Gold mother lode,0.0050
+dry-world,Hafnium zircons,0.0150
+dry-world,Helium field,0.0650
+dry-world,Iodine desert,0.0500
+dry-world,Iodine ice,0.0800
+dry-world,Iridium dust layer,0.0650
+dry-world,Lithium brine,0.0700
+dry-world,Lithium clays,0.0200
+dry-world,Manganese basin,0.0650
+dry-world,Nickel-palladium camp,0.0800
+dry-world,Niobium carbonatite,0.0350
+dry-world,Noble ices,0.0250
+dry-world,Osmiridium hoard,0.0100
+dry-world,Platinum mother lode,0.0100
+dry-world,Platinum reef,0.0600
+dry-world,Platinum-rich iron,0.0300
+dry-world,Rubidium granite,0.0200
+dry-world,Scandium laterite,0.0300
+dry-world,Selenide veins,0.0600
+dry-world,Silver mountain,0.0100
+dry-world,Strontium-barium beds,0.0400
+dry-world,Tellurium bonanza,0.0100
+dry-world,Thallium-selenium soil,0.0650
+dry-world,Uranium lode,0.0150
+dry-world,Uranium province,0.0350
+dry-world,Xenon traps,0.0600
+hothouse-world,Caesium pegmatite,0.0350
+hothouse-world,Cobalt-bearing basalt,0.0600
+hothouse-world,Five-element veins,0.0450
+hothouse-world,Fluorspar district,0.0200
+hothouse-world,Gallium bauxite and zinc,0.0450
+hothouse-world,Germanium zinc ore,0.0600
+hothouse-world,Germanium-gallium iron,0.0350
+hothouse-world,Gold mother lode,0.0050
+hothouse-world,Hafnium zircons,0.0200
+hothouse-world,Helium field,0.0600
+hothouse-world,Indium tin ore,0.0700
+hothouse-world,Iridium dust layer,0.0600
+hothouse-world,Lithium clays,0.0550
+hothouse-world,Lithium pegmatite field,0.0400
+hothouse-world,Manganese basin,0.0250
+hothouse-world,Mercury-thallium belt,0.0500
+hothouse-world,Nickel-palladium camp,0.0500
+hothouse-world,Osmiridium hoard,0.0100
+hothouse-world,Platinum mother lode,0.0100
+hothouse-world,Platinum-rich iron,0.0500
+hothouse-world,Rare-metal pegmatites,0.0450
+hothouse-world,Rhenium molybdenite,0.0400
+hothouse-world,Rubidium granite,0.0450
+hothouse-world,Scandium laterite,0.0300
+hothouse-world,Scandium pegmatites,0.0600
+hothouse-world,Selenide veins,0.0550
+hothouse-world,Silver bonanza veins,0.0800
+hothouse-world,Silver mountain,0.0100
+hothouse-world,Strontium-barium beds,0.0050
+hothouse-world,Telluride gold field,0.0500
+hothouse-world,Tellurium bonanza,0.0100
+hothouse-world,Tin-tungsten belt,0.0650
+hothouse-world,Uranium lode,0.0150
+hothouse-world,Uranium province,0.0550
+hothouse-world,Vanadium-lead oxide zone,0.0600
+hothouse-world,Xenon traps,0.0400
+ice-moon,Borate playa,0.1150
+ice-moon,Bromine sea,0.0650
+ice-moon,Cobalt-bearing basalt,0.0800
+ice-moon,Germanium-gallium iron,0.1550
+ice-moon,Gold mother lode,0.0050
+ice-moon,Hafnium zircons,0.0350
+ice-moon,Iodine ice,0.0950
+ice-moon,Iridium dust layer,0.0750
+ice-moon,Lithium brine,0.0750
+ice-moon,Nickel-palladium camp,0.1050
+ice-moon,Noble ices,0.1000
+ice-moon,Osmiridium hoard,0.0100
+ice-moon,Platinum mother lode,0.0100
+ice-moon,Platinum-rich iron,0.0950
+ice-moon,Rubidium granite,0.0950
+ice-moon,Scandium laterite,0.1200
+ice-moon,Selenide veins,0.1350
+ice-moon,Silver mountain,0.0100
+ice-moon,Tellurium bonanza,0.0100
+ice-moon,Uranium lode,0.0150
+ice-moon,Uranium province,0.0650
+iron-world,Chromite district,0.2500
+iron-world,Cobalt-bearing basalt,0.2200
+iron-world,Germanium-gallium iron,0.2550
+iron-world,Gold mother lode,0.0050
+iron-world,Iridium dust layer,0.1950
+iron-world,Osmiridium hoard,0.0100
+iron-world,Platinum mother lode,0.0100
+iron-world,Platinum-rich iron,0.2250
+iron-world,Scandium laterite,0.2650
+iron-world,Silver mountain,0.0100
+iron-world,Tellurium bonanza,0.0100
+iron-world,Uranium lode,0.0150
+lava-world,Chromite district,0.1800
+lava-world,Cobalt-bearing basalt,0.2250
+lava-world,Gold mother lode,0.0050
+lava-world,Hafnium zircons,0.0850
+lava-world,Iridium dust layer,0.1750
+lava-world,Lithium clays,0.1800
+lava-world,Osmiridium hoard,0.0100
+lava-world,Platinum mother lode,0.0100
+lava-world,Rubidium granite,0.1150
+lava-world,Scandium laterite,0.2350
+lava-world,Silver mountain,0.0100
+lava-world,Tellurium bonanza,0.0100
+lava-world,Uranium lode,0.0150
+lava-world,Uranium province,0.2150
+living-world,Borate playa,0.0350
+living-world,Bromine sea,0.0300
+living-world,Caesium pegmatite,0.0300
+living-world,Chromite district,0.0500
+living-world,Cobalt-bearing basalt,0.0300
+living-world,Five-element veins,0.0350
+living-world,Fluorspar district,0.0400
+living-world,Gallium bauxite and zinc,0.0350
+living-world,Germanium coal,0.0300
+living-world,Germanium zinc ore,0.0400
+living-world,Germanium-gallium iron,0.0150
+living-world,Gold mother lode,0.0050
+living-world,Hafnium zircons,0.0250
+living-world,Helium field,0.0250
+living-world,Indium tin ore,0.0500
+living-world,Iodine desert,0.0200
+living-world,Iridium dust layer,0.0250
+living-world,Lithium brine,0.0550
+living-world,Lithium clays,0.0350
+living-world,Lithium pegmatite field,0.0400
+living-world,Mercury-thallium belt,0.0450
+living-world,Nickel-palladium camp,0.0200
+living-world,Niobium carbonatite,0.0400
+living-world,Osmiridium hoard,0.0100
+living-world,Platinum mother lode,0.0100
+living-world,Platinum reef,0.0550
+living-world,Platinum-rich iron,0.0400
+living-world,Rare-metal pegmatites,0.0450
+living-world,Rhenium molybdenite,0.0450
+living-world,Rubidium granite,0.0550
+living-world,Scandium laterite,0.0300
+living-world,Scandium pegmatites,0.0200
+living-world,Selenide veins,0.0400
+living-world,Silver bonanza veins,0.0250
+living-world,Silver mountain,0.0100
+living-world,Strontium-barium beds,0.0300
+living-world,Telluride gold field,0.0200
+living-world,Tellurium bonanza,0.0100
+living-world,Thallium-selenium soil,0.0350
+living-world,Tin-tungsten belt,0.0400
+living-world,Uranium black shale,0.0500
+living-world,Uranium lode,0.0150
+living-world,Uranium province,0.0200
+living-world,Vanadium black shale,0.0550
+living-world,Vanadium-lead oxide zone,0.0100
+living-world,Xenon traps,0.0450
+metal-asteroid,Antimony cache,0.0350
+metal-asteroid,Beryllium cache,0.0600
+metal-asteroid,Bismuth cache,0.0250
+metal-asteroid,Chromium cache,0.0500
+metal-asteroid,Cobalt cache,0.0650
+metal-asteroid,Cobalt-bearing basalt,0.0450
+metal-asteroid,Copper cache,0.0650
+metal-asteroid,Germanium cache,0.0650
+metal-asteroid,Germanium-gallium iron,0.0300
+metal-asteroid,Gold mother lode,0.0550
+metal-asteroid,Iridium dust layer,0.0550
+metal-asteroid,Lithium cache,0.0800
+metal-asteroid,Manganese cache,0.0750
+metal-asteroid,Mercury cache,0.0550
+metal-asteroid,Molybdenum cache,0.0800
+metal-asteroid,Nickel cache,0.0750
+metal-asteroid,Niobium cache,0.0750
+metal-asteroid,Osmiridium hoard,0.0200
+metal-asteroid,Palladium cache,0.0700
+metal-asteroid,Platinum mother lode,0.0650
+metal-asteroid,Platinum-rich iron,0.0250
+metal-asteroid,Rhodium cache,0.0450
+metal-asteroid,Scandium laterite,0.0200
+metal-asteroid,Silver cache,0.0800
+metal-asteroid,Silver mountain,0.0600
+metal-asteroid,Tantalum cache,0.0350
+metal-asteroid,Tellurium bonanza,0.0550
+metal-asteroid,Tin cache,0.0550
+metal-asteroid,Titanium cache,0.0550
+metal-asteroid,Tungsten cache,0.0450
+metal-asteroid,Uranium cache,0.0350
+metal-asteroid,Uranium lode,0.0300
+metal-asteroid,Vanadium cache,0.0950
+methane-world,Borate playa,0.1450
+methane-world,Bromine sea,0.1100
+methane-world,Cobalt-bearing basalt,0.1900
+methane-world,Gold mother lode,0.0050
+methane-world,Hafnium zircons,0.0300
+methane-world,Iodine ice,0.1350
+methane-world,Iridium dust layer,0.1450
+methane-world,Lithium brine,0.1700
+methane-world,Noble ices,0.1550
+methane-world,Osmiridium hoard,0.0100
+methane-world,Platinum mother lode,0.0100
+methane-world,Rubidium granite,0.0700
+methane-world,Scandium laterite,0.1500
+methane-world,Silver mountain,0.0100
+methane-world,Tellurium bonanza,0.0100
+methane-world,Uranium lode,0.0150
+methane-world,Uranium province,0.1100
+ocean-world,Borate playa,0.1200
+ocean-world,Bromine sea,0.1250
+ocean-world,Cobalt-bearing basalt,0.1300
+ocean-world,Germanium-gallium iron,0.1400
+ocean-world,Gold mother lode,0.0050
+ocean-world,Iodine ice,0.1050
+ocean-world,Iridium dust layer,0.1150
+ocean-world,Lithium brine,0.0550
+ocean-world,Nickel-palladium camp,0.1050
+ocean-world,Noble ices,0.1100
+ocean-world,Osmiridium hoard,0.0100
+ocean-world,Platinum mother lode,0.0100
+ocean-world,Platinum-rich iron,0.1350
+ocean-world,Scandium laterite,0.1250
+ocean-world,Selenide veins,0.1450
+ocean-world,Silver mountain,0.0100
+ocean-world,Tellurium bonanza,0.0100
+ocean-world,Uranium lode,0.0150
+rogue-world,Borate playa,0.1300
+rogue-world,Bromine sea,0.0950
+rogue-world,Cobalt-bearing basalt,0.0900
+rogue-world,Germanium-gallium iron,0.1450
+rogue-world,Gold mother lode,0.0050
+rogue-world,Hafnium zircons,0.0450
+rogue-world,Iodine ice,0.1050
+rogue-world,Iridium dust layer,0.1350
+rogue-world,Lithium brine,0.0600
+rogue-world,Noble ices,0.1150
+rogue-world,Osmiridium hoard,0.0100
+rogue-world,Platinum mother lode,0.0100
+rogue-world,Platinum-rich iron,0.1250
+rogue-world,Rubidium granite,0.1150
+rogue-world,Scandium laterite,0.1100
+rogue-world,Silver mountain,0.0100
+rogue-world,Tellurium bonanza,0.0100
+rogue-world,Uranium lode,0.0150
+rogue-world,Uranium province,0.1400
+rubble-asteroid,Antimony cache,0.0350
+rubble-asteroid,Beryllium cache,0.0600
+rubble-asteroid,Bismuth cache,0.0250
+rubble-asteroid,Chromium cache,0.0500
+rubble-asteroid,Cobalt cache,0.0650
+rubble-asteroid,Cobalt-bearing basalt,0.0450
+rubble-asteroid,Copper cache,0.0650
+rubble-asteroid,Germanium cache,0.0650
+rubble-asteroid,Germanium-gallium iron,0.0300
+rubble-asteroid,Gold mother lode,0.0550
+rubble-asteroid,Iridium dust layer,0.0550
+rubble-asteroid,Lithium cache,0.0800
+rubble-asteroid,Manganese cache,0.0750
+rubble-asteroid,Mercury cache,0.0550
+rubble-asteroid,Molybdenum cache,0.0800
+rubble-asteroid,Nickel cache,0.0750
+rubble-asteroid,Niobium cache,0.0750
+rubble-asteroid,Osmiridium hoard,0.0200
+rubble-asteroid,Palladium cache,0.0700
+rubble-asteroid,Platinum mother lode,0.0650
+rubble-asteroid,Platinum-rich iron,0.0250
+rubble-asteroid,Rhodium cache,0.0450
+rubble-asteroid,Scandium laterite,0.0200
+rubble-asteroid,Silver cache,0.0800
+rubble-asteroid,Silver mountain,0.0600
+rubble-asteroid,Tantalum cache,0.0350
+rubble-asteroid,Tellurium bonanza,0.0550
+rubble-asteroid,Tin cache,0.0550
+rubble-asteroid,Titanium cache,0.0550
+rubble-asteroid,Tungsten cache,0.0450
+rubble-asteroid,Uranium cache,0.0350
+rubble-asteroid,Uranium lode,0.0300
+rubble-asteroid,Vanadium cache,0.0950
+rubble-demo,Antimony cache,0.0200
+rubble-demo,Beryllium cache,0.0800
+rubble-demo,Bismuth cache,0.0300
+rubble-demo,Chromium cache,0.0450
+rubble-demo,Cobalt cache,0.0650
+rubble-demo,Cobalt-bearing basalt,0.0400
+rubble-demo,Copper cache,0.0650
+rubble-demo,Germanium cache,0.0650
+rubble-demo,Germanium-gallium iron,0.0300
+rubble-demo,Gold mother lode,0.0550
+rubble-demo,Iodine ice,0.0150
+rubble-demo,Iridium dust layer,0.0500
+rubble-demo,Lithium cache,0.0450
+rubble-demo,Manganese cache,0.0850
+rubble-demo,Mercury cache,0.0450
+rubble-demo,Molybdenum cache,0.0550
+rubble-demo,Nickel cache,0.0400
+rubble-demo,Niobium cache,0.0500
+rubble-demo,Noble ices,0.0400
+rubble-demo,Osmiridium hoard,0.0200
+rubble-demo,Palladium cache,0.0600
+rubble-demo,Platinum mother lode,0.0650
+rubble-demo,Platinum-rich iron,0.0300
+rubble-demo,Rhodium cache,0.0300
+rubble-demo,Scandium laterite,0.0250
+rubble-demo,Silver cache,0.0900
+rubble-demo,Silver mountain,0.0600
+rubble-demo,Tantalum cache,0.0800
+rubble-demo,Tellurium bonanza,0.0550
+rubble-demo,Tin cache,0.0600
+rubble-demo,Titanium cache,0.0650
+rubble-demo,Tungsten cache,0.0700
+rubble-demo,Uranium cache,0.0250
+rubble-demo,Uranium lode,0.0300
+rubble-demo,Vanadium cache,0.0950
+sandbox-demo,Cobalt-bearing basalt,0.4750
+sandbox-demo,Gold mother lode,0.0050
+sandbox-demo,Iridium dust layer,0.5200
+sandbox-demo,Osmiridium hoard,0.0100
+sandbox-demo,Platinum mother lode,0.0100
+sandbox-demo,Scandium laterite,0.4150
+sandbox-demo,Silver mountain,0.0100
+sandbox-demo,Tellurium bonanza,0.0100
+sandbox-demo,Uranium lode,0.0150
+strata-demo,Borate playa,0.0350
+strata-demo,Bromine sea,0.0300
+strata-demo,Caesium pegmatite,0.0300
+strata-demo,Chromite district,0.0500
+strata-demo,Cobalt-bearing basalt,0.0300
+strata-demo,Five-element veins,0.0350
+strata-demo,Fluorspar district,0.0400
+strata-demo,Gallium bauxite and zinc,0.0350
+strata-demo,Germanium coal,0.0300
+strata-demo,Germanium zinc ore,0.0400
+strata-demo,Germanium-gallium iron,0.0150
+strata-demo,Gold mother lode,0.0050
+strata-demo,Hafnium zircons,0.0250
+strata-demo,Helium field,0.0250
+strata-demo,Indium tin ore,0.0500
+strata-demo,Iodine desert,0.0200
+strata-demo,Iridium dust layer,0.0250
+strata-demo,Lithium brine,0.0550
+strata-demo,Lithium clays,0.0350
+strata-demo,Lithium pegmatite field,0.0400
+strata-demo,Mercury-thallium belt,0.0450
+strata-demo,Nickel-palladium camp,0.0200
+strata-demo,Niobium carbonatite,0.0400
+strata-demo,Osmiridium hoard,0.0100
+strata-demo,Platinum mother lode,0.0100
+strata-demo,Platinum reef,0.0550
+strata-demo,Platinum-rich iron,0.0400
+strata-demo,Rare-metal pegmatites,0.0450
+strata-demo,Rhenium molybdenite,0.0450
+strata-demo,Rubidium granite,0.0550
+strata-demo,Scandium laterite,0.0300
+strata-demo,Scandium pegmatites,0.0200
+strata-demo,Selenide veins,0.0400
+strata-demo,Silver bonanza veins,0.0250
+strata-demo,Silver mountain,0.0100
+strata-demo,Strontium-barium beds,0.0300
+strata-demo,Telluride gold field,0.0200
+strata-demo,Tellurium bonanza,0.0100
+strata-demo,Thallium-selenium soil,0.0350
+strata-demo,Tin-tungsten belt,0.0400
+strata-demo,Uranium black shale,0.0500
+strata-demo,Uranium lode,0.0150
+strata-demo,Uranium province,0.0200
+strata-demo,Vanadium black shale,0.0550
+strata-demo,Vanadium-lead oxide zone,0.0100
+strata-demo,Xenon traps,0.0450
+sulfur-world,Cobalt-bearing basalt,0.1500
+sulfur-world,Gold mother lode,0.0050
+sulfur-world,Hafnium zircons,0.0800
+sulfur-world,Helium field,0.1650
+sulfur-world,Iridium dust layer,0.1600
+sulfur-world,Lithium clays,0.0650
+sulfur-world,Osmiridium hoard,0.0100
+sulfur-world,Platinum mother lode,0.0100
+sulfur-world,Rubidium granite,0.2000
+sulfur-world,Scandium laterite,0.1250
+sulfur-world,Selenide veins,0.1700
+sulfur-world,Silver mountain,0.0100
+sulfur-world,Tellurium bonanza,0.0100
+sulfur-world,Uranium lode,0.0150
+sulfur-world,Uranium province,0.1400
+sulfur-world,Xenon traps,0.1550
+test-planetoid-3km,Caesium pegmatite,0.0600
+test-planetoid-3km,Chromite district,0.0450
+test-planetoid-3km,Cobalt-bearing basalt,0.0450
+test-planetoid-3km,Five-element veins,0.0650
+test-planetoid-3km,Fluorspar district,0.0200
+test-planetoid-3km,Gallium bauxite and zinc,0.0350
+test-planetoid-3km,Germanium zinc ore,0.0500
+test-planetoid-3km,Germanium-gallium iron,0.0250
+test-planetoid-3km,Gold mother lode,0.0050
+test-planetoid-3km,Hafnium zircons,0.0200
+test-planetoid-3km,Helium field,0.0400
+test-planetoid-3km,Indium tin ore,0.0700
+test-planetoid-3km,Iridium dust layer,0.0550
+test-planetoid-3km,Lithium clays,0.0400
+test-planetoid-3km,Lithium pegmatite field,0.0250
+test-planetoid-3km,Manganese basin,0.0550
+test-planetoid-3km,Mercury-thallium belt,0.0350
+test-planetoid-3km,Nickel-palladium camp,0.0400
+test-planetoid-3km,Niobium carbonatite,0.0450
+test-planetoid-3km,Osmiridium hoard,0.0100
+test-planetoid-3km,Platinum mother lode,0.0100
+test-planetoid-3km,Platinum reef,0.0600
+test-planetoid-3km,Platinum-rich iron,0.0500
+test-planetoid-3km,Rare-metal pegmatites,0.0400
+test-planetoid-3km,Rhenium molybdenite,0.0350
+test-planetoid-3km,Rubidium granite,0.0300
+test-planetoid-3km,Scandium laterite,0.0450
+test-planetoid-3km,Scandium pegmatites,0.0450
+test-planetoid-3km,Selenide veins,0.0600
+test-planetoid-3km,Silver bonanza veins,0.0700
+test-planetoid-3km,Silver mountain,0.0100
+test-planetoid-3km,Strontium-barium beds,0.0200
+test-planetoid-3km,Telluride gold field,0.0500
+test-planetoid-3km,Tellurium bonanza,0.0100
+test-planetoid-3km,Tin-tungsten belt,0.0250
+test-planetoid-3km,Uranium lode,0.0150
+test-planetoid-3km,Uranium province,0.0450
+test-planetoid-3km,Vanadium-lead oxide zone,0.0600
+test-planetoid-3km,Xenon traps,0.0050
+tutorial-1-2km,Antimony cache,0.0350
+tutorial-1-2km,Beryllium cache,0.0600
+tutorial-1-2km,Bismuth cache,0.0250
+tutorial-1-2km,Chromium cache,0.0500
+tutorial-1-2km,Cobalt cache,0.0650
+tutorial-1-2km,Cobalt-bearing basalt,0.0450
+tutorial-1-2km,Copper cache,0.0650
+tutorial-1-2km,Germanium cache,0.0650
+tutorial-1-2km,Germanium-gallium iron,0.0300
+tutorial-1-2km,Gold mother lode,0.0550
+tutorial-1-2km,Iridium dust layer,0.0550
+tutorial-1-2km,Lithium cache,0.0800
+tutorial-1-2km,Manganese cache,0.0750
+tutorial-1-2km,Mercury cache,0.0550
+tutorial-1-2km,Molybdenum cache,0.0800
+tutorial-1-2km,Nickel cache,0.0750
+tutorial-1-2km,Niobium cache,0.0750
+tutorial-1-2km,Osmiridium hoard,0.0200
+tutorial-1-2km,Palladium cache,0.0700
+tutorial-1-2km,Platinum mother lode,0.0650
+tutorial-1-2km,Platinum-rich iron,0.0250
+tutorial-1-2km,Rhodium cache,0.0450
+tutorial-1-2km,Scandium laterite,0.0200
+tutorial-1-2km,Silver cache,0.0800
+tutorial-1-2km,Silver mountain,0.0600
+tutorial-1-2km,Tantalum cache,0.0350
+tutorial-1-2km,Tellurium bonanza,0.0550
+tutorial-1-2km,Tin cache,0.0550
+tutorial-1-2km,Titanium cache,0.0550
+tutorial-1-2km,Tungsten cache,0.0450
+tutorial-1-2km,Uranium cache,0.0350
+tutorial-1-2km,Uranium lode,0.0300
+tutorial-1-2km,Vanadium cache,0.0950
+tutorial-2-3km,Antimony cache,0.0350
+tutorial-2-3km,Beryllium cache,0.0600
+tutorial-2-3km,Bismuth cache,0.0250
+tutorial-2-3km,Chromium cache,0.0500
+tutorial-2-3km,Cobalt cache,0.0650
+tutorial-2-3km,Cobalt-bearing basalt,0.0450
+tutorial-2-3km,Copper cache,0.0650
+tutorial-2-3km,Germanium cache,0.0650
+tutorial-2-3km,Germanium-gallium iron,0.0300
+tutorial-2-3km,Gold mother lode,0.0550
+tutorial-2-3km,Iridium dust layer,0.0550
+tutorial-2-3km,Lithium cache,0.0800
+tutorial-2-3km,Manganese cache,0.0750
+tutorial-2-3km,Mercury cache,0.0550
+tutorial-2-3km,Molybdenum cache,0.0800
+tutorial-2-3km,Nickel cache,0.0750
+tutorial-2-3km,Niobium cache,0.0750
+tutorial-2-3km,Osmiridium hoard,0.0200
+tutorial-2-3km,Palladium cache,0.0700
+tutorial-2-3km,Platinum mother lode,0.0650
+tutorial-2-3km,Platinum-rich iron,0.0250
+tutorial-2-3km,Rhodium cache,0.0450
+tutorial-2-3km,Scandium laterite,0.0200
+tutorial-2-3km,Silver cache,0.0800
+tutorial-2-3km,Silver mountain,0.0600
+tutorial-2-3km,Tantalum cache,0.0350
+tutorial-2-3km,Tellurium bonanza,0.0550
+tutorial-2-3km,Tin cache,0.0550
+tutorial-2-3km,Titanium cache,0.0550
+tutorial-2-3km,Tungsten cache,0.0450
+tutorial-2-3km,Uranium cache,0.0350
+tutorial-2-3km,Uranium lode,0.0300
+tutorial-2-3km,Vanadium cache,0.0950

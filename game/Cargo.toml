@@ -1,0 +1,35 @@
+[package]
+name = "dark-forest"
+version = "0.1.0"
+edition = "2024"
+# Two programs live here; plain `cargo run` starts the game.
+default-run = "dark-forest"
+
+# The game: a native client over dft-sim. The simulation runs on its own
+# thread; this crate only draws, takes input and directs the camera.
+[[bin]]
+name = "dark-forest"
+path = "src/main.rs"
+
+# Flora viewer: browse the plants every world grows (run-floraview.bat).
+[[bin]]
+name = "floraview"
+path = "src/bin/floraview.rs"
+
+[dependencies]
+dft-sim = { path = ".." }
+bevy = "=0.20.0"
+# Only for the F1 developer panel; the game's own interface will be made from scratch.
+bevy_egui = "=0.43.1"
+parking_lot = "0.12"
+rayon = "1.10"
+
+# Fast enough to play while developing; the engine itself fully optimised.
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+codegen-units = 16

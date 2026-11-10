@@ -1,0 +1,217 @@
+# Life: the plant materials, how they burn, and the rules that breed each
+# body's flora (src/flora.rs).
+#
+# Each species on a body gets its own copies of these materials in its own
+# colours (named "flora <n> <part>"), so they keep these physics but every
+# species looks different. Everything eaten is just biomass and its elements.
+#
+# Living tissue is mostly water; a 1 m cell of foliage is mostly air, so its
+# mass is low.
+
+[[material]]
+name = "wood"
+state = "solid"
+density = 650
+hardness = 2
+colour = [104, 78, 52]
+multiplier = 1.2
+composition = { C = 0.50, O = 0.42, H = 0.065, N = 0.01, K = 0.005 }
+
+[[material]]
+name = "leaf"
+state = "solid"
+density = 120
+hardness = 0
+colour = [70, 130, 60]
+multiplier = 1.2
+composition = { O = 0.60, C = 0.28, H = 0.09, N = 0.025, K = 0.005 }
+
+[[material]]
+name = "bloom"
+state = "solid"
+density = 150
+hardness = 0
+colour = [220, 120, 160]
+multiplier = 1.3
+composition = { O = 0.62, C = 0.26, H = 0.09, N = 0.025, P = 0.005 }
+
+[[material]]
+name = "fruit"
+state = "solid"
+density = 700
+hardness = 0
+colour = [200, 80, 50]
+multiplier = 1.4
+composition = { O = 0.74, H = 0.11, C = 0.14, K = 0.005, P = 0.005 }
+
+[[material]]
+name = "fungus"
+state = "solid"
+density = 350
+hardness = 0
+colour = [200, 190, 170]
+multiplier = 1.3
+composition = { O = 0.70, H = 0.10, C = 0.17, N = 0.025, P = 0.005 }
+
+[[material]]
+name = "moss"
+state = "solid"
+density = 400
+hardness = 0
+colour = [86, 120, 58]
+multiplier = 1.1
+composition = { O = 0.66, H = 0.09, C = 0.21, N = 0.03, K = 0.01 }
+
+[[material]]
+name = "root"
+state = "solid"
+density = 800
+hardness = 1
+colour = [120, 92, 64]
+multiplier = 1.1
+composition = { C = 0.42, O = 0.48, H = 0.075, N = 0.015, K = 0.01 }
+
+[[material]]
+name = "kelp"
+state = "solid"
+density = 1050
+hardness = 0
+colour = [96, 104, 44]
+multiplier = 1.2
+composition = { O = 0.74, H = 0.10, C = 0.12, Na = 0.02, Cl = 0.015, K = 0.005 }
+
+[[material]]
+name = "living crystal"
+state = "solid"
+density = 1900
+hardness = 3
+colour = [150, 200, 210]
+multiplier = 1.6
+composition = { O = 0.50, Si = 0.30, C = 0.15, H = 0.04, N = 0.01 }
+
+[[material]]
+name = "deadwood"
+state = "solid"
+density = 450
+hardness = 1
+colour = [92, 80, 66]
+multiplier = 1.0
+composition = { C = 0.50, O = 0.43, H = 0.06, N = 0.01 }
+
+[[material]]
+name = "leaf litter"
+state = "powder"
+density = 200
+hardness = 0
+colour = [110, 92, 58]
+multiplier = 1.0
+composition = { C = 0.48, O = 0.44, H = 0.06, N = 0.02 }
+
+[[material]]
+name = "humus"
+state = "powder"
+density = 1100
+hardness = 0
+colour = [58, 46, 36]
+multiplier = 1.1
+composition = { O = 0.45, C = 0.30, Si = 0.15, H = 0.05, N = 0.03, Fe = 0.02 }
+
+# ---- How they burn (see burning.toml). Living tissue is wet: slow to catch.
+# Kelp and living crystal don't burn. ----
+
+[[burn]]
+material = "wood"
+ignite_k = 600
+flame_k = 1250
+rate = 0.06
+
+[[burn]]
+material = "leaf"
+ignite_k = 520
+flame_k = 1100
+rate = 0.5
+
+[[burn]]
+material = "bloom"
+ignite_k = 520
+flame_k = 1050
+rate = 0.6
+
+[[burn]]
+material = "fruit"
+ignite_k = 650
+flame_k = 1000
+rate = 0.1
+
+[[burn]]
+material = "fungus"
+ignite_k = 580
+flame_k = 1050
+rate = 0.25
+
+[[burn]]
+material = "moss"
+ignite_k = 540
+flame_k = 1050
+rate = 0.35
+
+[[burn]]
+material = "root"
+ignite_k = 650
+flame_k = 1150
+rate = 0.03
+
+[[burn]]
+material = "deadwood"
+ignite_k = 520
+flame_k = 1250
+rate = 0.15
+
+[[burn]]
+material = "leaf litter"
+ignite_k = 480
+flame_k = 1100
+rate = 0.8
+
+[[burn]]
+material = "humus"
+ignite_k = 650
+flame_k = 1000
+rate = 0.02
+
+# ---- The rules that breed each body's flora. ----
+[life]
+# The deepest a cave can hold life, below the surface (m).
+depth_m = 1500
+# Light reaches this deep into a sea; below it life needs chemistry.
+sea_light_m = 200
+# Caves this close under a living surface are fed by what seeps down.
+seep_m = 600
+# Ground this hot or hotter (K) counts as a hot spring or vent.
+hot_k = 370
+# Structural species bred per living niche, before the body's `life` scale.
+species = [2, 5]
+# Ground that counts as soil (roots grow in it; grass and forests on it).
+soils = ["soil", "clay", "sand", "gravel", "volcanic ash", "humus", "leaf litter", "regolith", "red dust", "tholin"]
+
+# Liquids life can use, with the temperatures (K) it can live at in each.
+# A solvent counts on a body when any of its materials turns up there.
+[[life.solvent]]
+name = "water"
+materials = ["water", "brine", "muddy water", "ice", "sea ice", "dirty ice", "aquifer sandstone"]
+min_k = 245
+max_k = 395
+
+[[life.solvent]]
+name = "ammonia"
+materials = ["liquid ammonia", "ammonia ice"]
+min_k = 190
+max_k = 245
+glamour = 0.4
+
+[[life.solvent]]
+name = "methane"
+materials = ["liquid methane", "methane ice", "liquid ethane", "ethane ice"]
+min_k = 85
+max_k = 190
+glamour = 0.5

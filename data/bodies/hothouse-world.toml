@@ -1,0 +1,284 @@
+# Hothouse world: a planet smothered in a crushing, scorching atmosphere
+# (like Venus). The heat is the same day and night, pole to equator, hot
+# enough to melt lead. A young surface of lava plains, ringed by crumpled
+# highlands of older rock, dotted with thousands of volcanoes and round
+# domes of sticky lava. Few craters survive. No Heart.
+name = "Hothouse world"
+archetype = "hothouse-world"
+seed = 23001
+radius_m = 30000
+heart = false
+regolith_depth_m = 1
+regolith_material = "volcanic ash"
+atmosphere_m = 6000
+atmosphere_colour = [225, 190, 110]
+space_k = 735
+
+[shape]
+roughness = 0.006
+wavelength_m = 8000
+
+[[layer]]
+name = "inner core"
+outer = 0.2
+material = "iron-nickel"
+temperature_k = 2500
+boundary_noise = 0.01
+
+[[layer]]
+name = "outer core"
+outer = 0.5
+material = "molten-iron"
+temperature_k = 2200
+boundary_noise = 0.012
+
+[[layer]]
+name = "lower mantle"
+outer = 0.7
+material = "perovskite rock"
+temperature_k = 1900
+boundary_noise = 0.02
+
+[[layer]]
+name = "upper mantle"
+outer = 0.88
+material = "peridotite"
+temperature_k = 1550
+boundary_noise = 0.02
+
+[[layer]]
+name = "crust"
+outer = 1.0
+material = "basalt"
+temperature_k = 735
+
+# Flow on flow of lava.
+[strata]
+depth_m = 1400
+fold_amplitude_m = 60
+fold_wavelength_m = 5000
+pinch = 0.5
+pinch_wavelength_m = 2000
+
+[[strata.band]]
+material = "basalt"
+thickness_m = [20, 100]
+weight = 6
+
+[[strata.band]]
+material = "lava-rock"
+thickness_m = [10, 40]
+weight = 2
+
+[[strata.band]]
+material = "tuff"
+thickness_m = [5, 20]
+weight = 1
+
+[[strata.band]]
+material = "andesite"
+thickness_m = [10, 40]
+weight = 0.6
+
+[[strata.band]]
+material = "obsidian"
+thickness_m = [1, 4]
+weight = 0.3
+
+# The crumpled highlands: an older crust, folded hard and buried by the
+# flows except where the mountains bring it up.
+[strata.old]
+cover_m = [200, 800]
+cover_wavelength_m = 7000
+erode_m = 400
+conglomerate = "impact breccia"
+conglomerate_m = [2, 8]
+depth_m = 3000
+fold_amplitude_m = 1200
+fold_wavelength_m = 1200
+pinch = 0.3
+pinch_wavelength_m = 2500
+
+[[strata.old.band]]
+material = "gneiss"
+thickness_m = [30, 120]
+weight = 3
+
+[[strata.old.band]]
+material = "schist"
+thickness_m = [20, 80]
+weight = 2
+
+[[strata.old.band]]
+material = "basalt"
+thickness_m = [20, 80]
+weight = 2
+
+[[strata.old.band]]
+material = "marble"
+thickness_m = [10, 40]
+weight = 0.7
+
+[faults]
+count = 50
+throw_m = [20, 200]
+length_m = 3000
+dip = 0.3
+gouge = "impact breccia"
+gouge_width_m = 3
+scarp = 0.5
+
+[[cave]]                # drained lava channels
+kind = "tube"
+host = ["basalt", "lava-rock"]
+scale_m = 180
+threshold = 0.9
+max_depth_m = 1000
+
+# Lead and bismuth ores condensed in the highland rock ("metal snow").
+[[vein]]
+material = "galena"
+host = ["gneiss", "schist"]
+scale_m = 250
+width = 0.04
+r_min = 0.97
+r_max = 1.0
+
+[[vein]]
+material = "pyrite"
+host = ["basalt", "lava-rock"]
+scale_m = 300
+width = 0.02
+r_min = 0.9
+r_max = 1.0
+
+[[intrusion]]           # granite under the highlands with ore veins
+material = "granite"
+kind = "felsic"
+count = 30
+radius_m = [200, 500]
+top_depth_m = [900, 2500]
+dikes = [2, 4]
+dike_material = "andesite"
+veins = [20, 40]
+vein_width_m = [2, 5]
+halo_m = 800
+aureole_m = 40
+skarn_m = 15
+
+[[blob]]                # magma chambers everywhere under the plains
+material = "magma"
+count = 45
+radius_min_m = 150
+radius_max_m = 900
+r_min = 0.86
+r_max = 0.975
+
+[[blob]]                # trapped volcanic gas
+material = "volcanic-gas"
+count = 80
+radius_min_m = 15
+radius_max_m = 80
+r_min = 0.93
+r_max = 0.99
+
+[craters]
+count = 6
+radius_min_m = 300
+radius_max_m = 2000
+rim = 0.05
+breccia = 0.2
+melt = 0.05
+
+[[deep.streaks]]
+host = ["peridotite", "perovskite rock"]
+r_min = 0.5
+r_max = 0.87
+cells = 8
+bands = 9
+width = 0.3
+fraction = 0.4
+warp = 0.4
+
+[[deep.streaks.rock]]
+material = "harzburgite"
+weight = 2
+
+[[deep.streaks.rock]]
+material = "eclogite"
+weight = 1
+
+[[deep.plume]]          # many plumes: the planet sheds its heat through volcanoes
+count = 6
+base = 0.5
+top = 0.85
+stem_m = [1200, 2200]
+head_m = [3000, 5000]
+material = "plume rock"
+melt = "magma"
+melt_share = 0.3
+heat_k = 250
+
+[deep.inner_core]
+host = "iron-nickel"
+grain_m = 300
+alt = "iron crystal"
+precious = "platinum-iron alloy"
+precious_centre = 0.3
+precious_edge = 0.02
+boundary_m = 5
+
+# ---- surface ----
+[[relief]]              # crumpled highlands ("tesserae")
+kind = "range"
+chance = 1.0
+count = [2, 4]
+width_m = [4000, 8000]
+height_m = [1000, 2500]
+
+[[relief]]              # shield volcanoes over the plumes
+kind = "hotspot"
+chance = 0.9
+width_m = [4000, 9000]
+height_m = [800, 2500]
+extra = 0.12
+band_m = [16, 40]
+active_chance = 0.5
+
+[[relief.material]]
+material = "basalt"
+weight = 5
+
+[[relief.material]]
+material = "lava-rock"
+weight = 2
+
+[[relief]]              # flat-topped "pancake" domes of thick, sticky lava
+kind = "volcano"
+chance = 1.0
+count = [3, 8]
+width_m = [600, 1500]
+height_m = [150, 400]
+extra = 0.0
+band_m = [4, 12]
+active_chance = 0.1
+
+[[relief.material]]
+material = "andesite"
+weight = 3
+
+[[relief.material]]
+material = "obsidian"
+weight = 1
+
+[[relief]]              # coronae: rings of crust pushed up and sunk round rising magma
+kind = "basin"
+chance = 0.9
+count = [2, 4]
+width_m = [2000, 4000]
+height_m = [300, 800]
+extra = 300
+fill_m = 200
+
+[[relief.material]]
+material = "basalt"

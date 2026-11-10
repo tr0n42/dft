@@ -1,0 +1,1142 @@
+# The Dark Forest Theory: element table.
+# Every element from hydrogen to radium except the lanthanides, plus thorium
+# and uranium (the two actinides that matter: radioactivity, heat, helium).
+# The ground truth for procedural chemistry. Every material's composition is
+# written in these elements, and rules about mixing, alloys, burning and
+# melting read these properties.
+#
+# mass:        atomic mass (g/mol)
+# radius_pm:   metallic radius for metals, covalent radius for the rest (picometres)
+# structure:   crystal structure of the pure solid: fcc, bcc, hcp, diamond, molecular, noble, other
+# en:          Pauling electronegativity (0 for noble gases)
+# valence:     usual valence
+# melt_k, boil_k: melting and boiling points of the pure element at 1 atm (kelvin)
+# oxide:       its usual oxide, and that oxide's formation enthalpy per mole of
+#              oxygen atoms (kJ/mol; more negative = more stable; 0 = no stable oxide)
+# value:       game value of 1 kg of the pure element, in units of 1 kg of common rock
+# class:       metal, metalloid, nonmetal, noble
+
+[[element]]
+symbol = "H"
+name = "hydrogen"
+mass = 1.008
+radius_pm = 31
+structure = "molecular"
+en = 2.20
+valence = 1
+melt_k = 14
+boil_k = 20
+oxide = "H2O"
+oxide_kj = -286
+value = 2
+class = "nonmetal"
+
+[[element]]
+symbol = "He"
+name = "helium"
+mass = 4.003
+radius_pm = 28
+structure = "noble"
+en = 0.0
+valence = 0
+melt_k = 1
+boil_k = 4
+oxide = ""
+oxide_kj = 0
+value = 20
+class = "noble"
+
+[[element]]
+symbol = "Li"
+name = "lithium"
+mass = 6.94
+radius_pm = 152
+structure = "bcc"
+en = 0.98
+valence = 1
+melt_k = 454
+boil_k = 1615
+oxide = "Li2O"
+oxide_kj = -598
+value = 8
+class = "metal"
+
+[[element]]
+symbol = "Be"
+name = "beryllium"
+mass = 9.012
+radius_pm = 112
+structure = "hcp"
+en = 1.57
+valence = 2
+melt_k = 1560
+boil_k = 2742
+oxide = "BeO"
+oxide_kj = -609
+value = 40
+class = "metal"
+
+[[element]]
+symbol = "B"
+name = "boron"
+mass = 10.81
+radius_pm = 84
+structure = "other"
+en = 2.04
+valence = 3
+melt_k = 2349
+boil_k = 4200
+oxide = "B2O3"
+oxide_kj = -424
+value = 5
+class = "metalloid"
+
+[[element]]
+symbol = "C"
+name = "carbon"
+mass = 12.011
+radius_pm = 76
+structure = "other"
+en = 2.55
+valence = 4
+melt_k = 3823
+boil_k = 4098
+oxide = "CO2"
+oxide_kj = -197
+value = 1
+class = "nonmetal"
+
+[[element]]
+symbol = "N"
+name = "nitrogen"
+mass = 14.007
+radius_pm = 71
+structure = "molecular"
+en = 3.04
+valence = 3
+melt_k = 63
+boil_k = 77
+oxide = ""
+oxide_kj = 0
+value = 1
+class = "nonmetal"
+
+[[element]]
+symbol = "O"
+name = "oxygen"
+mass = 15.999
+radius_pm = 66
+structure = "molecular"
+en = 3.44
+valence = -2
+melt_k = 54
+boil_k = 90
+oxide = ""
+oxide_kj = 0
+value = 1
+class = "nonmetal"
+
+[[element]]
+symbol = "F"
+name = "fluorine"
+mass = 18.998
+radius_pm = 64
+structure = "molecular"
+en = 3.98
+valence = -1
+melt_k = 53
+boil_k = 85
+oxide = ""
+oxide_kj = 0
+value = 3
+class = "nonmetal"
+
+[[element]]
+symbol = "Ne"
+name = "neon"
+mass = 20.18
+radius_pm = 58
+structure = "noble"
+en = 0.0
+valence = 0
+melt_k = 25
+boil_k = 27
+oxide = ""
+oxide_kj = 0
+value = 10
+class = "noble"
+
+[[element]]
+symbol = "Na"
+name = "sodium"
+mass = 22.99
+radius_pm = 186
+structure = "bcc"
+en = 0.93
+valence = 1
+melt_k = 371
+boil_k = 1156
+oxide = "Na2O"
+oxide_kj = -418
+value = 1
+class = "metal"
+
+[[element]]
+symbol = "Mg"
+name = "magnesium"
+mass = 24.305
+radius_pm = 160
+structure = "hcp"
+en = 1.31
+valence = 2
+melt_k = 923
+boil_k = 1363
+oxide = "MgO"
+oxide_kj = -602
+value = 2
+class = "metal"
+
+[[element]]
+symbol = "Al"
+name = "aluminium"
+mass = 26.98
+radius_pm = 143
+structure = "fcc"
+en = 1.61
+valence = 3
+melt_k = 933
+boil_k = 2743
+oxide = "Al2O3"
+oxide_kj = -559
+value = 2
+class = "metal"
+
+[[element]]
+symbol = "Si"
+name = "silicon"
+mass = 28.085
+radius_pm = 111
+structure = "diamond"
+en = 1.90
+valence = 4
+melt_k = 1687
+boil_k = 3538
+oxide = "SiO2"
+oxide_kj = -455
+value = 1
+class = "metalloid"
+
+[[element]]
+symbol = "P"
+name = "phosphorus"
+mass = 30.974
+radius_pm = 107
+structure = "molecular"
+en = 2.19
+valence = 5
+melt_k = 317
+boil_k = 554
+oxide = "P4O10"
+oxide_kj = -298
+value = 2
+class = "nonmetal"
+
+[[element]]
+symbol = "S"
+name = "sulfur"
+mass = 32.06
+radius_pm = 105
+structure = "molecular"
+en = 2.58
+valence = -2
+melt_k = 388
+boil_k = 718
+oxide = "SO2"
+oxide_kj = -148
+value = 1
+class = "nonmetal"
+
+[[element]]
+symbol = "Cl"
+name = "chlorine"
+mass = 35.45
+radius_pm = 102
+structure = "molecular"
+en = 3.16
+valence = -1
+melt_k = 172
+boil_k = 239
+oxide = ""
+oxide_kj = 0
+value = 1
+class = "nonmetal"
+
+[[element]]
+symbol = "Ar"
+name = "argon"
+mass = 39.95
+radius_pm = 106
+structure = "noble"
+en = 0.0
+valence = 0
+melt_k = 84
+boil_k = 87
+oxide = ""
+oxide_kj = 0
+value = 2
+class = "noble"
+
+[[element]]
+symbol = "K"
+name = "potassium"
+mass = 39.10
+radius_pm = 227
+structure = "bcc"
+en = 0.82
+valence = 1
+melt_k = 337
+boil_k = 1032
+oxide = "K2O"
+oxide_kj = -361
+value = 2
+class = "metal"
+
+[[element]]
+symbol = "Ca"
+name = "calcium"
+mass = 40.08
+radius_pm = 197
+structure = "fcc"
+en = 1.00
+valence = 2
+melt_k = 1115
+boil_k = 1757
+oxide = "CaO"
+oxide_kj = -635
+value = 1
+class = "metal"
+
+[[element]]
+symbol = "Sc"
+name = "scandium"
+mass = 44.956
+radius_pm = 162
+structure = "hcp"
+en = 1.36
+valence = 3
+melt_k = 1814
+boil_k = 3109
+oxide = "Sc2O3"
+oxide_kj = -636
+value = 500
+class = "metal"
+
+[[element]]
+symbol = "Ti"
+name = "titanium"
+mass = 47.87
+radius_pm = 147
+structure = "hcp"
+en = 1.54
+valence = 4
+melt_k = 1941
+boil_k = 3560
+oxide = "TiO2"
+oxide_kj = -472
+value = 6
+class = "metal"
+
+[[element]]
+symbol = "V"
+name = "vanadium"
+mass = 50.94
+radius_pm = 134
+structure = "bcc"
+en = 1.63
+valence = 5
+melt_k = 2183
+boil_k = 3680
+oxide = "V2O5"
+oxide_kj = -310
+value = 15
+class = "metal"
+
+[[element]]
+symbol = "Cr"
+name = "chromium"
+mass = 52.00
+radius_pm = 128
+structure = "bcc"
+en = 1.66
+valence = 3
+melt_k = 2180
+boil_k = 2944
+oxide = "Cr2O3"
+oxide_kj = -380
+value = 6
+class = "metal"
+
+[[element]]
+symbol = "Mn"
+name = "manganese"
+mass = 54.94
+radius_pm = 127
+structure = "other"
+en = 1.55
+valence = 2
+melt_k = 1519
+boil_k = 2334
+oxide = "MnO"
+oxide_kj = -385
+value = 3
+class = "metal"
+
+[[element]]
+symbol = "Fe"
+name = "iron"
+mass = 55.845
+radius_pm = 126
+structure = "bcc"
+en = 1.83
+valence = 3
+melt_k = 1811
+boil_k = 3134
+oxide = "Fe2O3"
+oxide_kj = -275
+value = 2
+class = "metal"
+
+[[element]]
+symbol = "Co"
+name = "cobalt"
+mass = 58.93
+radius_pm = 125
+structure = "hcp"
+en = 1.88
+valence = 2
+melt_k = 1768
+boil_k = 3200
+oxide = "CoO"
+oxide_kj = -238
+value = 20
+class = "metal"
+
+[[element]]
+symbol = "Ni"
+name = "nickel"
+mass = 58.69
+radius_pm = 124
+structure = "fcc"
+en = 1.91
+valence = 2
+melt_k = 1728
+boil_k = 3186
+oxide = "NiO"
+oxide_kj = -240
+value = 10
+class = "metal"
+
+[[element]]
+symbol = "Cu"
+name = "copper"
+mass = 63.55
+radius_pm = 128
+structure = "fcc"
+en = 1.90
+valence = 2
+melt_k = 1358
+boil_k = 2835
+oxide = "CuO"
+oxide_kj = -157
+value = 6
+class = "metal"
+
+[[element]]
+symbol = "Zn"
+name = "zinc"
+mass = 65.38
+radius_pm = 134
+structure = "hcp"
+en = 1.65
+valence = 2
+melt_k = 693
+boil_k = 1180
+oxide = "ZnO"
+oxide_kj = -351
+value = 3
+class = "metal"
+
+[[element]]
+symbol = "Ga"
+name = "gallium"
+mass = 69.72
+radius_pm = 135
+structure = "other"
+en = 1.81
+valence = 3
+melt_k = 303
+boil_k = 2673
+oxide = "Ga2O3"
+oxide_kj = -363
+value = 60
+class = "metal"
+
+[[element]]
+symbol = "Ge"
+name = "germanium"
+mass = 72.63
+radius_pm = 122
+structure = "diamond"
+en = 2.01
+valence = 4
+melt_k = 1211
+boil_k = 3106
+oxide = "GeO2"
+oxide_kj = -290
+value = 60
+class = "metalloid"
+
+[[element]]
+symbol = "As"
+name = "arsenic"
+mass = 74.92
+radius_pm = 119
+structure = "other"
+en = 2.18
+valence = 3
+melt_k = 887
+boil_k = 887
+oxide = "As2O3"
+oxide_kj = -219
+value = 1
+class = "metalloid"
+
+[[element]]
+symbol = "Se"
+name = "selenium"
+mass = 78.971
+radius_pm = 120
+structure = "other"
+en = 2.55
+valence = 2
+melt_k = 494
+boil_k = 958
+oxide = "SeO2"
+oxide_kj = -112
+value = 20
+class = "nonmetal"
+
+[[element]]
+symbol = "Br"
+name = "bromine"
+mass = 79.904
+radius_pm = 120
+structure = "molecular"
+en = 2.96
+valence = 1
+melt_k = 266
+boil_k = 332
+oxide = ""
+oxide_kj = 0
+value = 4
+class = "nonmetal"
+
+[[element]]
+symbol = "Kr"
+name = "krypton"
+mass = 83.798
+radius_pm = 116
+structure = "noble"
+en = 0.00
+valence = 0
+melt_k = 116
+boil_k = 120
+oxide = ""
+oxide_kj = 0
+value = 150
+class = "noble"
+
+[[element]]
+symbol = "Rb"
+name = "rubidium"
+mass = 85.468
+radius_pm = 248
+structure = "bcc"
+en = 0.82
+valence = 1
+melt_k = 312
+boil_k = 961
+oxide = "Rb2O"
+oxide_kj = -339
+value = 200
+class = "metal"
+
+[[element]]
+symbol = "Sr"
+name = "strontium"
+mass = 87.62
+radius_pm = 215
+structure = "fcc"
+en = 0.95
+valence = 2
+melt_k = 1050
+boil_k = 1655
+oxide = "SrO"
+oxide_kj = -592
+value = 4
+class = "metal"
+
+[[element]]
+symbol = "Y"
+name = "yttrium"
+mass = 88.906
+radius_pm = 180
+structure = "hcp"
+en = 1.22
+valence = 3
+melt_k = 1799
+boil_k = 3609
+oxide = "Y2O3"
+oxide_kj = -635
+value = 40
+class = "metal"
+
+[[element]]
+symbol = "Zr"
+name = "zirconium"
+mass = 91.224
+radius_pm = 160
+structure = "hcp"
+en = 1.33
+valence = 4
+melt_k = 2128
+boil_k = 4682
+oxide = "ZrO2"
+oxide_kj = -550
+value = 10
+class = "metal"
+
+[[element]]
+symbol = "Nb"
+name = "niobium"
+mass = 92.906
+radius_pm = 146
+structure = "bcc"
+en = 1.60
+valence = 5
+melt_k = 2750
+boil_k = 5017
+oxide = "Nb2O5"
+oxide_kj = -380
+value = 40
+class = "metal"
+
+[[element]]
+symbol = "Mo"
+name = "molybdenum"
+mass = 95.95
+radius_pm = 139
+structure = "bcc"
+en = 2.16
+valence = 6
+melt_k = 2896
+boil_k = 4912
+oxide = "MoO3"
+oxide_kj = -248
+value = 25
+class = "metal"
+
+[[element]]
+symbol = "Tc"
+name = "technetium"
+mass = 98.0
+radius_pm = 136
+structure = "hcp"
+en = 1.90
+valence = 7
+melt_k = 2430
+boil_k = 4538
+oxide = "Tc2O7"
+oxide_kj = -159
+value = 50000
+class = "metal"
+
+[[element]]
+symbol = "Ru"
+name = "ruthenium"
+mass = 101.07
+radius_pm = 134
+structure = "hcp"
+en = 2.20
+valence = 4
+melt_k = 2607
+boil_k = 4423
+oxide = "RuO2"
+oxide_kj = -153
+value = 1500
+class = "metal"
+
+[[element]]
+symbol = "Rh"
+name = "rhodium"
+mass = 102.91
+radius_pm = 134
+structure = "fcc"
+en = 2.28
+valence = 3
+melt_k = 2237
+boil_k = 3968
+oxide = "Rh2O3"
+oxide_kj = -114
+value = 8000
+class = "metal"
+
+[[element]]
+symbol = "Pd"
+name = "palladium"
+mass = 106.42
+radius_pm = 137
+structure = "fcc"
+en = 2.20
+valence = 2
+melt_k = 1828
+boil_k = 3236
+oxide = "PdO"
+oxide_kj = -85
+value = 3000
+class = "metal"
+
+[[element]]
+symbol = "Ag"
+name = "silver"
+mass = 107.87
+radius_pm = 144
+structure = "fcc"
+en = 1.93
+valence = 1
+melt_k = 1235
+boil_k = 2435
+oxide = "Ag2O"
+oxide_kj = -31
+value = 150
+class = "metal"
+
+[[element]]
+symbol = "Cd"
+name = "cadmium"
+mass = 112.41
+radius_pm = 151
+structure = "hcp"
+en = 1.69
+valence = 2
+melt_k = 594
+boil_k = 1040
+oxide = "CdO"
+oxide_kj = -258
+value = 10
+class = "metal"
+
+[[element]]
+symbol = "In"
+name = "indium"
+mass = 114.82
+radius_pm = 167
+structure = "other"
+en = 1.78
+valence = 3
+melt_k = 430
+boil_k = 2345
+oxide = "In2O3"
+oxide_kj = -309
+value = 200
+class = "metal"
+
+[[element]]
+symbol = "Sn"
+name = "tin"
+mass = 118.71
+radius_pm = 140
+structure = "other"
+en = 1.96
+valence = 4
+melt_k = 505
+boil_k = 2875
+oxide = "SnO2"
+oxide_kj = -289
+value = 15
+class = "metal"
+
+[[element]]
+symbol = "Sb"
+name = "antimony"
+mass = 121.76
+radius_pm = 140
+structure = "other"
+en = 2.05
+valence = 3
+melt_k = 904
+boil_k = 1860
+oxide = "Sb2O3"
+oxide_kj = -240
+value = 8
+class = "metalloid"
+
+[[element]]
+symbol = "Te"
+name = "tellurium"
+mass = 127.6
+radius_pm = 138
+structure = "other"
+en = 2.10
+valence = 2
+melt_k = 723
+boil_k = 1261
+oxide = "TeO2"
+oxide_kj = -161
+value = 80
+class = "metalloid"
+
+[[element]]
+symbol = "I"
+name = "iodine"
+mass = 126.9
+radius_pm = 139
+structure = "molecular"
+en = 2.66
+valence = 1
+melt_k = 387
+boil_k = 457
+oxide = "I2O5"
+oxide_kj = -32
+value = 30
+class = "nonmetal"
+
+[[element]]
+symbol = "Xe"
+name = "xenon"
+mass = 131.29
+radius_pm = 140
+structure = "noble"
+en = 0.00
+valence = 0
+melt_k = 161
+boil_k = 165
+oxide = ""
+oxide_kj = 0
+value = 600
+class = "noble"
+
+[[element]]
+symbol = "Cs"
+name = "caesium"
+mass = 132.91
+radius_pm = 265
+structure = "bcc"
+en = 0.79
+valence = 1
+melt_k = 302
+boil_k = 944
+oxide = "Cs2O"
+oxide_kj = -346
+value = 300
+class = "metal"
+
+[[element]]
+symbol = "Ba"
+name = "barium"
+mass = 137.33
+radius_pm = 222
+structure = "bcc"
+en = 0.89
+valence = 2
+melt_k = 1000
+boil_k = 2118
+oxide = "BaO"
+oxide_kj = -548
+value = 2
+class = "metal"
+
+[[element]]
+symbol = "Hf"
+name = "hafnium"
+mass = 178.49
+radius_pm = 159
+structure = "hcp"
+en = 1.30
+valence = 4
+melt_k = 2506
+boil_k = 4876
+oxide = "HfO2"
+oxide_kj = -572
+value = 300
+class = "metal"
+
+[[element]]
+symbol = "Ta"
+name = "tantalum"
+mass = 180.95
+radius_pm = 146
+structure = "bcc"
+en = 1.50
+valence = 5
+melt_k = 3290
+boil_k = 5731
+oxide = "Ta2O5"
+oxide_kj = -409
+value = 150
+class = "metal"
+
+[[element]]
+symbol = "W"
+name = "tungsten"
+mass = 183.84
+radius_pm = 139
+structure = "bcc"
+en = 2.36
+valence = 6
+melt_k = 3695
+boil_k = 5828
+oxide = "WO3"
+oxide_kj = -281
+value = 20
+class = "metal"
+
+[[element]]
+symbol = "Re"
+name = "rhenium"
+mass = 186.21
+radius_pm = 137
+structure = "hcp"
+en = 1.90
+valence = 7
+melt_k = 3459
+boil_k = 5869
+oxide = "Re2O7"
+oxide_kj = -177
+value = 2000
+class = "metal"
+
+[[element]]
+symbol = "Os"
+name = "osmium"
+mass = 190.23
+radius_pm = 135
+structure = "hcp"
+en = 2.20
+valence = 4
+melt_k = 3306
+boil_k = 5285
+oxide = "OsO4"
+oxide_kj = -99
+value = 3000
+class = "metal"
+
+[[element]]
+symbol = "Ir"
+name = "iridium"
+mass = 192.22
+radius_pm = 136
+structure = "fcc"
+en = 2.20
+valence = 4
+melt_k = 2719
+boil_k = 4403
+oxide = "IrO2"
+oxide_kj = -137
+value = 4000
+class = "metal"
+
+[[element]]
+symbol = "Pt"
+name = "platinum"
+mass = 195.08
+radius_pm = 139
+structure = "fcc"
+en = 2.28
+valence = 2
+melt_k = 2041
+boil_k = 4098
+oxide = "PtO2"
+oxide_kj = -40
+value = 5000
+class = "metal"
+
+[[element]]
+symbol = "Au"
+name = "gold"
+mass = 196.97
+radius_pm = 144
+structure = "fcc"
+en = 2.54
+valence = 1
+melt_k = 1337
+boil_k = 3129
+oxide = ""
+oxide_kj = 0
+value = 10000
+class = "metal"
+
+[[element]]
+symbol = "Hg"
+name = "mercury"
+mass = 200.59
+radius_pm = 151
+structure = "other"
+en = 2.00
+valence = 2
+melt_k = 234
+boil_k = 630
+oxide = "HgO"
+oxide_kj = -91
+value = 10
+class = "metal"
+
+[[element]]
+symbol = "Tl"
+name = "thallium"
+mass = 204.38
+radius_pm = 170
+structure = "hcp"
+en = 1.62
+valence = 1
+melt_k = 577
+boil_k = 1746
+oxide = "Tl2O"
+oxide_kj = -169
+value = 300
+class = "metal"
+
+[[element]]
+symbol = "Pb"
+name = "lead"
+mass = 207.2
+radius_pm = 175
+structure = "fcc"
+en = 2.33
+valence = 2
+melt_k = 601
+boil_k = 2022
+oxide = "PbO"
+oxide_kj = -219
+value = 2
+class = "metal"
+
+[[element]]
+symbol = "Bi"
+name = "bismuth"
+mass = 208.98
+radius_pm = 156
+structure = "other"
+en = 2.02
+valence = 3
+melt_k = 544
+boil_k = 1837
+oxide = "Bi2O3"
+oxide_kj = -191
+value = 10
+class = "metal"
+
+[[element]]
+symbol = "Po"
+name = "polonium"
+mass = 209.0
+radius_pm = 168
+structure = "other"
+en = 2.00
+valence = 2
+melt_k = 527
+boil_k = 1235
+oxide = "PoO2"
+oxide_kj = -125
+value = 50000
+class = "metalloid"
+
+[[element]]
+symbol = "At"
+name = "astatine"
+mass = 210.0
+radius_pm = 150
+structure = "other"
+en = 2.20
+valence = 1
+melt_k = 575
+boil_k = 610
+oxide = ""
+oxide_kj = 0
+value = 200000
+class = "metalloid"
+
+[[element]]
+symbol = "Rn"
+name = "radon"
+mass = 222.0
+radius_pm = 150
+structure = "noble"
+en = 0.00
+valence = 0
+melt_k = 202
+boil_k = 211
+oxide = ""
+oxide_kj = 0
+value = 20000
+class = "noble"
+
+[[element]]
+symbol = "Fr"
+name = "francium"
+mass = 223.0
+radius_pm = 270
+structure = "bcc"
+en = 0.70
+valence = 1
+melt_k = 300
+boil_k = 950
+oxide = "Fr2O"
+oxide_kj = -330
+value = 300000
+class = "metal"
+
+[[element]]
+symbol = "Ra"
+name = "radium"
+mass = 226.0
+radius_pm = 215
+structure = "bcc"
+en = 0.90
+valence = 2
+melt_k = 973
+boil_k = 2010
+oxide = "RaO"
+oxide_kj = -520
+value = 100000
+class = "metal"
+
+[[element]]
+symbol = "Th"
+name = "thorium"
+mass = 232.04
+radius_pm = 180
+structure = "fcc"
+en = 1.30
+valence = 4
+melt_k = 2023
+boil_k = 5061
+oxide = "ThO2"
+oxide_kj = -613
+value = 60
+class = "metal"
+
+[[element]]
+symbol = "U"
+name = "uranium"
+mass = 238.03
+radius_pm = 156
+structure = "other"
+en = 1.38
+valence = 4
+melt_k = 1405
+boil_k = 4404
+oxide = "UO2"
+oxide_kj = -542
+value = 50
+class = "metal"

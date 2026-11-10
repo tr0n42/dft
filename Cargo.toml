@@ -1,0 +1,25 @@
+[package]
+name = "dft-sim"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+miniz_oxide = "0.8"
+png = "0.17"
+rapier2d = { version = "0.36.1", features = ["enhanced-determinism"] }
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
+[profile.test]
+opt-level = 3
+
+# For perf: release speed with symbols (cargo build --profile profiling).
+[profile.profiling]
+inherits = "release"
+debug = true

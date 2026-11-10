@@ -1,0 +1,428 @@
+# Living world: a world like Earth, the canvas for life (none yet: plants,
+# animals and structures come later as their own layers). One great ocean
+# and one great continent. Continents of granite under thick sediments;
+# ocean floor of basalt; plates diving under the land at trenches, with
+# volcanic arcs behind them; groundwater in the sands, oil and coal, salt,
+# caves in the limestone, and an ancient crust under it all.
+name = "Living world"
+archetype = "living-world"
+seed = 24001
+radius_m = 35000
+heart = false
+regolith_depth_m = 3
+regolith_material = "soil"
+regolith_max_slope = 0.6        # steep slopes are bare rock
+atmosphere_m = 3000
+atmosphere_colour = [110, 160, 230]
+oxygen = 0.21                  # breathable air: things can burn in it
+# The air holds the warmth: nights stay as mild as the ground, the seas never freeze.
+space_k = 288
+polar_cooling_k = 30
+polar_depth_m = 150
+
+[sun]
+day_k = 300
+day_s = 900
+start_deg = 0
+
+[shape]
+roughness = 0.003
+wavelength_m = 8000
+
+[[layer]]
+name = "inner core"
+outer = 0.19
+material = "iron-nickel"
+temperature_k = 2600
+boundary_noise = 0.01
+
+[[layer]]
+name = "outer core"
+outer = 0.45
+material = "molten-iron"
+temperature_k = 2300
+boundary_noise = 0.012
+
+[[layer]]
+name = "lower mantle"
+outer = 0.7
+material = "perovskite rock"
+temperature_k = 2000
+boundary_noise = 0.02
+
+[[layer]]
+name = "transition zone"
+outer = 0.78
+material = "ringwoodite rock"
+temperature_k = 1750
+boundary_noise = 0.02
+
+[[layer]]
+name = "upper mantle"
+outer = 0.9
+material = "peridotite"
+temperature_k = 1500
+boundary_noise = 0.02
+
+[[layer]]
+name = "crust"
+outer = 1.0
+material = "granite"
+temperature_k = 288
+
+# Sediments laid down by rivers, deltas and shallow seas.
+[strata]
+depth_m = 1800
+fold_amplitude_m = 120
+fold_wavelength_m = 5000
+pinch = 0.5
+pinch_wavelength_m = 2000
+
+[[strata.band]]
+material = "sandstone"
+thickness_m = [15, 70]
+weight = 3
+
+[[strata.band]]
+material = "shale"
+thickness_m = [10, 60]
+weight = 3
+
+[[strata.band]]
+material = "limestone"
+thickness_m = [20, 90]
+weight = 2.5
+
+[[strata.band]]
+material = "conglomerate"
+thickness_m = [4, 15]
+weight = 1
+
+[[strata.band]]
+material = "coal"
+thickness_m = [1, 5]
+weight = 0.6
+
+[[strata.band]]
+material = "clay"
+thickness_m = [3, 12]
+weight = 0.8
+
+[[strata.band]]
+material = "basalt"
+thickness_m = [10, 40]
+weight = 0.4
+
+[[strata.lens]]             # aquifers: sands soaked with groundwater
+host = "sandstone"
+material = "aquifer sandstone"
+position = "middle"
+length_m = [100, 600]
+thickness = 0.5
+spacing_m = 500
+
+[[strata.lens]]             # oil trapped at the top of a sand under shale
+host = "sandstone"
+material = "crude oil"
+position = "top"
+length_m = [80, 400]
+thickness = 0.3
+spacing_m = 1600
+
+[[strata.lens]]             # old river channels: gravel with gold at the base
+host = "conglomerate"
+material = "gravel"
+position = "base"
+length_m = [60, 250]
+thickness = 0.6
+spacing_m = 400
+nugget = "gold"
+nugget_chance = 0.0005
+
+[[strata.lens]]             # evaporated lagoons: salt in the shale
+host = "shale"
+material = "rock salt"
+position = "middle"
+length_m = [100, 400]
+thickness = 0.5
+spacing_m = 1000
+
+[[strata.lens]]
+host = "limestone"
+material = "gypsum"
+position = "top"
+length_m = [60, 250]
+thickness = 0.4
+spacing_m = 800
+
+# The ancient basement: a greenstone belt and gneiss, folded hard, worn flat,
+# buried by the sediments.
+[strata.old]
+cover_m = [600, 1500]
+cover_wavelength_m = 7000
+erode_m = 1200
+conglomerate = "conglomerate"
+conglomerate_m = [4, 15]
+depth_m = 3500
+fold_amplitude_m = 1500
+fold_wavelength_m = 1500
+pinch = 0.3
+pinch_wavelength_m = 3000
+
+[[strata.old.band]]
+material = "gneiss"
+thickness_m = [40, 150]
+weight = 3
+
+[[strata.old.band]]
+material = "schist"
+thickness_m = [30, 120]
+weight = 2
+
+[[strata.old.band]]
+material = "basalt"
+thickness_m = [20, 90]
+weight = 2
+
+[[strata.old.band]]
+material = "quartzite"
+thickness_m = [15, 60]
+weight = 1
+
+[[strata.old.band]]
+material = "banded iron"
+thickness_m = [5, 25]
+weight = 1
+
+[faults]
+count = 40
+throw_m = [10, 150]
+length_m = 3000
+dip = 0.25
+gouge = "impact breccia"
+gouge_width_m = 2.5
+scarp = 0.4
+
+[[cave]]                # caves dissolved out of the limestone
+kind = "karst"
+host = ["limestone"]
+scale_m = 80
+threshold = 0.9
+max_depth_m = 1500
+
+[[intrusion]]           # granite under the mountains: copper, lead-zinc and gold veins
+material = "granite"
+kind = "felsic"
+count = 60
+radius_m = [150, 450]
+top_depth_m = [800, 2000]
+dikes = [2, 4]
+dike_material = "andesite"
+veins = [30, 50]
+vein_width_m = [2, 5]
+halo_m = 900
+aureole_m = 40
+skarn_m = 15
+
+[[intrusion]]           # gabbro in the mantle: chromite and platinum
+material = "gabbro"
+kind = "mafic"
+count = 60
+radius_m = [300, 800]
+top_depth_m = [4000, 12000]
+dikes = [1, 3]
+veins = [6, 12]
+halo_m = 500
+aureole_m = 30
+
+[[blob]]                # flooded caverns deep in the rock
+material = "water"
+count = 40
+radius_min_m = 10
+radius_max_m = 40
+r_min = 0.95
+r_max = 0.98
+
+[[blob]]                # magma under the volcanoes and rifts
+material = "magma"
+count = 25
+radius_min_m = 200
+radius_max_m = 900
+r_min = 0.8
+r_max = 0.9
+
+[[sprinkle]]
+material = "gold"
+host = ["gold-quartz"]
+chance = 0.0002
+r_min = 0.0
+r_max = 1.0
+
+[[sprinkle]]
+material = "diamond"
+host = ["kimberlite"]
+chance = 0.004
+r_min = 0.0
+r_max = 1.0
+
+[pipes]                 # kimberlite pipes in the old heart of the continent
+material = "kimberlite"
+count = 6
+width_m = 70
+r_min = 0.6
+
+[ice_caps]
+material = "ice"
+thickness_m = 300
+from_latitude = 0.97
+
+# ---- deep interior ----
+[[deep.streaks]]
+host = ["peridotite", "ringwoodite rock", "perovskite rock"]
+r_min = 0.45
+r_max = 0.89
+cells = 8
+bands = 9
+width = 0.3
+fraction = 0.4
+warp = 0.4
+
+[[deep.streaks.rock]]
+material = "harzburgite"
+weight = 3
+
+[[deep.streaks.rock]]
+material = "pyroxenite"
+weight = 2
+
+[[deep.streaks.rock]]
+material = "eclogite"
+weight = 1
+
+[[deep.plume]]
+count = 3
+base = 0.46
+top = 0.85
+stem_m = [1000, 1800]
+head_m = [3000, 4800]
+material = "plume rock"
+melt = "magma"
+melt_share = 0.25
+heat_k = 250
+
+[[deep.slab]]           # ocean floor diving under the land
+count = 3
+thickness_m = 1200
+bottom = 0.5
+material = "eclogite"
+stall_chance = 0.5
+stall_at = 0.75
+chill_k = 400
+diamond = "diamond"
+diamond_chance = 0.004
+
+[deep.piles]
+count = 2
+at = 0.45
+width = [0.12, 0.22]
+height_m = [800, 1800]
+material = "deep pile rock"
+melt = "magma"
+melt_m = 160
+
+[deep.inner_core]
+host = "iron-nickel"
+grain_m = 300
+alt = "iron crystal"
+precious = "platinum-iron alloy"
+precious_centre = 0.35
+precious_edge = 0.02
+boundary_m = 4
+
+[deep.outer_core]
+host = "molten-iron"
+material = "sulfur-rich core melt"
+column_m = 450
+share = 0.3
+top_material = "sulfur-rich core melt"
+top_m = 160
+
+# ---- surface ----
+[[relief]]              # the world ocean: half the planet sunk, floored with basalt
+kind = "lowland"
+chance = 1.0
+width_m = [5000, 5000]
+height_m = [2200, 2200]
+sea_level_m = 500
+floor = "basalt"
+floor_m = 700
+
+[[relief.material]]
+material = "water"
+
+[[relief]]              # mountain ranges on the continent
+kind = "range"
+chance = 1.0
+count = [2, 3]
+width_m = [3000, 7000]
+height_m = [1000, 3000]
+
+[[relief]]              # flat-topped mesas where the land wore away around them
+kind = "plateau"
+chance = 0.6
+count = [1, 2]
+width_m = [800, 2000]
+height_m = [150, 400]
+
+[[relief]]              # a rift valley where the continent is pulling apart
+kind = "rift"
+chance = 0.6
+width_m = [1500, 3000]
+height_m = [400, 1200]
+fill_m = 150
+
+[[relief.material]]
+material = "conglomerate"
+
+[[relief]]              # trenches where the ocean floor dives under
+kind = "trench"
+chance = 0.9
+width_m = [2500, 5000]
+height_m = [800, 2000]
+
+[[relief]]              # volcanic arcs behind the trenches
+kind = "arc"
+chance = 0.9
+count = [1, 3]
+width_m = [1200, 2800]
+height_m = [1000, 2600]
+steep = true
+extra = 0.08
+band_m = [8, 24]
+offset_m = [3000, 9000]
+active_chance = 0.5
+
+[[relief.material]]
+material = "andesite"
+weight = 4
+
+[[relief.material]]
+material = "tuff"
+weight = 2
+
+[[relief]]              # volcanic islands over the plumes
+kind = "hotspot"
+chance = 0.8
+width_m = [3000, 6000]
+height_m = [1500, 3500]
+extra = 0.12
+band_m = [16, 40]
+active_chance = 0.6
+
+[[relief.material]]
+material = "basalt"
+weight = 6
+
+[[relief.material]]
+material = "tuff"
+weight = 1

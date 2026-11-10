@@ -1,0 +1,249 @@
+# Frozen rogue world: a small planet flung out of its star system long ago,
+# drifting in the dark at 35 K. Its air has fallen as snow and frozen into
+# glaciers of nitrogen; under a thick shell of water ice, the heat of its
+# rocky interior still keeps a salty ocean liquid. Cryovolcanoes bring brine
+# up through the ice. No Heart.
+name = "Frozen rogue world"
+archetype = "rogue-world"
+seed = 7001
+radius_m = 40000
+heart = false
+regolith_depth_m = 5
+regolith_material = "air snow"
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+space_k = 3
+
+[shape]
+roughness = 0.004
+wavelength_m = 9000
+
+[[layer]]
+name = "iron core"
+outer = 0.28
+material = "iron-nickel"
+temperature_k = 1300
+
+[[layer]]
+name = "rock mantle"
+outer = 0.70
+material = "peridotite"
+temperature_k = 700
+
+[[layer]]
+name = "high-pressure ice"
+outer = 0.79
+material = "pressure ice"
+temperature_k = 280
+
+[[layer]]
+name = "buried ocean"
+outer = 0.83
+material = "brine"
+temperature_k = 262
+
+[[layer]]
+name = "ice shell"
+outer = 1.0
+material = "ice"
+temperature_k = 35
+
+# Frozen air in layers under the surface: nitrogen glaciers, oxygen frost,
+# methane, laid down as the atmosphere collapsed, then buried and warped.
+[strata]
+depth_m = 900
+fold_amplitude_m = 60
+fold_wavelength_m = 5000
+pinch = 0.55
+pinch_wavelength_m = 3000
+
+[[strata.band]]
+material = "nitrogen ice"
+thickness_m = [15, 70]
+weight = 5
+
+[[strata.band]]
+material = "ice"
+thickness_m = [20, 80]
+weight = 4
+
+[[strata.band]]
+material = "methane ice"
+thickness_m = [5, 25]
+weight = 1.5
+
+[[strata.band]]
+material = "carbon monoxide ice"
+thickness_m = [3, 15]
+weight = 1
+
+[[strata.band]]
+material = "oxygen ice"
+thickness_m = [2, 10]
+weight = 0.6
+
+[[strata.band]]
+material = "tholin"        # organics made by starlight in the old air
+thickness_m = [1, 5]
+weight = 0.8
+
+[[strata.band]]
+material = "dirty ice"
+thickness_m = [10, 40]
+weight = 2
+
+# Refrozen brine where the ocean once leaked up through cracks.
+[[vein]]
+material = "sea ice"
+host = ["ice"]
+scale_m = 900
+width = 0.03
+r_min = 0.83
+r_max = 0.99
+
+# Salt and ammonia pockets in the ice shell, and old ocean floor minerals.
+[[blob]]
+material = "ammonia ice"
+count = 300
+radius_min_m = 20
+radius_max_m = 160
+r_min = 0.84
+r_max = 0.97
+
+[[blob]]
+material = "rock salt"
+count = 160
+radius_min_m = 15
+radius_max_m = 90
+r_min = 0.80
+r_max = 0.9
+
+[[deep.streaks]]
+host = ["peridotite"]
+r_min = 0.3
+r_max = 0.69
+cells = 8
+bands = 10
+width = 0.3
+fraction = 0.35
+warp = 0.4
+
+[[deep.streaks.rock]]
+material = "harzburgite"
+weight = 3
+
+[[deep.streaks.rock]]
+material = "pyroxenite"
+weight = 2
+
+# The ice shell convects slowly too: plumes of dirty and salty ice stirred
+# through it.
+[[deep.streaks]]
+host = ["ice"]
+r_min = 0.835
+r_max = 0.975
+cells = 14
+bands = 9
+width = 0.35
+fraction = 0.45
+warp = 0.5
+
+[[deep.streaks.rock]]
+material = "dirty ice"
+weight = 3
+
+[[deep.streaks.rock]]
+material = "sea ice"
+weight = 2
+
+[[deep.streaks.rock]]
+material = "rock salt"
+weight = 0.5
+
+[deep.inner_core]
+host = "iron-nickel"
+grain_m = 1500
+alt = "iron crystal"
+precious = "platinum-iron alloy"
+precious_centre = 0.3
+precious_edge = 0.02
+boundary_m = 50
+
+[craters]
+count = 60
+radius_min_m = 80
+radius_max_m = 3500
+breccia = 0.12
+breccia_material = "dirty ice"
+melt = 0.0
+rim = 0.04
+
+# ---- surface (G5) ----
+[[relief]]              # a vast plain of nitrogen glacier filling an old basin
+kind = "lowland"
+chance = 0.7
+width_m = [6000, 12000]
+height_m = [400, 900]
+fill_m = 700
+
+[[relief.material]]
+material = "nitrogen ice"
+
+[[relief]]              # mountains of water-ice blocks, hard as rock at 35 K
+kind = "range"
+chance = 0.8
+count = [1, 3]
+width_m = [3000, 7000]
+height_m = [800, 2500]
+
+[[relief]]              # cryovolcanoes: brine from the ocean, erupted and frozen
+kind = "volcano"
+chance = 0.9
+count = [2, 5]
+width_m = [1500, 4000]
+height_m = [500, 1800]
+steep = true
+extra = 0.1
+band_m = [8, 24]
+melt = "brine"
+chamber = "sea ice"
+dike = "ammonia ice"
+active_chance = 0.4
+
+[[relief.material]]
+material = "ice"
+weight = 4
+
+[[relief.material]]
+material = "ammonia ice"
+weight = 2
+
+[[relief.material]]
+material = "sea ice"
+weight = 2
+
+[[relief]]              # impact basins
+kind = "basin"
+chance = 0.7
+count = [1, 2]
+width_m = [5000, 9000]
+height_m = [600, 1500]
+extra = 200
+
+[[relief.material]]
+material = "dirty ice"
+
+[[relief]]              # ice blocks strewn on the plains
+kind = "boulders"
+count = [600, 900]
+width_m = [3, 20]
+height_m = [0, 0]
+extra = 0.3
+
+[[relief.material]]
+material = "ice"
+weight = 3
+
+[[relief.material]]
+material = "dirty ice"
+weight = 1

@@ -1,0 +1,213 @@
+# Scale test only: an Earth-size rocky world (6,371 km radius) using every
+# generator feature at realistic sizes, to measure load time, memory and speed.
+name = "Earth-size scale test"
+archetype = "rocky-world"
+seed = 9001
+radius_m = 6371000
+heart = true
+regolith_depth_m = 2
+regolith_material = "soil"
+atmosphere_m = 100000
+atmosphere_colour = [110, 160, 230]
+oxygen = 0.21                  # breathable air: things can burn in it
+polar_cooling_k = 60
+polar_depth_m = 200
+
+[shape]
+roughness = 0.0015
+wavelength_m = 1000000
+
+[[layer]]
+name = "inner core"
+outer = 0.19
+material = "iron-nickel"
+temperature_k = 5400
+boundary_noise = 0.002
+
+[[layer]]
+name = "outer core"
+outer = 0.55
+material = "molten-iron"
+temperature_k = 4500
+boundary_noise = 0.002
+
+[[layer]]
+name = "lower mantle"
+outer = 0.87
+material = "perovskite rock"
+temperature_k = 3000
+boundary_noise = 0.003
+
+[[layer]]
+name = "transition zone"
+outer = 0.9
+material = "ringwoodite rock"
+temperature_k = 1900
+boundary_noise = 0.002
+
+[[layer]]
+name = "upper mantle"
+outer = 0.994
+material = "peridotite"
+temperature_k = 1600
+boundary_noise = 0.001
+
+[[layer]]
+name = "crust"
+outer = 1.0
+material = "granite"
+temperature_k = 288
+
+[strata]
+depth_m = 5000
+fold_amplitude_m = 800
+fold_wavelength_m = 200000
+pinch = 0.5
+pinch_wavelength_m = 50000
+
+[[strata.band]]
+material = "sandstone"
+thickness_m = [20, 200]
+weight = 3
+
+[[strata.band]]
+material = "shale"
+thickness_m = [20, 150]
+weight = 3
+
+[[strata.band]]
+material = "limestone"
+thickness_m = [30, 250]
+weight = 2
+
+[[strata.band]]
+material = "basalt"
+thickness_m = [20, 120]
+weight = 1
+
+[[strata.lens]]
+host = "shale"
+material = "rock salt"
+position = "middle"
+length_m = [2000, 20000]
+thickness = 0.5
+spacing_m = 60000
+
+[faults]
+count = 400
+throw_m = [50, 1500]
+length_m = 20000
+dip = 0.3
+gouge = "impact breccia"
+gouge_width_m = 10
+
+[[cave]]
+kind = "karst"
+host = ["limestone"]
+scale_m = 80
+threshold = 0.9
+max_depth_m = 3000
+
+[[intrusion]]
+material = "granite"
+kind = "felsic"
+count = 600
+radius_m = [2000, 8000]
+top_depth_m = [3000, 12000]
+dikes = [2, 4]
+dike_material = "andesite"
+veins = [20, 40]
+vein_width_m = [3, 10]
+halo_m = 8000
+aureole_m = 400
+skarn_m = 100
+
+[[blob]]
+material = "magma"
+count = 300
+radius_min_m = 1000
+radius_max_m = 6000
+r_min = 0.985
+r_max = 0.998
+
+[ice_caps]
+material = "ice"
+thickness_m = 3000
+from_latitude = 0.92
+
+[craters]
+count = 40
+radius_min_m = 1000
+radius_max_m = 60000
+breccia = 0.2
+melt = 0.03
+
+[[deep.streaks]]
+host = ["peridotite", "ringwoodite rock", "perovskite rock"]
+r_min = 0.55
+r_max = 0.994
+cells = 10
+bands = 12
+width = 0.3
+fraction = 0.4
+warp = 0.4
+
+[[deep.streaks.rock]]
+material = "harzburgite"
+weight = 3
+
+[[deep.streaks.rock]]
+material = "pyroxenite"
+weight = 2
+
+[[deep.streaks.rock]]
+material = "eclogite"
+weight = 1
+
+[[deep.plume]]
+count = 6
+base = 0.56
+top = 0.97
+stem_m = [80000, 150000]
+head_m = [250000, 450000]
+material = "plume rock"
+melt = "magma"
+melt_share = 0.25
+heat_k = 300
+
+[[deep.slab]]
+count = 6
+thickness_m = 90000
+bottom = 0.6
+material = "eclogite"
+stall_chance = 0.5
+stall_at = 0.89
+chill_k = 500
+diamond = "diamond"
+diamond_chance = 0.002
+
+[deep.piles]
+count = 2
+at = 0.55
+width = [0.12, 0.22]
+height_m = [200000, 500000]
+material = "deep pile rock"
+melt = "magma"
+melt_m = 30000
+
+[deep.inner_core]
+host = "iron-nickel"
+grain_m = 60000
+alt = "iron crystal"
+precious = "platinum-iron alloy"
+precious_centre = 0.3
+precious_edge = 0.02
+boundary_m = 1500
+
+[deep.outer_core]
+host = "molten-iron"
+material = "sulfur-rich core melt"
+column_m = 90000
+share = 0.3
+top_material = "sulfur-rich core melt"
+top_m = 30000

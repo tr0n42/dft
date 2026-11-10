@@ -1,0 +1,170 @@
+# Barren world: a small airless rocky world (like Mercury or the Moon). A big
+# iron core under a thin mantle; a pale crust of feldspar rock smashed by
+# impacts for billions of years, its great basins flooded with dark basalt;
+# cliffs where the shrinking body squeezed its crust; deep rubble on top.
+# No water, no air. No Heart.
+name = "Barren world"
+archetype = "barren-world"
+seed = 21001
+radius_m = 20000
+heart = false
+regolith_depth_m = 8
+regolith_material = "regolith"
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+
+# Slow days that bake the ground and nights that freeze it.
+[sun]
+day_k = 400
+day_s = 1500
+start_deg = 30
+
+[shape]
+roughness = 0.008
+wavelength_m = 5000
+
+[[layer]]
+name = "inner core"
+outer = 0.3
+material = "iron-nickel"
+temperature_k = 1900
+boundary_noise = 0.01
+
+[[layer]]
+name = "outer core"
+outer = 0.6
+material = "molten-iron"
+temperature_k = 1800
+boundary_noise = 0.01
+
+[[layer]]
+name = "mantle"
+outer = 0.9
+material = "peridotite"
+temperature_k = 1300
+boundary_noise = 0.02
+
+[[layer]]
+name = "crust"
+outer = 1.0
+material = "anorthosite"
+temperature_k = 200
+
+# The highland crust: feldspar rock and the shattered rubble of old impacts,
+# with sheets of basalt where lava once broke through.
+[strata]
+depth_m = 1000
+fold_amplitude_m = 40
+fold_wavelength_m = 5000
+pinch = 0.6
+pinch_wavelength_m = 2000
+
+[[strata.band]]
+material = "anorthosite"
+thickness_m = [30, 120]
+weight = 4
+
+[[strata.band]]
+material = "impact breccia"
+thickness_m = [10, 60]
+weight = 3
+
+[[strata.band]]
+material = "basalt"
+thickness_m = [10, 40]
+weight = 1
+
+[[strata.band]]
+material = "ilmenite"
+thickness_m = [1, 4]
+weight = 0.2
+
+# Cliffs hundreds of metres high where the cooling body shrank and its
+# crust was thrust over itself.
+[faults]
+count = 24
+throw_m = [40, 300]
+length_m = 4000
+dip = 0.35
+gouge = "impact breccia"
+gouge_width_m = 3
+scarp = 0.9
+
+[[vein]]                # titanium ore in the flood basalt
+material = "ilmenite"
+host = ["basalt"]
+scale_m = 250
+width = 0.03
+r_min = 0.9
+r_max = 1.0
+
+[[blob]]                # iron sulfide from the impactors
+material = "troilite"
+count = 80
+radius_min_m = 10
+radius_max_m = 50
+r_min = 0.9
+r_max = 0.995
+
+[[sprinkle]]            # rare earth and uranium-rich rock in the impact rubble
+material = "uraninite"
+host = ["impact breccia"]
+chance = 0.002
+r_min = 0.85
+r_max = 1.0
+
+[[sprinkle]]
+material = "platinum nugget"
+host = ["troilite"]
+chance = 0.01
+r_min = 0.85
+r_max = 1.0
+
+[craters]
+count = 70
+radius_min_m = 30
+radius_max_m = 2200
+rim = 0.06
+breccia = 0.25
+melt = 0.04
+
+[deep.inner_core]
+host = "iron-nickel"
+grain_m = 400
+alt = "iron crystal"
+precious = "platinum-iron alloy"
+precious_centre = 0.3
+precious_edge = 0.02
+boundary_m = 6
+
+# ---- surface ----
+[[relief]]              # great impact basins flooded with dark lava ("seas")
+kind = "basin"
+chance = 1.0
+count = [2, 4]
+width_m = [3000, 7000]
+height_m = [800, 2000]
+extra = 150
+fill_m = 500
+
+[[relief.material]]
+material = "basalt"
+
+[[relief]]              # boulders thrown out by impacts
+kind = "boulders"
+count = [100, 200]
+width_m = [6, 30]
+height_m = [0, 0]
+extra = 0.4
+
+[[relief.material]]
+material = "anorthosite"
+weight = 2
+
+[[relief.material]]
+material = "impact breccia"
+weight = 2
+
+[[relief.material]]
+material = "basalt"
+weight = 1

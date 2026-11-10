@@ -1,0 +1,18 @@
+[package]
+name = "dft-viewer"
+version = "0.1.0"
+edition = "2024"
+
+# The planet generator for the browser: a small C-style API over dft-sim's
+# Planet, compiled to WebAssembly and driven by viewer/page.html.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dft-sim = { path = ".." }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
