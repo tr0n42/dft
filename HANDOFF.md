@@ -29,8 +29,8 @@ Read this first, then ROADMAP.md (what's built and what's next) and README.md
   `cargo build --release --ignore-rust-version`.
 - Generator changes change every body's fingerprint: re-lock with
   `BLESS=1 cargo test --release --test reference` once the change is meant.
-- The game opens a borderless fullscreen window by default; pass
-  `--windowed` for a window. The stockpile window's collapse arrow is at
+- The game opens a maximized window by default; pass
+  `--windowed` for a 1600 x 900 window. The stockpile window's collapse arrow is at
   about (1365, 28) on a 1600 x 900 screen.
 - The test suite and the abundance tool both use a lot of memory, so don't
   run them at the same time.
@@ -92,6 +92,15 @@ often each specialty rolls).
   tab in the stockpile window. Then refiner and fabricator ships (phase 2),
   factories and the director's hidden queue (3), energy (4), heat-sink bots
   (5), tunnelers (6).
+- **Hauler landing spots** (with production): give each hauler its own
+  landing spot so no two land on top of each other. In flight, haulers pass
+  freely in front of and behind each other; Benjamin doesn't want them
+  pushed apart in the air. For now the drawing only spaces out landed
+  haulers (game/src/drones.rs), as a stopgap. Seen 10 Nov (rubble asteroid,
+  32 min): every hauler of a flock lands on the one hub point
+  (`site_pos`), so busy hubs pile up 10+; 1,315 haulers for 244 flocks with
+  984 cutters still waiting, so the director also builds too many: size
+  each flock's haulers from its round trip instead.
 - Open questions for Benjamin: which generation-bending perks go in the
   meta tree first; planet ranking for selection (parked until he decides).
 - Also waiting: map icons for the zoomed-out view, life L1e, the lava flow

@@ -29,7 +29,8 @@
 //!   --screenshot <file>   draw, save a PNG of the window and quit
 //!   --frames <n>          with --screenshot: n pictures, 4 frames apart
 //!   --view <x>,<y>,<mpp>  where to look (metres, and metres per pixel)
-//!   --size <w>x<h>        the window size (default 1600x900)
+//!   --size <w>x<h>        a window this size (default: maximized)
+//!   --windowed            a 1600x900 window rather than maximized
 //!   --continue            load the newest save (saves folder)
 //!   --load <file>         load a save (a path, or a name in the saves folder)
 //!   --no-autosave         don't autosave (benchmarks and screenshots never do)
@@ -89,7 +90,7 @@ pub struct Options {
     pub frames: u32,
     pub view: Option<(f64, f64, f64)>,
     pub size: (u32, u32),
-    /// A window of `size` (--size, --windowed) rather than borderless full screen.
+    /// A window of `size` (--size, --windowed) rather than maximized.
     pub windowed: bool,
     /// A save to load at the start: "last" for the newest, or a file.
     pub load: Option<String>,
@@ -362,6 +363,18 @@ fn main() {
         None => None,
     };
     let run = sim::start(sim, control);
+    // An ordinary window, maximized, unless asked for a set size (or opened
+    // in the background for a benchmark).
+    let mut window = Window {
+        title: title(&planet),
+        resolution: WindowResolution::new(o.size.0, o.size.1),
+        focused: !o.background,
+        window_level: if o.background { bevy::window::WindowLevel::AlwaysOnBottom } else { bevy::window::WindowLevel::Normal },
+        ..default()
+    };
+    if !o.windowed && !o.background {
+        window.set_maximized(true);
+    }
     let mut app = App::new();
     if let Some(s) = script {
         app.insert_resource(s);
@@ -371,15 +384,7 @@ fn main() {
     }
     app
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: title(&planet),
-                resolution: WindowResolution::new(o.size.0, o.size.1),
-                // Full screen in a borderless window, unless asked for a window.
-                mode: if o.windowed || o.background { bevy::window::WindowMode::Windowed } else { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current) },
-                focused: !o.background,
-                window_level: if o.background { bevy::window::WindowLevel::AlwaysOnBottom } else { bevy::window::WindowLevel::Normal },
-                ..default()
-            }),
+            primary_window: Some(window),
             ..default()
         }))
         .insert_resource(ClearColor(Color::srgb_u8(6, 7, 12)))

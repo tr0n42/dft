@@ -612,8 +612,7 @@ fn draw(
         let reach = HAULER_W as f64 * cell_px as f64 * v.mpp;
         let hold_n = HOLD_CELLS.len();
         // Where each is drawn: lifted (while its legs are out) high enough
-        // that they never touch the ground under it, and pushed apart from
-        // the others so no two ever share the same space.
+        // that they never touch the ground under it.
         let ground = |a: f64| -> Option<f64> {
             let h = heights.as_ref()?;
             let n = h.len();
@@ -647,9 +646,18 @@ fn draw(
             }
             placed.push((k, x, y, ext));
         }
+        // Only landed haulers (legs out) are kept apart, and only as far as
+        // their legs are out, so the push fades in on landing and out on
+        // lifting. In flight they pass freely in front of and behind each
+        // other. (A stopgap: landing spots will be shared out so that no two
+        // land on the same one.)
         for _ in 0..6 {
             for i in 0..placed.len() {
                 for j in i + 1..placed.len() {
+                    let w = placed[i].3.min(placed[j].3) as f64;
+                    if w <= 0.0 {
+                        continue;
+                    }
                     let (dx, dy) = (placed[j].1 - placed[i].1, placed[j].2 - placed[i].2);
                     let d = (dx * dx + dy * dy).sqrt();
                     if d >= HAULER_GAP_M {
@@ -663,7 +671,7 @@ fn draw(
                         let a = placed[i].2.atan2(placed[i].1);
                         (-a.sin(), a.cos())
                     };
-                    let push = (HAULER_GAP_M - d) * 0.5;
+                    let push = (HAULER_GAP_M - d) * 0.5 * w;
                     placed[i].1 -= ux * push;
                     placed[i].2 -= uy * push;
                     placed[j].1 += ux * push;
