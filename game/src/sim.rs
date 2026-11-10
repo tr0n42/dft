@@ -91,28 +91,48 @@ pub struct Stats {
     pub drops: usize,
     /// The swarm director's last few calls, and haulers it has built.
     pub director: Vec<String>,
+    /// What production is doing: the fabricator, the factory's bays and
+    /// the orders waiting (counted once a second).
+    pub production: Vec<String>,
     pub haulers_built: u64,
     /// Drones out of work, resting in the mother swarm (counted once a second).
     pub resting: usize,
-    /// The element stockpile (kg, by place in the element table), what the
-    /// cutters' parts are being made of now (part, element or "-" when it
-    /// can't be), cutters built for work waiting, and room for more.
+    /// The element stockpile (kg, by place in the element table), the parts
+    /// stock, cutters built for work waiting, and room for more.
     pub stock: Vec<f64>,
     /// The part of `stock` already refined to pure element.
     pub refined: Vec<f64>,
     /// Raw stockpile refined each second.
     pub refine_rate: f64,
     /// All the swarm's matter (see Sim::matter): the round's score.
-    pub matter: [f64; 5],
+    pub matter: [f64; 6],
     /// What has been brought up lately: (colour, kg), most first.
     pub recent_mix: Vec<([u8; 3], f64)>,
     /// Every material collected, ever (kg, by material id).
     pub collected: Vec<f64>,
     /// kg taken out of the stockpile to build with, all told.
     pub stock_spent: f64,
-    pub cutter_parts: Vec<(String, String)>,
+    pub parts: Vec<PartRow>,
     pub built_for_room: u64,
     pub room: u64,
+}
+
+/// One kind of part, for the stockpile window's Parts tab.
+#[derive(Clone, Debug, Default)]
+pub struct PartRow {
+    pub name: String,
+    pub lore: String,
+    /// Kilograms in one.
+    pub kg: f64,
+    /// On hand, and made all told.
+    pub have: u64,
+    pub made: u64,
+    /// How many a cutter and a hauler take.
+    pub per_cutter: u64,
+    pub per_hauler: u64,
+    /// Each component, and the element most of it is made of now ("-":
+    /// it can't be made).
+    pub from: Vec<(String, String)>,
 }
 
 /// How the simulation thread itself is doing, summed since the log last took it.
@@ -385,8 +405,25 @@ fn run(shared: &Shared) {
                     stats.stock_spent = s.stock_spent;
                     stats.collected = s.collected_mats.clone();
                     stats.recent_mix = s.recent_mix(12).into_iter().map(|(m, kg)| (s.world.planet.mats.get(m).colour, kg)).collect();
-                    stats.cutter_parts = s.stock.sources(els, &s.eco.recipe.harvester).into_iter().map(|(p, e)| (p, e.unwrap_or_else(|| "-".into()))).collect();
+                    let r = &s.eco.recipe;
+                    let (per_c, per_h) = (r.counts(&r.harvester), r.counts(&r.hauler));
+                    stats.parts = r
+                        .part
+                        .iter()
+                        .enumerate()
+                        .map(|(i, p)| PartRow {
+                            name: p.name.clone(),
+                            lore: p.lore.clone(),
+                            kg: p.kg(),
+                            have: s.parts.n.get(i).copied().unwrap_or(0),
+                            made: s.parts.made.get(i).copied().unwrap_or(0),
+                            per_cutter: per_c[i],
+                            per_hauler: per_h[i],
+                            from: s.stock.sources(els, p).into_iter().map(|(c, e)| (c, e.unwrap_or_else(|| "-".into()))).collect(),
+                        })
+                        .collect();
                     stats.built_for_room = s.cutters_built_for_room;
+                    stats.production = s.production_lines();
                     stats.room = s.last_room;
                 }
                 if stats.director.len() != s.director_log.len() || stats.director.last() != s.director_log.back() {

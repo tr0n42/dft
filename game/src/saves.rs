@@ -45,7 +45,6 @@ impl Plugin for SavesPlugin {
 pub struct Restore {
     pub view: (f64, f64, f64),
     pub speed: usize,
-    pub free_drones: Option<u64>,
     pub charted: Vec<(i64, i64)>,
 }
 
@@ -213,8 +212,10 @@ fn snapshot(run: &Run, body: &Body, fog: &crate::fog::Fog, view: &crate::view::V
     o.f64(view.y);
     o.f64(view.mpp);
     o.u32(control.speed as u32);
-    o.u8(control.free_drones.is_some() as u8);
-    o.u64(control.free_drones.unwrap_or(0));
+    // (Once whether the economy was off, and the free swarm's size: the
+    // economy is always on now. Kept so older saves still read.)
+    o.u8(0);
+    o.u64(0);
     let charted = fog.charted_cells();
     o.u64(charted.len() as u64);
     let mut prev = (0i64, 0i64);
@@ -309,8 +310,14 @@ pub fn read_file(path: &Path) -> Result<Start, String> {
         charted.push(c);
     }
     let (planet, eco) = crate::build_body(&source)?;
-    let sim = dft_sim::swarm::Sim::read_save(&mut r, planet.clone(), eco)?;
-    Ok(Start { planet, sim, source, restore: Some(Restore { view, speed, free_drones: free.then_some(n_free), charted }) })
+    let mut sim = dft_sim::swarm::Sim::read_save(&mut r, planet.clone(), eco)?;
+    // A save from when the economy could be off: it goes on with the real
+    // economy, its free energy dropped.
+    let _ = n_free;
+    if free {
+        sim.energy = sim.eco.seed_swarm.start_energy;
+    }
+    Ok(Start { planet, sim, source, restore: Some(Restore { view, speed, charted }) })
 }
 
 fn setup(mut commands: Commands, o: Res<crate::Options>) {
@@ -436,10 +443,9 @@ fn finish_switch(
             if let Ok(mut w) = windows.single_mut() {
                 w.title = crate::title(&planet);
             }
-            let mut control = Control { speed: old.speed, paused: false, pause_at: None, free_drones: old.free_drones, attention: old.attention, full_detail: old.full_detail, quit: false };
+            let control = Control { speed: old.speed, paused: false, pause_at: None, free_drones: old.free_drones, attention: old.attention, full_detail: old.full_detail, quit: false };
             if let Some(r) = restore {
                 tiles.all_touched = true;
-                control.free_drones = r.free_drones;
                 apply(r, &mut view, &mut fog, &planet, &mut cam, time.elapsed_secs_f64());
             }
             saves.last_game_t = sim.time();

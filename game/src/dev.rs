@@ -121,6 +121,11 @@ fn panel_inner(mut contexts: EguiContexts, mut dev: ResMut<Dev>, run: Res<Run>, 
                 ui.monospace(l);
             }
         });
+        egui::CollapsingHeader::new("production").default_open(true).show(ui, |ui| {
+            for l in &stats.production {
+                ui.monospace(l);
+            }
+        });
         ui.monospace(format!("eaten   {:.3}%", stats.consumed * 100.0));
         ui.monospace(format!("moving  {} cells awake, {} waiting out of sight, {} loose bodies", stats.awake, stats.dormant, stats.loose));
         if control.free_drones.is_none() {
@@ -138,17 +143,6 @@ fn panel_inner(mut contexts: EguiContexts, mut dev: ResMut<Dev>, run: Res<Run>, 
                     control.speed = i;
                     control.paused = false;
                 }
-            }
-        });
-        ui.horizontal(|ui| {
-            let mut free = control.free_drones.is_some();
-            if ui.checkbox(&mut free, "economy off, grow to").changed() {
-                control.free_drones = if free { Some(20000) } else { None };
-            }
-            if let Some(n) = &mut control.free_drones {
-                let drag = (*n as f64 * 0.01).max(1.0);
-                ui.add(egui::DragValue::new(n).range(10..=1_000_000).speed(drag));
-                ui.label("drones");
             }
         });
         ui.checkbox(&mut control.full_detail, "full detail everywhere (loose matter moves out of sight too)");

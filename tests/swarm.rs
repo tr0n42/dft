@@ -218,10 +218,16 @@ fn a_big_body_opens_one_landing_zone_at_a_time() {
     println!("  set up in {setup:.2} s with {start} dig-face cells");
     assert!(setup < 3.0);
     assert!(start > 0 && (start as f64) < zone * 2.0 * 3.0, "frontier {start} is bigger than one zone");
-    s.run(60.0);
+    // (The fleet arrives with no haulers: the factory builds the first
+    // ones in a couple of minutes, and on a body this size they take as
+    // long again to fly down; only then does anything come up.)
+    s.run(420.0);
     let aboard: f64 = s.haulers.iter().map(|h| h.load).sum();
-    println!("  after a minute: {} dig-face cells, {:.0} kg in haulers, {} landing points", s.frontier_len(), aboard, s.hubs.len());
-    // (Haulers carry it up when full, so after a minute it is still aboard.)
+    println!("  after seven minutes: {} dig-face cells, {:.0} kg in haulers, {} landing points", s.frontier_len(), aboard, s.hubs.len());
+    for l in s.production_lines() {
+        println!("    {l}");
+    }
+    // (Haulers carry it up when full, so it may all still be aboard.)
     assert!(aboard + s.delivered_credited > 0.0);
     // (The mother swarm starts over one spot and spreads as it grows.)
     assert!(s.flock_count() >= 1);

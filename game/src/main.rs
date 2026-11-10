@@ -15,8 +15,9 @@
 //!   --speed <1-8>         the starting speed key (default 1, real time)
 //!   --paused              start paused
 //!   --run-s <t>           run to game time t as fast as possible, then pause
-//!   --drones <n>          economy off: the swarm grows to n drones (default 20000)
-//!   --economy             play the real economy instead
+//!   --bench-drones <n>    benchmarks only: the economy off, the swarm grows
+//!                         to n drones for free (the game always plays the
+//!                         real economy: 1,000 cutters to start, no cap)
 //!   --dev                 open the F1 panel at the start
 //!   --director            start with the action cam on (C toggles it in play;
 //!                         off by default: the camera only moves when you move it)
@@ -111,7 +112,7 @@ impl Options {
             paused: false,
             run_s: None,
             dev: false,
-            free_drones: Some(20000),
+            free_drones: None,
             quit_after: None,
             full_detail: false,
             camera: None,
@@ -148,7 +149,7 @@ impl Options {
                     o.paused = true;
                     used = 1;
                 }
-                "--drones" => o.free_drones = Some(val(i)?.parse().map_err(|_| "--drones takes a number")?),
+                "--bench-drones" => o.free_drones = Some(val(i)?.parse().map_err(|_| "--bench-drones takes a number")?),
                 "--quit-after" => o.quit_after = Some(val(i)?.parse().map_err(|_| "--quit-after takes seconds")?),
                 "--camera" => {
                     // The plan is optional: the next word, unless it's another option.
@@ -182,10 +183,6 @@ impl Options {
                 }
                 "--full-detail" => {
                     o.full_detail = true;
-                    used = 1;
-                }
-                "--economy" => {
-                    o.free_drones = None;
                     used = 1;
                 }
                 "--continue" => {
@@ -350,10 +347,7 @@ fn main() {
         }
     };
     let Start { planet, sim, source, restore } = start;
-    let mut control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, full_detail: o.full_detail, quit: false };
-    if let Some(r) = &restore {
-        control.free_drones = r.free_drones;
-    }
+    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, full_detail: o.full_detail, quit: false };
     let script = match o.camera.as_deref().map(bench::parse) {
         Some(Ok(steps)) => Some(bench::Script::new(steps)),
         Some(Err(e)) => {

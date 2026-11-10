@@ -239,7 +239,7 @@ fn ease(mut now: ResMut<SwarmNow>, run: Option<Res<crate::Run>>, body: Res<crate
     *last = real;
     let (mother, held) = {
         let out = run.0.out.lock();
-        (out.mother, out.stats.matter[0])
+        (out.mother, out.stats.matter[0] + out.stats.matter[2])
     };
     let target = Shape::new(mother, held, body.0.max_radius, real);
     let cur = &mut now.0;

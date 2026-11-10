@@ -105,8 +105,10 @@ fn main() {
                 top.sort_by(|a, b| b.0.total_cmp(&a.0));
                 let t: Vec<String> = top.iter().take(8).map(|(k, e)| format!("{e} {:.1} t", k / 1000.0)).collect();
                 println!("           stockpile {:.1} t ({}), in transit {:.1} t; energy {:.0}; cutters built for room {}, room {}", s.stock.total() / 1000.0, t.join(", "), s.transit.total / 1000.0, s.energy, s.cutters_built_for_room, s.last_room);
-                let src: Vec<String> = s.stock.sources(els, &s.eco.recipe.harvester).into_iter().map(|(p, e)| format!("{p}: {}", e.unwrap_or("-".into()))).collect();
-                println!("           cutter parts from: {}", src.join(", "));
+                let src: Vec<String> = s.eco.recipe.part.iter().map(|p| format!("{}: {}", p.name, s.stock.sources(els, p).into_iter().map(|(_, e)| e.unwrap_or("-".into())).collect::<Vec<_>>().join("+"))).collect();
+                println!("           parts made from: {}", src.join(", "));
+                let have: Vec<String> = s.eco.recipe.part.iter().zip(&s.parts.n).map(|(p, n)| format!("{} {n}", p.name)).collect();
+                println!("           parts in stock: {}", have.join(", "));
             }
             println!("           haulers {} (built {}), cutters waiting {}, flocks {}", s.hauler_views().len(), s.haulers_built, s.waiting_count(), s.flock_count());
             println!("           loose bodies in the air {}, broken free {}, settled {}, shattered {}, crushed drones {}", s.bodies.count(), s.bodies.stats.broken_free, s.bodies.stats.settled, s.bodies.stats.shattered, s.crushed);

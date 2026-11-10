@@ -38,5 +38,5 @@ exit /b 0
 
 :run
 echo %1 of 9: %2, %3 km, %4 drones
-cargo run --release -- --body %2 --radius-km %3 --drones %4 --speed 8 --background --camera "%~5"
+cargo run --release -- --body %2 --radius-km %3 --bench-drones %4 --speed 8 --background --camera "%~5"
 exit /b 0

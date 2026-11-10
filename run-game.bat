@@ -5,7 +5,7 @@ rem Controls: drag with either mouse button (or arrows / WASD) to pan, the wheel
 rem Page Up / Page Down zooms, Home shows the whole body, C turns the action cam on/off
 rem (off at the start; starts with it on, --zoom-limit limits zooming out).
 rem Space pauses, 1-8 pick a speed (1x 2x 5x 10x 30x 100x 300x max), + and - step it.
-rem The economy is off for now: the swarm grows to 20000 drones for free (--drones N to change, --economy for the real game).
+rem The real economy: the swarm arrives with 1,000 cutters and builds more from parts, with no cap.
 rem Every session writes a performance log to the logs folder (bench-suite.bat runs a fixed set).
 rem F1 opens the developer panel (numbers, speed, a body/size/seed/glamour picker, saves).
 rem Saves: F5 saves, F9 loads the newest; the game autosaves every 5 minutes and on closing

@@ -395,14 +395,20 @@ pub struct Economy {
     pub perk: Vec<Perk>,
     pub intelligence: Intelligence,
     pub lava: Lava,
-    /// What cutters and haulers are made of (with the economy on).
+    /// The parts catalogue, and what cutters and haulers are made of (with
+    /// the economy on).
     #[serde(default)]
     pub recipe: crate::recipes::Recipes,
+    /// The fleet's starting allowance, the fabricator and the factory.
+    #[serde(default)]
+    pub production: crate::production::ProductionSpec,
 }
 
 impl Economy {
     pub fn parse(text: &str) -> Result<Self, String> {
-        toml::from_str(text).map_err(|e| e.to_string())
+        let e: Economy = toml::from_str(text).map_err(|e| e.to_string())?;
+        e.recipe.check()?;
+        Ok(e)
     }
     pub fn load(path: &str) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;

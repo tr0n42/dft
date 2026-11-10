@@ -469,6 +469,12 @@ pub struct Sim {
     /// haulers from (see recipes.rs), and those on their way to it.
     pub stock: crate::recipes::Stock,
     pub transit: crate::recipes::Transit,
+    /// Parts made from the stockpile and not yet built into anything (see
+    /// recipes.rs).
+    pub parts: crate::recipes::Parts,
+    /// The fabricator, the factory's bays and the director's orders (see
+    /// production.rs).
+    pub prod: crate::production::Production,
     /// The same by material (kg, by material id), for showing what was
     /// brought up in its own colours: on its way, and delivered lately
     /// (fading, a few minutes' worth).
@@ -778,6 +784,16 @@ impl Sim {
     /// Start a body with starting advantages bought with Seed Mass.
     pub fn with_perks(world: World, eco: Economy, perks: &[String]) -> Self {
         let mut sim = Self::blank(world, eco);
+        // The fleet's storage ship brings refined elements to build from.
+        if sim.prod.on() {
+            for (s, kg) in &sim.eco.production.start_refined {
+                if let Some(i) = sim.world.planet.mats.elements.index(s) {
+                    sim.stock.kg[i] += kg;
+                    sim.stock.refined[i] += kg;
+                }
+            }
+            sim.energy += sim.eco.production.start_energy;
+        }
         sim.build_ring();
         sim.mother_work();
         sim.seed_frontier();
@@ -817,9 +833,13 @@ impl Sim {
         let bodies = Bodies::new(&world);
         let stock = crate::recipes::Stock::new(&world.planet.mats.elements);
         let transit = crate::recipes::Transit::new(&world.planet.mats.elements);
+        let parts = crate::recipes::Parts::new(&eco.recipe);
+        let prod = if eco.recipe.part.is_empty() { crate::production::Production::default() } else { crate::production::Production::new(&eco.production) };
         let sim = Sim {
             stock,
             transit,
+            parts,
+            prod,
             transit_mats: vec![0.0; world.planet.mats.len()],
             transit_mats_total: 0.0,
             flock_mix: Vec::new(),
@@ -2247,7 +2267,7 @@ impl Sim {
         self.alive_count
     }
 
-    fn harvesters_alive(&self) -> u64 {
+    pub fn harvesters_alive(&self) -> u64 {
         self.alive_count as u64 + self.packet
     }
 
@@ -3201,8 +3221,6 @@ impl Sim {
         route_len(a, b, route_cruise(a, b, self.world.planet.max_radius))
     }
 
-    /// Pay for a hauler (economy on): its energy, and its parts from the
-    /// stockpile (or its mass, with no recipe). Returns whether it could.
     fn mats_add(&mut self, m: crate::materials::MatId, kg: f64) {
         if let Some(v) = self.transit_mats.get_mut(m as usize) {
             *v += kg;
@@ -3238,20 +3256,33 @@ impl Sim {
     }
 
     fn can_expand(&self) -> bool {
+        // With a factory: while no hauler is left waiting for a bay.
+        if self.factory() {
+            return self.prod.queued(crate::production::Unit::Hauler) == 0;
+        }
         let els = &self.world.planet.mats.elements;
         let r = &self.eco.recipe;
         if r.hauler.parts.is_empty() {
             return self.mass >= self.eco.hauler.mass_cost + POOL_OPEN as f64 * self.eco.harvester.mass_cost;
         }
         // A hauler, then a first crew of cutters, all from what's on hand.
-        let mut s = self.stock.clone();
-        if !s.build(els, &r.hauler) {
+        let (mut s, mut p) = (self.stock.clone(), self.parts.clone());
+        if p.build(&mut s, els, r, &r.hauler).is_none() {
             return false;
         }
-        (0..POOL_OPEN / 4).all(|_| s.build(els, &r.harvester))
+        (0..POOL_OPEN / 4).all(|_| p.build(&mut s, els, r, &r.harvester).is_some())
     }
 
+    /// Pay for a hauler (economy on): its energy, and its parts from the
+    /// parts stock, any it is short of made at once from the stockpile (or
+    /// its mass, with no recipe). Returns whether it could.
     fn pay_hauler(&mut self) -> bool {
+        // With a factory, it is paid for when its bay starts on it: here,
+        // only whether the queue has room.
+        if self.factory() {
+            let room = self.eco.production.hauler_orders_per_bay as usize * self.prod.bays_of(crate::production::Unit::Hauler);
+            return self.prod.queued(crate::production::Unit::Hauler) < room;
+        }
         let (e, m) = (self.eco.hauler.energy_cost, self.eco.hauler.mass_cost);
         if self.energy - e < 5.0 * self.upkeep() {
             return false;
@@ -3262,10 +3293,11 @@ impl Sim {
             }
             self.mass -= m;
             self.spent_mass += m;
-        } else if !self.stock.build(&self.world.planet.mats.elements, &self.eco.recipe.hauler) {
-            return false;
         } else {
-            self.stock_spent += self.eco.recipe.hauler.kg();
+            match self.parts.build(&mut self.stock, &self.world.planet.mats.elements, &self.eco.recipe, &self.eco.recipe.hauler) {
+                Some(kg) => self.stock_spent += kg,
+                None => return false,
+            }
         }
         self.energy -= e;
         true
@@ -3283,17 +3315,34 @@ impl Sim {
             }
             self.mass -= m;
             self.spent_mass += m;
-        } else if !self.stock.build(&self.world.planet.mats.elements, &self.eco.recipe.harvester) {
-            return false;
         } else {
-            self.stock_spent += self.eco.recipe.harvester.kg();
+            match self.parts.build(&mut self.stock, &self.world.planet.mats.elements, &self.eco.recipe, &self.eco.recipe.harvester) {
+                Some(kg) => self.stock_spent += kg,
+                None => return false,
+            }
         }
         self.energy -= energy;
         true
     }
 
-    /// A new hauler leaves the mother swarm for flock h.
+    /// A hauler for flock h: ordered from the factory (it comes when built),
+    /// or straight away with no factory.
     fn send_hauler(&mut self, h: usize) {
+        if self.factory() {
+            self.prod.orders.push_back(crate::production::Order::Hauler(h));
+        } else {
+            self.launch_hauler(h);
+        }
+    }
+
+    /// Units are built in the factory, over time (the economy on, with a
+    /// factory in the economy).
+    pub fn factory(&self) -> bool {
+        self.prod.on() && self.free_drones.is_none()
+    }
+
+    /// A new hauler leaves the mother swarm for flock h.
+    fn launch_hauler(&mut self, h: usize) {
         let from = self.rendezvous(h);
         let to = self.site_pos(h);
         let t1 = self.tick + self.ticks(self.hauler_way(from, to) / self.eco.hauler.speed);
@@ -3831,6 +3880,10 @@ impl Sim {
                     _ => {}
                 }
             }
+            // (Those on order from the factory are on their way too.)
+            let ordered = self.prod.haulers_for(site);
+            n += ordered;
+            coming += ordered;
             let f = self.flock[site];
             // Rates over the remembered stretch (a sum fading by `fade` each
             // second settles at rate x DIRECTOR_MEMORY_S).
@@ -3883,8 +3936,12 @@ impl Sim {
                 }
             }
             self.send_hauler(site);
-            self.haulers_built += 1;
-            self.director_log_push(format!("flock {site}: hauler {} ({why})", n + 1));
+            if self.factory() {
+                self.director_log_push(format!("flock {site}: hauler {} ordered ({why})", n + 1));
+            } else {
+                self.haulers_built += 1;
+                self.director_log_push(format!("flock {site}: hauler {} ({why})", n + 1));
+            }
         }
     }
 
@@ -3912,10 +3969,12 @@ impl Sim {
     /// All the matter the swarm holds, kg: (in the stockpile, on its way
     /// up in holds and haulers, built into cutters, built into haulers,
     /// grown into the mother swarm). Their sum is the round's score.
-    pub fn matter(&self) -> [f64; 5] {
+    pub fn matter(&self) -> [f64; 6] {
         let cutters = (self.alive_count as f64 + self.packet as f64) * self.eco.harvester.mass_cost;
         let haulers = self.haulers.iter().filter(|h| h.alive).count() as f64 * self.eco.hauler.mass_cost;
-        [self.stock.total(), self.transit.total, cutters, haulers, self.mother.grown_kg]
+        let r = &self.eco.recipe;
+        let in_bays: f64 = self.prod.bays.iter().filter_map(|b| b.job).map(|j| r.kg(if j.order.unit() == crate::production::Unit::Cutter { &r.harvester } else { &r.hauler })).sum();
+        [self.stock.total(), self.transit.total, self.parts.kg(r) + in_bays, cutters, haulers, self.mother.grown_kg]
     }
 
     /// Every hauler, for drawing.
@@ -3984,6 +4043,17 @@ impl Sim {
             self.energy = self.energy.max(1e12);
             return;
         }
+        // With a factory: cutters are ordered, as many as there is work
+        // for less those on order, and built in its bays.
+        let factory = self.factory();
+        if factory {
+            self.production_work();
+        }
+        // Parts made ahead from the stockpile, kept in stock (with no
+        // factory: the fabricator makes them, over time).
+        if !factory && !self.eco.recipe.part.is_empty() {
+            self.stock_spent += self.parts.make_ahead(&mut self.stock, &self.world.planet.mats.elements, &self.eco.recipe);
+        }
         let reserve = 5.0 * self.upkeep();
         // A Refiner when hauls get long.
         if self.refiner_unlocked
@@ -4046,6 +4116,22 @@ impl Sim {
         // the stockpile and energy allow. The swarm has no cap.
         let mut alive = self.harvesters_alive();
         let resting = self.parked.len() as u64;
+        if factory {
+            use crate::production::{Order, Unit};
+            let on_order = (self.prod.queued(Unit::Cutter) + self.prod.building(Unit::Cutter)) as u64;
+            let want = self.last_room.saturating_sub(resting + on_order);
+            let room = (self.eco.production.cutter_orders_per_bay as usize * self.prod.bays_of(Unit::Cutter)).saturating_sub(self.prod.queued(Unit::Cutter)) as u64;
+            for _ in 0..want.min(room) {
+                self.prod.orders.push_back(Order::Cutter);
+                self.last_room -= 1;
+            }
+            // The guaranteed minimum, as below.
+            if self.tick >= self.next_free_build && (want > 0 || alive < 10) {
+                self.spawn_harvester();
+                self.next_free_build = self.tick + self.ticks(self.eco.seed_swarm.free_build_every_s);
+            }
+            return;
+        }
         let mut want = self.last_room.saturating_sub(resting);
         while want > 0 {
             let cost = self.eco.harvester.energy_cost * self.perk_energy / self.up("fabrication") * crate::noise::powi(self.eco.harvester.energy_cost_growth, alive.min(i32::MAX as u64) as i32);
@@ -4065,6 +4151,229 @@ impl Sim {
             self.spawn_harvester();
             self.next_free_build = self.tick + self.ticks(self.eco.seed_swarm.free_build_every_s);
         }
+    }
+
+    /// One second of production: the fabricator makes parts, the factory's
+    /// bays finish units and start on the next orders.
+    fn production_work(&mut self) {
+        let dt = self.ticks(1.0) as f64 * self.eco.tick_s;
+        self.fabricate(dt);
+        // Orders for flocks gone since are dropped.
+        let flock = &self.flock;
+        self.prod.orders.retain(|o| match o {
+            crate::production::Order::Hauler(s) => !flock.get(*s).is_some_and(|f| f.dead),
+            _ => true,
+        });
+        // Each bay works through the second: a quick unit done, it starts
+        // the next, as long as there are orders, parts and energy.
+        for b in 0..self.prod.bays.len() {
+            let mut budget = dt;
+            for _ in 0..100_000 {
+                if self.prod.bays[b].job.is_none() && !self.start_unit(b) {
+                    break;
+                }
+                let Some(mut j) = self.prod.bays[b].job else { break };
+                if j.left_s > budget {
+                    j.left_s -= budget;
+                    self.prod.bays[b].job = Some(j);
+                    break;
+                }
+                budget -= j.left_s;
+                self.prod.bays[b].job = None;
+                self.finish_unit(j.order);
+            }
+        }
+    }
+
+    /// The fabricator: parts from refined elements, one kind at a time.
+    /// First the parts the next hauler waiting still lacks (if a hauler bay
+    /// is free for it), then the next cutter's (the same), then those for
+    /// every order waiting and the stock kept ahead. That decides which kind
+    /// it makes; once on a kind it makes a whole run of it (all that every
+    /// order waiting and the stock ahead lack) before switching, since
+    /// every switch costs time; then it takes the kind furthest short (by
+    /// mass) in the most urgent need.
+    fn fabricate(&mut self, dt: f64) {
+        // Through the whole second: a run finished, it switches and goes on.
+        let mut budget = dt;
+        for _ in 0..64 {
+            if budget <= 1e-9 {
+                break;
+            }
+            let used = self.fab_step(budget);
+            if used <= 0.0 || self.prod.fab.idle || self.prod.fab.stalled {
+                break;
+            }
+            budget -= used;
+        }
+    }
+
+    /// One stretch of the fabricator's work, up to `budget` seconds: a
+    /// switch, or making parts until the run is done or the time is up.
+    /// Returns the seconds it used.
+    fn fab_step(&mut self, budget: f64) -> f64 {
+        use crate::production::Unit;
+        let r = &self.eco.recipe;
+        let n = r.part.len();
+        if n == 0 {
+            return 0.0;
+        }
+        let (hc, uc) = (r.counts(&r.harvester), r.counts(&r.hauler));
+        let (qc, qh) = (self.prod.queued(Unit::Cutter) as u64, self.prod.queued(Unit::Hauler) as u64);
+        let have = &self.parts.n;
+        let tier = |c: u64, h: u64| -> Vec<u64> { (0..n).map(|i| (c * hc[i] + h * uc[i]).saturating_sub(have[i])).collect() };
+        let free = |u: Unit| (self.prod.building(u) < self.prod.bays_of(u)) as u64;
+        let (nh, nc) = (qh.min(free(Unit::Hauler)), qc.min(free(Unit::Cutter)));
+        let tiers = [tier(0, nh), tier(nc, nh), tier(r.ahead.harvester as u64 + qc, r.ahead.hauler as u64 + qh)];
+        // The most urgent need, and the whole run.
+        let urgent = tiers.iter().find(|t| t.iter().any(|&k| k > 0)).cloned().unwrap_or_else(|| vec![0; n]);
+        let short = tiers[2].clone();
+        let kg: Vec<f64> = r.part.iter().map(|p| p.kg()).collect();
+        let spec = &self.eco.production;
+        let fab = &mut self.prod.fab;
+        if fab.part.is_none_or(|p| short[p] == 0) {
+            let best = (0..n).filter(|&i| urgent[i] > 0).max_by(|&a, &b| (urgent[a] as f64 * kg[a]).total_cmp(&(urgent[b] as f64 * kg[b])).then(b.cmp(&a)));
+            match best {
+                None => {
+                    fab.progress_kg = 0.0;
+                    fab.stalled = false;
+                    fab.idle = true;
+                    return 0.0;
+                }
+                Some(p) => {
+                    if fab.part.is_some() {
+                        fab.switch_left_s = spec.fab_switch_s;
+                    }
+                    fab.part = Some(p);
+                    fab.progress_kg = 0.0;
+                }
+            }
+        }
+        fab.idle = false;
+        if fab.switch_left_s > 0.0 {
+            let used = fab.switch_left_s.min(budget);
+            fab.switch_left_s -= used;
+            return used;
+        }
+        let Some(p) = fab.part else { return 0.0 };
+        let rate = spec.fab_kg_per_s.max(1e-9);
+        let work = fab.progress_kg + rate * budget;
+        let mut k = ((work / kg[p]).floor() as u64).min(short[p]);
+        if k == 0 {
+            // A big part, not done this stretch.
+            fab.progress_kg = work;
+            return budget;
+        }
+        loop {
+            let comps: Vec<(&crate::recipes::Component, f64)> = r.part[p].make.iter().map(|c| (c, c.kg * k as f64)).collect();
+            if let Some(take) = self.stock.plan_refined(&self.world.planet.mats.elements, &comps) {
+                self.stock_spent += self.stock.take(&take);
+                self.parts.n[p] += k;
+                self.parts.made[p] += k;
+                fab.stalled = false;
+                let left = work - k as f64 * kg[p];
+                if k == short[p] {
+                    // The run is done: the time left goes on.
+                    fab.progress_kg = 0.0;
+                    return (budget - left / rate).clamp(1e-6, budget);
+                }
+                // (Work isn't banked beyond the part in hand.)
+                fab.progress_kg = left.min(kg[p]);
+                return budget;
+            }
+            if k == 1 {
+                fab.stalled = true;
+                fab.progress_kg = fab.progress_kg.min(kg[p]);
+                return budget;
+            }
+            k /= 2;
+        }
+    }
+
+    /// Bay b starts on the first order for its kind of unit, if its parts
+    /// are in stock and there is the energy to build it. Returns whether it did.
+    fn start_unit(&mut self, b: usize) -> bool {
+        use crate::production::{Job, Unit};
+        let unit = self.prod.bays[b].unit;
+        let Some(k) = self.prod.orders.iter().position(|o| o.unit() == unit) else { return false };
+        let energy = match unit {
+            Unit::Cutter => self.eco.harvester.energy_cost * self.perk_energy / self.up("fabrication") * crate::noise::powi(self.eco.harvester.energy_cost_growth, self.harvesters_alive().min(i32::MAX as u64) as i32),
+            Unit::Hauler => self.eco.hauler.energy_cost,
+        };
+        // (A hauler waiting on energy goes first: cutters are no use until
+        // there is a hauler to fill.)
+        let held = if unit == Unit::Cutter && self.prod.queued(Unit::Hauler) > 0 && self.prod.building(Unit::Hauler) < self.prod.bays_of(Unit::Hauler) { self.eco.hauler.energy_cost } else { 0.0 };
+        if self.energy - energy - held <= 5.0 * self.upkeep() {
+            return false;
+        }
+        let r = &self.eco.recipe;
+        let recipe = match unit {
+            Unit::Cutter => &r.harvester,
+            Unit::Hauler => &r.hauler,
+        };
+        if !self.parts.claim(r, recipe) {
+            return false;
+        }
+        self.energy -= energy;
+        let order = self.prod.orders.remove(k).expect("found above");
+        self.prod.bays[b].job = Some(Job { order, left_s: self.prod.bays[b].build_s });
+        true
+    }
+
+    /// A unit leaves the factory: a cutter drops to the flock that needs
+    /// one most, a hauler goes to the flock it was built for (or, if that
+    /// flock is gone, the one with the most cutters waiting).
+    fn finish_unit(&mut self, order: crate::production::Order) {
+        use crate::production::Order;
+        match order {
+            Order::Cutter => {
+                self.spawn_harvester();
+                self.cutters_built_for_room += 1;
+                self.prod.built[0] += 1;
+            }
+            Order::Hauler(site) => {
+                let live = |i: usize| self.flock.get(i).is_some_and(|f| !f.dead) && self.hubs[i].kind == HubKind::Seed;
+                let to = if live(site) { Some(site) } else { (0..self.hubs.len()).filter(|&i| live(i)).max_by_key(|&i| (self.site_wait[i].len(), std::cmp::Reverse(i))) };
+                if let Some(s) = to {
+                    self.launch_hauler(s);
+                    self.director_log_push(format!("flock {s}: a hauler leaves the factory"));
+                }
+                self.haulers_built += 1;
+                self.prod.built[1] += 1;
+            }
+        }
+    }
+
+    /// What production is doing, for the F1 panel.
+    pub fn production_lines(&self) -> Vec<String> {
+        use crate::production::{Order, Unit};
+        if !self.factory() {
+            return vec!["no factory: units are built at once".into()];
+        }
+        let mut v = Vec::new();
+        let r = &self.eco.recipe;
+        let f = &self.prod.fab;
+        v.push(match f.part {
+            _ if f.idle => "fabricator idle: every part wanted is in stock".into(),
+            None => "fabricator idle".into(),
+            Some(p) if f.switch_left_s > 0.0 => format!("fabricator switching to {} ({:.0} s)", r.part[p].name.to_lowercase(), f.switch_left_s),
+            Some(p) if f.stalled => format!("fabricator stalled on {}: the stockpile can't make it", r.part[p].name.to_lowercase()),
+            Some(p) => format!("fabricator making {} ({} in stock)", r.part[p].name.to_lowercase(), self.parts.n[p]),
+        });
+        for u in [Unit::Cutter, Unit::Hauler] {
+            v.push(format!("{} bays  {} of {} busy · {} waiting", u.name(), self.prod.building(u), self.prod.bays_of(u), self.prod.queued(u)));
+        }
+        for (i, b) in self.prod.bays.iter().enumerate() {
+            if let Some(j) = b.job {
+                let what = match j.order {
+                    Order::Cutter => "a cutter".to_string(),
+                    Order::Hauler(s) => format!("a hauler for flock {s}"),
+                };
+                v.push(format!("  bay {}: {what}, {:.0} s left", i + 1, j.left_s.max(0.0)));
+            }
+        }
+        v.push(format!("built   {} cutters, {} haulers", self.prod.built[0], self.prod.built[1]));
+        v
     }
 
     /// One second of packet work. Packets mine whole 64 m blocks at the frontier
@@ -4707,7 +5016,7 @@ pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches f
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 8; // 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined
+const SIM_VERSION: u32 = 10; // 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -4760,6 +5069,12 @@ impl Sim {
         for r in &self.stock.refined {
             o.f64(*r);
         }
+        o.u32(self.parts.n.len() as u32);
+        for (n, m) in self.parts.n.iter().zip(&self.parts.made) {
+            o.u64(*n);
+            o.u64(*m);
+        }
+        self.prod.write(o);
         o.f64(self.delivered_credited);
         o.f64(self.spent_mass);
         o.f64(self.recovered_mass);
@@ -4933,7 +5248,10 @@ impl Sim {
     /// the economy as it is now.
     pub fn read_save(r: &mut crate::save::R, planet: std::sync::Arc<crate::planet::Planet>, eco: Economy) -> Result<Sim, String> {
         let world = crate::save::read_world(r, planet)?;
-        if r.u32()? != SIM_VERSION {
+        // (Version 8 saves have no parts stock, 8 and 9 no production: they
+        // start empty.)
+        let version = r.u32()?;
+        if !(8..=SIM_VERSION).contains(&version) {
             return Err("this save's swarm is from another version".into());
         }
         let mut s = Sim::blank(world, eco);
@@ -4954,6 +5272,23 @@ impl Sim {
             let v = r.f64()?;
             if i < s.stock.refined.len() {
                 s.stock.refined[i] = v.min(s.stock.kg[i]);
+            }
+        }
+        if version >= 9 {
+            let n = r.u32()? as usize;
+            for i in 0..n {
+                let (k, m) = (r.u64()?, r.u64()?);
+                if i < s.parts.n.len() {
+                    s.parts.n[i] = k;
+                    s.parts.made[i] = m;
+                }
+            }
+        }
+        if version >= 10 {
+            let p = crate::production::Production::read(r)?;
+            // (Only if it is the same factory as the economy's.)
+            if p.bays.len() == s.prod.bays.len() {
+                s.prod = p;
             }
         }
         s.delivered_credited = r.f64()?;

@@ -1,6 +1,7 @@
 //! The stockpile: the elements the mother swarm has been sent, laid out as a
-//! periodic table, with the round's score (all the matter the swarm holds)
-//! in its title. Starts collapsed; opens and closes only when clicked.
+//! periodic table, the materials collected, and the parts made from them,
+//! with the round's score (all the matter the swarm holds) in its title.
+//! Starts collapsed; opens and closes only when clicked.
 
 use crate::{Body, Run};
 use bevy::prelude::*;
@@ -102,7 +103,7 @@ fn stockpile(mut contexts: EguiContexts, run: Option<Res<Run>>, body: Res<Body>,
     let (stock, refined, rate, matter, parts, built, room, collected) = {
         let out = run.0.out.lock();
         let s = &out.stats;
-        (s.stock.clone(), s.refined.clone(), s.refine_rate, s.matter, s.cutter_parts.clone(), s.built_for_room, s.room, s.collected.clone())
+        (s.stock.clone(), s.refined.clone(), s.refine_rate, s.matter, s.parts.clone(), s.built_for_room, s.room, s.collected.clone())
     };
     let els = &body.0.mats.elements;
     let score: f64 = matter.iter().sum();
@@ -116,7 +117,7 @@ fn stockpile(mut contexts: EguiContexts, run: Option<Res<Run>>, body: Res<Body>,
         .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
         .show(ctx, |ui| {
             // Where the matter is.
-            let names = ["in the stockpile", "on its way up", "built into cutters", "built into haulers", "grown into the mother swarm"];
+            let names = ["in the stockpile", "on its way up", "made into parts", "built into cutters", "built into haulers", "grown into the mother swarm"];
             egui::Grid::new("stockpile-matter").num_columns(2).spacing([16.0, 2.0]).show(ui, |ui| {
                 for (n, kg) in names.iter().zip(matter) {
                     ui.label(*n);
@@ -153,11 +154,18 @@ fn stockpile(mut contexts: EguiContexts, run: Option<Res<Run>>, body: Res<Body>,
                 if ui.selectable_label(tab == 1, "Materials").clicked() {
                     tab = 1;
                 }
+                if ui.selectable_label(tab == 2, "Parts").clicked() {
+                    tab = 2;
+                }
             });
             ui.ctx().data_mut(|d| d.insert_persisted(tab_id, tab));
             ui.add_space(4.0);
             if tab == 1 {
                 materials(ui, &body.0, &collected, &on.materials, &mut finder);
+                return;
+            }
+            if tab == 2 {
+                parts_page(ui, &parts, built, room);
                 return;
             }
             // Raw (still in the minerals it was dug as) or refined (pure,
@@ -242,7 +250,7 @@ fn stockpile(mut contexts: EguiContexts, run: Option<Res<Run>>, body: Res<Body>,
                 if resp.clicked() {
                     finder.want = Some(i);
                 }
-                let uses: Vec<&str> = parts.iter().filter(|(_, el)| el == &e.symbol).map(|(p, _)| p.as_str()).collect();
+                let uses: Vec<String> = parts.iter().flat_map(|p| p.from.iter().filter(|(_, el)| el == &e.symbol).map(move |(c, _)| format!("{} ({c})", p.name.to_lowercase()))).collect();
                 resp.on_hover_ui(|ui| {
                     ui.label(egui::RichText::new(format!("{} ({})", e.name, e.symbol)).strong());
                     if held {
@@ -252,7 +260,7 @@ fn stockpile(mut contexts: EguiContexts, run: Option<Res<Run>>, body: Res<Body>,
                     }
                     ui.label(format!("worth {:.1}× ordinary rock per kg", e.value));
                     if !uses.is_empty() {
-                        ui.label(format!("cutters' {} are made of it now", uses.join(", ")));
+                        ui.label(format!("made into {} now", uses.join(", ")));
                     }
                     if traces {
                         ui.label(egui::RichText::new("only traces in common rock here: no ore of it on this body").color(egui::Color32::from_rgb(210, 180, 100)));
@@ -301,23 +309,61 @@ fn stockpile(mut contexts: EguiContexts, run: Option<Res<Run>>, body: Res<Body>,
                     }
                 });
             }
-            ui.add_space(4.0);
-            ui.separator();
-            // What cutters are being made of now.
-            ui.label(egui::RichText::new("Cutters are being made of").strong());
-            ui.horizontal_wrapped(|ui| {
-                for (p, el) in &parts {
-                    let ok = el != "-";
-                    let t = egui::RichText::new(format!("{p}: {el}")).monospace();
-                    ui.label(if ok { t } else { t.color(egui::Color32::from_rgb(230, 110, 90)) });
-                    ui.label("·");
-                }
-            });
-            ui.label(egui::RichText::new(format!("{built} cutters built for waiting work · room for {room} more")).weak());
         });
     // (Open, it covers part of the screen: finds are framed beside it.)
     finder.covered = shown.filter(|r| r.inner.is_some()).map(|r| r.response.rect);
     Ok(())
+}
+
+/// The parts page: every kind of part, how many are on hand and have been
+/// made, what a cutter and a hauler take, and what each is made of now.
+fn parts_page(ui: &mut egui::Ui, parts: &[crate::sim::PartRow], built: u64, room: u64) {
+    ui.set_min_width(18.0 * (CELL.x + GAP));
+    if parts.is_empty() {
+        ui.label("No parts catalogue: units are built straight from mass.");
+        return;
+    }
+    let held: f64 = parts.iter().map(|p| p.have as f64 * p.kg).sum();
+    ui.label(egui::RichText::new(format!("{} of parts on hand", if held >= 1.0 { mass(held) } else { "nothing".into() })).strong());
+    ui.label(egui::RichText::new("Made from the refined stockpile and kept ready; every unit is built from them.").weak());
+    ui.add_space(6.0);
+    let head = |t: &str| egui::RichText::new(t).strong();
+    egui::Grid::new("stockpile-parts").num_columns(6).striped(true).spacing([18.0, 4.0]).show(ui, |ui| {
+        ui.label(head("Part"));
+        ui.label(head("on hand"));
+        ui.label(head("made"));
+        ui.label(head("cutter"));
+        ui.label(head("hauler"));
+        ui.label(head("made of now"));
+        ui.end_row();
+        for p in parts {
+            ui.label(egui::RichText::new(&p.name)).on_hover_ui(|ui| {
+                ui.label(egui::RichText::new(&p.name).strong());
+                ui.label(egui::RichText::new(&p.lore).italics());
+                ui.label(format!("{} each", mass(p.kg).trim()));
+            });
+            ui.label(egui::RichText::new(p.have.to_string()).monospace());
+            ui.label(egui::RichText::new(p.made.to_string()).monospace().weak());
+            let n = |k: u64| egui::RichText::new(if k > 0 { k.to_string() } else { "·".into() }).monospace();
+            ui.label(n(p.per_cutter));
+            ui.label(n(p.per_hauler));
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for (k, (c, el)) in p.from.iter().enumerate() {
+                    if k > 0 {
+                        ui.label(egui::RichText::new("·").weak());
+                    }
+                    let t = egui::RichText::new(format!("{c} {el}")).monospace();
+                    ui.label(if el == "-" { t.color(egui::Color32::from_rgb(230, 110, 90)) } else { t });
+                }
+            });
+            ui.end_row();
+        }
+    });
+    ui.add_space(6.0);
+    let unit = |per: fn(&crate::sim::PartRow) -> u64| parts.iter().map(|p| per(p) as f64 * p.kg).sum::<f64>();
+    ui.label(egui::RichText::new(format!("a cutter is {} of parts · a hauler {}", mass(unit(|p| p.per_cutter)), mass(unit(|p| p.per_hauler)))).weak());
+    ui.label(egui::RichText::new(format!("{built} cutters built for waiting work · room for {room} more")).weak());
 }
 
 /// The materials page: every kind of matter there is, as a catalogue to

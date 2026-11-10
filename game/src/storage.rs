@@ -411,7 +411,7 @@ fn place(
     let sh = swarm.0;
     let (held, mix, heights, spent) = {
         let out = run.0.out.lock();
-        (out.stats.matter[0], out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()), out.stats.stock_spent)
+        (out.stats.matter[0] + out.stats.matter[2], out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()), out.stats.stock_spent)
     };
     // The top of the ground in direction `a` (as last swept).
     let ground = |a: f64| -> Option<f64> {

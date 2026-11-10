@@ -2,16 +2,16 @@
 
 New session? Read HANDOFF.md first.
 
-**Next up: production phase 1** (from the Swarm Production Design doc): the
-robot-lore parts catalogue (neural cores, behaviour chips, servos, power
-cells, frame struts, armour, cutting heads, hold modules, heat sinks, lift
-vanes) in a data file, a parts stock, unit recipes in parts, and a Parts
-tab in the stockpile window. Then phase 2 refiner and fabricator ships
-(couriers carry one block per trip), phase 3 factories and the director's
-hidden build queue, phase 4 energy (ground units beam it up; factories can
-switch to making power), phase 5 heat-sink bots (the magma barrier over big
-planets' cores), phase 6 tunnelers. Premium units (magma diver, seer, beam
-relay, deep hauler, core lance) come later through the per-run tech tree.
+**Next up: production, step 2 of the skeleton** (plan agreed with Benjamin
+10 Nov, see HANDOFF.md "Production plan"): machines placed along the mother
+swarm as it wraps the planet, material flowing between them with
+distance-based delays, and the swarm building its own machines (storage
+ships, refiners, fabricators, factories and factory bays) block by block
+from refined elements. Then the drawing (fleet arriving, the modular
+factory with lasers, couriers drawn along the flows), then each hauler's
+own landing spot. Energy (ground units beam it up), heat-sink bots and
+tunnelers after. Premium units (magma diver, seer, beam relay, deep hauler,
+core lance) come later through the per-run tech tree.
 
 ## M6, the native game (in progress)
 
@@ -33,7 +33,40 @@ relay, deep hauler, core lance) come later through the per-run tech tree.
   benchmark suite saves and loads at every size. Kept only roughly: drones
   mid-trip come home empty, rock in the air is lost.
 
-- **E1 stockpile and recipes: built, waiting on a PC test (test-economy.bat).**
+- **Production skeleton, step 1: built, waiting on a PC test
+  (test-barren.bat).** The swarm arrives as a fleet: the factory releases
+  1,000 cutters, the storage ship brings ~97 t of refined elements and 6,000
+  E ([production] in data/economy.toml), and there are no haulers. The
+  fabricator (src/production.rs, the work in swarm.rs) makes parts from
+  refined elements only, one kind at a time (3 s to switch, 1 t/s), the
+  next hauler's parts first when a hauler bay is free, then the next
+  cutter's, finishing each run (every order waiting and parts for 100
+  cutters and 2 haulers kept ahead) before switching. The factory has 4
+  cutter bays (0.5 s a cutter: ready as soon as the parts are) and 2 hauler
+  bays (5 s); haulers and cutters are ordered (the director's orders queue)
+  and built there, paying energy when a bay starts. Benjamin: units must
+  reach the many thousands, so building is quick and the fabricator's parts
+  are the limit. On the tutorial body the first hauler is out by 1 minute;
+  10 minutes in: 1,902 cutters and 49 haulers built (2,380 cutters alive).
+  F1
+  shows a "production" section. Saves from before still load. The game
+  always plays the real economy now: free drones are only for benchmarks
+  (`--bench-drones`).
+- **Production phase 1, parts: built, waiting on a PC test (test-barren.bat).**
+  The design's ten parts (neural core, behaviour chip, servo, power cell,
+  frame strut, armour plate, cutting head, hold module, heat sink, lift
+  vane) are in the [recipe] tables of data/economy.toml, written by
+  tools/recipes.py. Each part is a mix of components (wiring, electronics,
+  frame...) priced by rarity as before; units are built from parts (a
+  cutter is still 100 kg, a hauler 2 t; the design's part masses were
+  first guesses). The swarm keeps parts ahead for 20 cutters and a hauler,
+  made at once from the stockpile, and makes any part short on the spot
+  (fabricators come in phase 2). The stockpile window's Parts tab shows
+  each part on hand, made, per cutter and hauler, and what it is made of
+  now; matter counts "made into parts". Saves from before still load
+  (parts stock empty). Heat sinks are in the catalogue but nothing uses
+  them yet.
+- **E1 stockpile and recipes: built, waiting on a PC test (test-barren.bat).**
   Every element delivered goes into the mother swarm's stockpile (recipes.rs).
   Cutters (100 kg) and haulers (2 t) are built from parts (frame, motors,
   wiring, electronics, battery, electrodes, cutting head, composites, bulk),

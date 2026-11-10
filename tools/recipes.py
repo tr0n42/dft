@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Recipes for the base drones, priced by rarity.
+"""The parts catalogue and unit recipes, priced by rarity.
 
-Each part lists the elements it can be made of. The rarest is the ideal and
-costs 1 kg per kg of part; every step toward the common ones costs more, by
-how much more common it is in Earth's crust (data/reference/crust-ppm.toml):
+Drones are built from named parts (Swarm Production Design: neural cores,
+behaviour chips, servos...). Each part is a fixed mix of components
+(wiring, electronics, frame...), and each component lists the elements it
+can be made of. The rarest is the ideal and costs 1 kg per kg of
+component; every step toward the common ones costs more, by how much more
+common it is in Earth's crust (data/reference/crust-ppm.toml):
 
     x = 1 + MARKUP * log10(ppm / ppm_of_the_rarest)
 
@@ -11,8 +14,11 @@ so a part that ideally wants a rare element can always be made of a common
 one, at a steep markup. Last of all, anything solid in the stockpile ("*")
 stands in at a markup above the commonest, so no world can stall a build.
 
-Writes the [recipe.*] tables at the end of data/economy.toml.
-Run: python3 tools/recipes.py
+Part masses are set so a cutter is still 100 kg of parts and a hauler
+2,000 kg, as before parts existed (the design's masses were first guesses).
+
+Writes the [recipe] tables at the end of data/economy.toml.
+Run: python tools/recipes.py
 """
 import math, pathlib, tomllib
 
@@ -22,27 +28,48 @@ crust = tomllib.load(open(root / "data/reference/crust-ppm.toml", "rb"))
 MARKUP = 0.5        # extra cost per tenfold more common
 ANY_STEP = 2.0      # "*" (anything solid) costs this much over the commonest choice
 
-# Part: (what it is, candidate elements). Order doesn't matter: they are
-# sorted rarest first.
+# Component: (what it is, candidate elements). Order doesn't matter: they
+# are sorted rarest first.
+COMPONENTS = {
+    "frame":          ("structure: light and stiff", ["Be", "Ti", "Al", "Mg", "Fe"]),
+    "motors":         ("magnets and windings", ["Co", "Ni", "Fe"]),
+    "wiring":         ("conductors and contacts", ["Au", "Ag", "Cu", "Al"]),
+    "electronics":    ("semiconductors", ["Ga", "Ge", "In", "Si"]),
+    "battery":        ("charge carriers", ["Li", "Zn", "Na", "Mg"]),
+    "electrodes":     ("electrode metals", ["Co", "Ni", "Mn", "Fe"]),
+    "cutting edge":   ("hard, heat-proof edge", ["W", "Ta", "Mo", "Cr", "Ti", "C", "Fe"]),
+    "composites":     ("fibre and matrix", ["C", "Si", "Al"]),
+    "armour":         ("tough hull metal", ["Ti", "Fe"]),
+    "heat conductor": ("carries heat away", ["Ag", "Cu", "Al"]),
+}
+
+# Part id: (name, what it is in the lore, [(component, kg)]). "bulk" is
+# anything solid. A part's mass is the sum of its components.
 PARTS = {
-    "frame":        ("structure: light and stiff", ["Be", "Ti", "Al", "Mg", "Fe"]),
-    "motors":       ("magnets and windings", ["Co", "Ni", "Fe"]),
-    "wiring":       ("conductors", ["Au", "Ag", "Cu", "Al"]),
-    "electronics":  ("semiconductors", ["Ga", "Ge", "In", "Si"]),
-    "battery":      ("charge carriers", ["Li", "Zn", "Na", "Mg"]),
-    "electrodes":   ("electrode metals", ["Co", "Ni", "Mn", "Fe"]),
-    "cutting head": ("hard, heat-proof edge", ["W", "Ta", "Mo", "Cr", "Ti", "C", "Fe"]),
-    "composites":   ("fibre and matrix", ["C", "Si", "Al"]),
+    "neural-core":    ("Neural core", "The drone's mind; every unit needs exactly one", [("electronics", 3), ("wiring", 1), ("composites", 1)]),
+    "behaviour-chip": ("Behaviour chip", "Programs one job: cut, haul, carry, cool, bore", [("electronics", 0.6), ("wiring", 0.4)]),
+    "servo":          ("Servo", "Moves a joint, leg or cutting arm", [("motors", 3), ("wiring", 1), ("frame", 1)]),
+    "power-cell":     ("Power cell", "Stores beamed energy", [("battery", 6), ("electrodes", 3), ("bulk", 1)]),
+    "frame-strut":    ("Frame strut", "Load-bearing skeleton", [("frame", 8)]),
+    "armour-plate":   ("Armour plate", "Hull skin; heavier units carry more", [("armour", 12), ("bulk", 8)]),
+    "cutting-head":   ("Cutting head", "The tooth of a cutter", [("cutting edge", 4), ("frame", 2)]),
+    "hold-module":    ("Hold module", "One cargo cell of a hauler", [("frame", 120), ("composites", 50), ("bulk", 41)]),
+    "heat-sink":      ("Heat sink", "Soaks and sheds heat; the heart of the heat-sink bot", [("heat conductor", 8), ("frame", 2)]),
+    "lift-vane":      ("Lift vane", "Keeps flyers airborne", [("composites", 4), ("frame", 1)]),
 }
 
-RECIPES = {
-    "harvester": ("a cutter: 100 kg of parts", [("frame", 36), ("motors", 8), ("wiring", 10), ("electronics", 6), ("battery", 6), ("electrodes", 4), ("cutting head", 4), ("composites", 8), ("bulk", 18)]),
-    "hauler": ("a hauler: 2,000 kg of parts (more frame and cargo bay, no cutting head)", [("frame", 760), ("motors", 160), ("wiring", 120), ("electronics", 60), ("battery", 140), ("electrodes", 80), ("composites", 280), ("bulk", 400)]),
+# Unit: (what it is, [(part, count)]), as in the design's unit recipes.
+UNITS = {
+    "harvester": ("a cutter", [("neural-core", 1), ("behaviour-chip", 1), ("servo", 4), ("power-cell", 1), ("frame-strut", 2), ("armour-plate", 1), ("cutting-head", 3), ("lift-vane", 2)]),
+    "hauler": ("a hauler", [("neural-core", 1), ("behaviour-chip", 1), ("servo", 6), ("power-cell", 2), ("frame-strut", 12), ("armour-plate", 6), ("hold-module", 8), ("lift-vane", 8)]),
 }
 
+# Parts made ahead and kept in stock: enough for this many of each unit.
+AHEAD = {"harvester": 100, "hauler": 2}
 
-def choices(part):
-    els = sorted(PARTS[part][1], key=lambda e: crust[e])
+
+def choices(comp):
+    els = sorted(COMPONENTS[comp][1], key=lambda e: crust[e])
     base = crust[els[0]]
     out, last = [], 0.0
     for e in els:
@@ -57,29 +84,50 @@ def fmt(c):
     return ", ".join("{ el = \"%s\" }" % e if x == 1.0 else "{ el = \"%s\", x = %s }" % (e, x) for e, x in c)
 
 
+def num(v):
+    return str(int(v)) if float(v).is_integer() else str(v)
+
+
+def part_kg(p):
+    return sum(kg for _, kg in PARTS[p][2])
+
+
 def main():
     lines = ["# ---- recipes: generated by tools/recipes.py (edit the script, not these) ----",
-             "# Each part's elements run rarest first; x is kg of that element per kg of",
-             "# part, rising by %.1f for every tenfold more common it is in Earth's crust." % MARKUP,
-             "# \"*\" is anything solid in the stockpile, most plentiful first.", ""]
-    for name, (what, parts) in RECIPES.items():
-        lines.append(f"[recipe.{name}]              # {what}")
-        lines.append("parts = [")
-        for p, kg in parts:
-            if p == "bulk":
-                lines.append(f'  {{ name = "bulk", kg = {kg} }},')
+             "# Parts are made of components; each component's elements run rarest first,",
+             "# x being kg of that element per kg of component, rising by %.1f for every" % MARKUP,
+             "# tenfold more common it is in Earth's crust. \"*\" is anything solid in the",
+             "# stockpile, most plentiful first. Units are built from parts.", "",
+             "[recipe]",
+             "ahead = { %s }" % ", ".join(f"{u} = {n}" for u, n in AHEAD.items()), ""]
+    for pid, (name, lore, comps) in PARTS.items():
+        lines.append("[[recipe.part]]")
+        lines.append(f'id = "{pid}"')
+        lines.append(f'name = "{name}"')
+        lines.append(f'lore = "{lore}"')
+        lines.append("make = [")
+        for c, kg in comps:
+            if c == "bulk":
+                lines.append(f'  {{ name = "bulk", kg = {num(kg)} }},')
             else:
-                lines.append(f'  {{ name = "{p}", kg = {kg}, of = [{fmt(choices(p))}] }},')
+                lines.append(f'  {{ name = "{c}", kg = {num(kg)}, of = [{fmt(choices(c))}] }},')
         lines.append("]")
         lines.append("")
+    for u, (what, parts) in UNITS.items():
+        kg = sum(part_kg(p) * n for p, n in parts)
+        lines.append(f"[recipe.{u}]              # {what}: {num(round(kg, 3))} kg of parts")
+        lines.append("parts = [" + ", ".join(f'{{ part = "{p}", n = {n} }}' for p, n in parts) + "]")
+        lines.append("")
     path = root / "data/economy.toml"
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     cut = text.find("# ---- recipes: generated")
     if cut < 0:
         cut = text.find("[recipe.harvester]")
-    path.write_text(text[:cut].rstrip() + "\n\n" + "\n".join(lines))
-    for p in PARTS:
-        print(f"{p:13} " + "  ".join(f"{e} {x}" for e, x in choices(p)))
+    path.write_text(text[:cut].rstrip() + "\n\n" + "\n".join(lines), encoding="utf-8", newline="\n")
+    for c in COMPONENTS:
+        print(f"{c:15} " + "  ".join(f"{e} {x}" for e, x in choices(c)))
+    for u, (_, parts) in UNITS.items():
+        print(f"{u}: {sum(part_kg(p) * n for p, n in parts)} kg")
 
 
 main()

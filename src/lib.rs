@@ -21,6 +21,7 @@ pub mod metal;
 pub mod noise;
 pub mod palette;
 pub mod planet;
+pub mod production;
 pub mod reference;
 pub mod relief;
 pub mod render;

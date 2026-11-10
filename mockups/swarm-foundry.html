@@ -1,0 +1,2721 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{color-scheme:dark}body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Swarm Foundry Mockup</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the game view fills the screen; a thin HUD on top, controls along the bottom, notes in a drawer at the right. */
+:root {
+  --void: #05070c;
+  --panel: rgba(10, 14, 20, 0.86);
+  --edge: #1d2a2a;
+  --ink: #c9d4d0;
+  --dim: #7d8a87;
+  --lamp: #2ed66e;
+  --heat: #ff8a2a;
+  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--void); color: var(--ink); font-family: var(--mono); overflow: hidden; }
+#app { position: relative; height: 100%; }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#view.drag { cursor: grabbing; }
+.hud {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline;
+  pointer-events: none;
+  background: linear-gradient(var(--void), rgba(5,7,12,0));
+}
+.hud h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
+.hud h1 b { color: var(--lamp); font-weight: 600; }
+.stat { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.stat strong { color: var(--ink); font-weight: 500; }
+.bar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding-block: 10px calc(10px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  background: linear-gradient(rgba(5,7,12,0), var(--void) 40%);
+}
+.group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding-right: 10px; border-right: 1px solid var(--edge); }
+.group:last-child { border-right: 0; }
+.group span { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; margin-right: 4px; }
+button {
+  font-family: var(--mono); font-size: 12px; color: var(--ink);
+  background: #0e1519; border: 1px solid var(--edge); border-radius: 3px;
+  padding: 5px 9px; cursor: pointer;
+}
+button:hover { border-color: #2f4744; }
+button:focus-visible { outline: 2px solid var(--lamp); outline-offset: 1px; }
+button[aria-pressed="true"] { border-color: var(--lamp); color: var(--lamp); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+.notes {
+  position: absolute; top: 46px; right: max(16px, env(safe-area-inset-right, 0px));
+  width: min(360px, calc(100% - 32px)); max-height: calc(100% - 140px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 4px;
+  font-size: 12px; line-height: 1.5;
+}
+.notes summary { cursor: pointer; padding: 8px 12px; font-family: var(--display); font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink); }
+.notes .body { padding: 0 12px 12px; display: grid; gap: 10px; }
+.notes h2 { margin: 0; font-family: var(--display); font-size: 13px; font-weight: 600; color: var(--lamp); letter-spacing: 0.04em; }
+.notes p { margin: 0; color: var(--ink); }
+.notes ul { margin: 0; padding-left: 16px; color: var(--ink); }
+.notes .q { color: var(--heat); }
+.grafts {
+  position: absolute; top: 46px; left: max(16px, env(safe-area-inset-left, 0px));
+  width: min(250px, calc(100% - 32px)); max-height: calc(100% - 140px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 4px; font-size: 12px;
+}
+.grafts summary { cursor: pointer; padding: 8px 12px; font-family: var(--display); font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase; }
+.grafts .body { padding: 0 12px 10px; display: grid; gap: 4px; }
+.grafts .sw { display: flex; gap: 6px; align-items: baseline; cursor: pointer; }
+.grafts .sw span { color: var(--dim); font-size: 11px; }
+.grafts .row { display: flex; gap: 6px; padding-top: 4px; }
+.grafts .planets { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 2px; }
+.grafts .planets button { padding: 3px 7px; font-size: 11px; }
+.grafts hr { border: 0; border-top: 1px solid var(--edge); margin: 4px 0; width: 100%; }
+@media (prefers-reduced-motion: reduce) { #view { cursor: default; } }
+</style>
+
+<div id="app">
+  <canvas id="view" aria-label="Animated mockup: six small refineries and three storage ships"></canvas>
+  <div class="hud">
+    <h1>Planet <b>matches</b></h1>
+    <div class="stat">size <strong id="sSize">small</strong></div>
+    <div class="stat">page <strong id="sPage">refineries</strong></div>
+    <div class="stat">loads shipped on <strong id="sShip">0</strong></div>
+    <div class="stat">seed <strong id="sSeed">1001</strong></div>
+  </div>
+
+  <details class="grafts" id="graftsPanel">
+    <summary>Grafts</summary>
+    <div class="body" id="graftsBody">
+      <div class="sw"><span>Switch a graft off to see machines without it.</span></div>
+      <div class="row"><button id="gAll" type="button">All grafts on</button><button id="gNone" type="button">All off</button></div>
+    </div>
+  </details>
+
+  <details class="notes" id="notes">
+    <summary>Choices to look at</summary>
+    <div class="body">
+      <div>
+        <h2>Biomechanical</h2>
+        <p>The machines look grown as much as built, like the Matrix's machines: rounded carapace with overlapping plates over the frame, exposed ribs rising off their backs, vertebrae where modules stand apart, dark sinew cables sagging in loops, tendrils hanging and swaying, clusters of sensor eyes, horns for smokestacks, hammer legs bent at the knee like an insect's, rounded vats. Ships have domed holds, a head with eyes at the bow and a segmented tail at the stern. Sinew is a cold dark metal, bone a pale one; lights stay the swarm's colour. This holds for every machine from here on.</p>
+      </div>
+      <div>
+        <h2>Nine planets, two pages</h2>
+        <p>Each cell is one planet and a machine built for it: a refinery on the Refineries page, a storage ship on the Storage ships page. Metallic, rocky, volcanic; living, ocean, fungal swamp; ice moon, hothouse, carbon world. Life works and life grafts appear only on the living world, ocean, fungal swamp and hothouse (a little life).</p>
+      </div>
+      <div>
+        <h2>One parts library for every ship</h2>
+        <p>Every feature is a part in one library, tagged with the matter it works best and where it mounts; a machine draws the parts suited to its job, by its planet's weights. Refineries draw processing parts; storage ships draw from parts made for storing (below).</p>
+        <ul>
+          <li>Underneath: hammers (metal), crucible pour (metal), rolling mill (metal), electrolysis bank (fluid), centrifuge (fluid), jaw crusher (ore), soil sifter (ore), fractionating column (gas), cryo condenser (gas), log chipper, digester, rendering press, blood still, bone mill (life); hands (life), muscles (metal).</li>
+          <li>On top: horn stacks (ore), globe tanks (gas), crane (metal), ribs, lungs (gas). Storage ships have a library of their own (see above).</li>
+          <li>On the face: vats (fluid), furnaces and ember grilles (ore), eyes (any), heart, bones, ribcage (life), veins (fluid).</li>
+
+        </ul>
+      </div>
+      <div>
+        <h2>The planet shapes its refineries</h2>
+        <p>Every feature is classed by the matter it works best, and a planet's mix decides what its refineries and ships grow. Pick a planet in the panel at left.</p>
+        <ul>
+          <li>Metal: hammers, crucible pour, rolling mill, crane; muscles; bar racks and vaults.</li>
+          <li>Ore: jaw crusher, furnaces, smokestacks, soil sifter; jaws; ore cages and hoppers.</li>
+          <li>Fluid: vats, centrifuge, electrolysis bank; veins.</li>
+          <li>Gas: fractionating column, cryo condenser, globe tanks; lungs; tank rows.</li>
+          <li>Life: log chipper, digester, rendering press, blood still, bone mill; bones, ribcage, heart, hands, skull.</li>
+          <li>Any world: eyes.</li>
+        </ul>
+        <p>Extra jobs, works and holds are picked by those weights; a graft appears with a chance set by its class's weight (certain on the world it suits, never where the planet has none of that matter). Every refinery still has a forge, stacks, vats and a furnace. Life works only where there is life.</p>
+      </div>
+      <div>
+        <h2>Grafts (switch each in the panel at left)</h2>
+        <p>Machine twists on body parts, each a separate switch layered on top of the base design, so any can be removed if we go too far toward the biological:</p>
+        <ul>
+          <li>Eyes: big mechanical eyes; the pupil lamp tracks the nearest courier; the lids blink.</li>
+          <li>Bones: metal bones with knuckled ends across hull faces or bracing between modules.</li>
+          <li>Ribcage: bone bars caging the molten vats.</li>
+          <li>Heart: a metal heart in a chamber, thumping a double beat.</li>
+          <li>Jaws: mandibles that chomp at the ore intake; a lower jaw under a ship's bow.</li>
+          <li>Muscles: striated slings between modules that contract and relax.</li>
+          <li>Veins: channels in the carapace with pulses of light running along them.</li>
+          <li>Hands: skeletal metal hands hanging underneath, fingers curling and opening.</li>
+          <li>Lungs: bladders on top that breathe.</li>
+          <li>Skull: on ships, a plated cranium over the bow with sockets and teeth.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Life works (only on planets with life)</h2>
+        <ul>
+          <li>Log chipper (tree trunks): a trunk slides into a toothed drum; chips spray out; pulp bales.</li>
+          <li>Digester (biomass): a sac of sludge churns and bubbles, bleeding off gas; methane canisters and slurry drums.</li>
+          <li>Rendering press (meat): meat on hooks rides the rail into a press; tallow drips into drums.</li>
+          <li>Blood still (blood): a pump throbs pulses of red round a glass coil; a flask fills and separates; blood drums.</li>
+          <li>Bone mill (bones): bones tumble between rollers; white bone meal falls into a bin.</li>
+          <li>Soil sifter (soil, peat, humus): a sieve shakes; soil falls through; stones roll off the end.</li>
+        </ul>
+        <p>They show on the planets with life (Balanced, Living world, Ocean); in the game they would be built only on bodies whose life allows it.</p>
+      </div>
+      <div>
+        <h2>Built from modules</h2>
+        <p>Each refinery is a cluster of hull modules joined edge to edge, with a dark joint line where two meet. Shapes: box, keel, wedge, drum, tower, pod, and bridges where two modules stand apart. Every module is the same armour, struts and panel lines as the other ships; heat is what sets a refinery apart.</p>
+      </div>
+      <div>
+        <h2>Each module has a job</h2>
+        <ul>
+          <li>Forge: a row of short drop-hammers under it, each on its own beat; every third blow finishes an ingot.</li>
+          <li>Stacks: 2 to 4 smokestacks on top, flared, crowned, cowled or plain.</li>
+          <li>Vats: 1 to 3 glass vats in its face, each its own molten liquid (iron, white-hot, crimson, toxic green, cyan salt, violet).</li>
+          <li>Furnace: furnace mouths and ember grilles.</li>
+          <li>Globes: round glass tanks of liquid standing on top.</li>
+          <li>Crane: a mast and jib with a swaying chain and hook.</li>
+        </ul>
+        <p>Every refinery gets at least a forge, stacks, vats and a furnace; the rest roll. Plates, rivets, a pipe run, chains, spikes, lamps and the ore hopper go on top of that.</p>
+      </div>
+      <div>
+        <h2>Work hung underneath</h2>
+        <p>Besides the drop-hammers, seven works for solids, fluids and gases. Each refinery hangs a few under its modules; all seven appear across the six shown.</p>
+        <ul>
+          <li>Crucible pour (molten metal): heats until it glows, tips on its pivots, pours a stream into a mould; the ingot cools from white to metal.</li>
+          <li>Fractionating column (gases): bubbles rise through its window, amber to pale; a canister fills at the bottom; the side taps puff vapour.</li>
+          <li>Centrifuge (fluids): the rotor spins behind a round window; the sight glass settles into layers; it fills drums.</li>
+          <li>Electrolysis bank (fluids to light metals): electrodes dip into a bath under a copper busbar; blue-white arcs crackle; metal plates come out.</li>
+          <li>Jaw crusher (ore): chunks drop down a chute, two jaws chomp, gravel and dust fall into a bin.</li>
+          <li>Rolling mill (hot metal): a glowing slab goes between two rollers and out as a thin sheet; a shear cuts it.</li>
+          <li>Cryo condenser (gases to liquid): a bellows pumps; frost glitters on an icy coil; drips fill a dewar flask; cold mist drifts off.</li>
+        </ul>
+        <p>Products go to the ships' racks in their own shape: bars for solids, banded canisters for gases, ribbed drums for fluids.</p>
+      </div>
+      <div>
+        <h2>Sizes (buttons along the bottom)</h2>
+        <ul>
+          <li>Refineries: small 3 to 6 modules; medium about 10 to 16, each up to 1.3 times bigger; large about 14 to 19 (1.6 times); super about 27 to 37 (2 times), plus their corridors and hubs. Works, hammers, stacks and grafts come with the modules.</li>
+          <li>Storage ships: small about 60 to 88 m long; medium 100 to 150; large 160 to 230; super 260 to 360. Bigger ones have rows of holds with frame bands between, several windows to a row, a thicker frame, more tractor beams and cupolas.</li>
+          <li>Each window is either one big hold of a single kind of matter or bays split by ribs; the bigger the ship, the more often a big single hold.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Planned layout for bigger refineries</h2>
+        <p>Small refineries still grow free-form. From medium up they are laid out like a town:</p>
+        <ul>
+          <li>Spine corridors run the length: one for medium and large, two for super. Corridors are tubes with rails on both sides, bone rings every 6 m, and a glazed walkway down the middle with lamps in it.</li>
+          <li>Cross corridors cut the town into sectors: medium has 2 sectors split by a hub, large 3, super 4. Hubs (a ring of strut and bone round a lit core) sit where corridors meet and at both ends of every spine.</li>
+          <li>Each row of a sector (above the spine, below it, and on super between the two spines) has one job and is built from that job's family of shapes: forges from boxes and keels, furnaces from drums and domes, vats from boxes and drums, stacks from domes with tall horns, and so on. The first four rows are always forge, stacks, vats and furnace.</li>
+          <li>Inside a row the modules still vary in shape and height, so the skyline stays a mini-city.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Bigger storage ships: same shape, better fitted</h2>
+        <p>Every size keeps the same hull shapes (lore: one hull design, scaled, is cheaper to build). What grows with size is the fit-out:</p>
+        <ul>
+          <li>Medium and up: bulkheads between the holds in one of five styles: ribbed, cross-braced, riveted, vertebral, or lit double rails. Also antenna arrays on the roof and a row of running lights along the top edge.</li>
+          <li>Large and up: a thicker frame, docking clamps on both ends (bigger jaws on super), vent grilles underneath that glow warm, and eye clusters at the lower corners of the hold frame (part of the Eyes graft, so they switch off with it).</li>
+          <li>Super: short separate ribs standing along the roof (no continuous bar) and panel seams on the hull.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Storage ships: holds you can see into</h2>
+        <p>The main feature is that you can see what a storage ship holds. A boxy hull (box, flattened hexagon, a box with a raised deck, or a lens-topped box) with most of its face one big window, split by bone ribs into bays; each bay holds one kind of matter, picked by the planet from the storage ships' own library:</p>
+        <ul>
+          <li>Bar rack (metal): bars stacking up as they come.</li>
+          <li>Ore bay (ore): compressed ore heaped to its level, rising and falling.</li>
+          <li>Canister rack (gas): banded canisters.</li>
+          <li>Liquid tank (fluid): the liquid to its level, with bubbles.</li>
+          <li>Organics rack (life, only where there is life): bales and drums.</li>
+        </ul>
+        <p>A little of the UFO stays: rim lights chasing along the bottom, a tractor beam underneath (lit while couriers load and unload), sometimes a small glass cupola on top. Biomechanical touches are kept quiet: bone ribs between the bays, a sinew seal round the window, a pair of eyes on the frame, a few tendrils on living worlds. A full bay sends its load on.</p>
+      </div>
+      <div>
+        <h2>Material flow</h2>
+        <p>Each column of refineries is served by the storage ship below or above it. Couriers carry raw ore from the ship's cages and hoppers to each refinery's hopper, and cooled ingots back to its bar racks. Refined bars are 3 m by 2 m, packed edge to edge, brighter than the ore they came from, with a bright top edge and a glint sweeping across the hold now and then. When the hold is nearly full, a load leaves for the fabricators (off the page).</p>
+      </div>
+      <div>
+        <h2>Light</h2>
+        <p>One lighting engine: flames, seams, embers, vats, globes, hot ingots, blows, sparks, lamps and couriers each give off light, laid over the scene in stepped bands. Everything is 1 m blocks: no smooth circles or gradients.</p>
+      </div>
+      <div>
+        <h2 class="q">Open questions</h2>
+        <ul>
+          <li>Joint lines between modules: keep them (shown), or let modules blend into one hull?</li>
+          <li>Should a module's job show in its shape too (forges always keels, stack modules always boxes)?</li>
+          <li>Bigger refineries: more corridors and hubs, or fewer (more modules per sector)?</li>
+          <li>Storage ship bulkheads: keep all five styles, or settle on one or two as the swarm's standard?</li>
+        </ul>
+      </div>
+    </div>
+  </details>
+
+  <div class="bar">
+    <div class="group"><span>Page</span>
+      <button id="pgR" type="button" aria-pressed="true">Refineries</button>
+      <button id="pgS" type="button" aria-pressed="false">Storage ships</button>
+    </div>
+    <div class="group"><span>View</span>
+      <button id="fAll" type="button">All</button>
+      <button id="f1" type="button">1</button>
+      <button id="f2" type="button">2</button>
+      <button id="f3" type="button">3</button>
+      <button id="f4" type="button">4</button>
+      <button id="f5" type="button">5</button>
+      <button id="f6" type="button">6</button>
+      <button id="f7" type="button">7</button>
+      <button id="f8" type="button">8</button>
+      <button id="f9" type="button">9</button>
+    </div>
+    <div class="group"><span>Size</span>
+      <button id="szS" type="button" aria-pressed="true">Small</button>
+      <button id="szM" type="button" aria-pressed="false">Medium</button>
+      <button id="szL" type="button" aria-pressed="false">Large</button>
+      <button id="szX" type="button" aria-pressed="false">Super</button>
+    </div>
+    <div class="group">
+      <button id="seed" type="button">New seeds</button>
+      <button id="lab" type="button" aria-pressed="true">Labels</button>
+      <button id="pause" type="button" aria-pressed="false">Pause</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+"use strict";
+const canvas = document.getElementById("view");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0, DPR = 0;
+
+// ---------- randomness ----------
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash(x, y, s) {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(s | 0, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+let SEED = 1001;
+
+// ---------- colours (sRGB 0-255) ----------
+const LAMP = [46, 214, 110];
+const C = {
+  dark: [31, 33, 32], vent: [9, 10, 10], glass: [24, 38, 44],
+};
+function armour(x, y, s) { const k = (0.27 + 0.07 * hash(x, y, s)) * 255; return [k, k * 1.06, k * 1.04]; }
+function light(x, y, s) { const k = (0.40 + 0.06 * hash(x, y, s)) * 255; return [k, k * 1.04, k * 1.03]; }
+function strut(x, y, s) { const k = (0.34 + 0.05 * hash(x, y, s)) * 255; return [k, k * 1.05, k * 1.05]; }
+function darkg(x, y, s) { const k = (0.10 + 0.04 * hash(x, y, s)) * 255; return [k, k * 1.05, k * 1.03]; }
+function hullR(x, y, s) { const k = (0.12 + 0.06 * hash(x, y, s)) * 255; return [k * 1.15, k * 0.97, k * 0.92]; }
+function rust(x, y, s) { const h = hash(x, y, s); return [70 + 40 * h, 36 + 18 * h, 26 + 10 * h]; }
+const css = (c, a = 1) => a >= 1 ? `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})` : `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+function pulse(t, x) { return 0.62 + 0.38 * Math.sin(Math.PI * 2 * t / 4 - x * 0.012); }
+const ORES = [[112, 96, 82], [86, 80, 74], [128, 110, 88], [96, 92, 98], [140, 84, 58], [74, 88, 96], [150, 132, 96]];
+const ELEMENTS = [[148, 150, 160], [198, 112, 64], [204, 208, 214], [88, 98, 128], [172, 172, 190], [160, 158, 138], [120, 124, 132]];
+const PARTS = [[90, 210, 230], [70, 200, 120], [180, 140, 90], [230, 200, 80], [190, 196, 200], [96, 100, 104], [210, 214, 220], [130, 100, 70], [200, 220, 240]];
+
+// ---------- camera ----------
+const cam = { x: -50, y: 150, z: 3 };
+const ws = (x, y) => [(x - cam.x) * cam.z + W / 2, H / 2 - (y - cam.y) * cam.z];
+// Blocks are drawn in whole device pixels, each edge rounded on its own,
+// so neighbours meet exactly: no seams, no overlaps.
+function block(x, y, c, a = 1, s = 1) {
+  const [sx, sy] = ws(x, y + s);
+  const z = cam.z * s;
+  const x0 = Math.round(sx), y0 = Math.round(sy), x1 = Math.round(sx + z), y1 = Math.round(sy + z);
+  if (x1 <= x0 || y1 <= y0) return;
+  ctx.fillStyle = css(c, a);
+  ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+}
+
+// Everything is drawn in blocks on the 1 m grid: no smooth circles or
+// gradients anywhere. Light blooms in stepped blocks, dithered at the edge.
+function cell(x, y, c, a = 1, s = 1) { block(Math.floor(x / s) * s, Math.floor(y / s) * s, c, a, s); }
+// ---------- lighting ----------
+// One engine lights everything. Anything hot or lit says so each frame
+// (emit: where, how far its light reaches, its colour, how strong); the
+// engine adds every light into a light map on the 1 m grid, falling off
+// with distance, then lays it over the scene in stepped bands (no smooth
+// gradients): strongly on solid blocks, which it lights, and faintly in
+// empty space, as a dithered haze.
+const Light = { list: [], buf: null, n: 0, solid: null };
+const SOLID = { x0: -1700, y0: -900, w: 3400, h: 2000 };
+Light.solid = new Uint8Array(SOLID.w * SOLID.h);
+function markSolid(x, y) { const i = x - SOLID.x0, j = y - SOLID.y0; if (i >= 0 && j >= 0 && i < SOLID.w && j < SOLID.h) Light.solid[j * SOLID.w + i] = 1; }
+function isSolid(x, y) { const i = x - SOLID.x0, j = y - SOLID.y0; return i >= 0 && j >= 0 && i < SOLID.w && j < SOLID.h && Light.solid[j * SOLID.w + i] === 1; }
+function emit(x, y, r, c, i) { if (i > 0.01 && r > 0) Light.list.push(x, y, r, c[0] / 255 * i, c[1] / 255 * i, c[2] / 255 * i); }
+// (The old glow and bloom calls are lights now.)
+function bloom(x, y, r, c, a) { emit(x, y, r, c, a * 2.2); }
+const LIGHT_SOLID = 0.62, LIGHT_AIR = 0.16, LIGHT_BANDS = 6;
+function lightPass() {
+  const L = Light.list;
+  if (!L.length) return;
+  // The visible cells, coarser when zoomed far out.
+  const vx0 = Math.floor(cam.x - W / 2 / cam.z) - 1, vx1 = Math.ceil(cam.x + W / 2 / cam.z) + 1;
+  const vy0 = Math.floor(cam.y - H / 2 / cam.z) - 1, vy1 = Math.ceil(cam.y + H / 2 / cam.z) + 1;
+  const g = Math.max(1, Math.ceil(Math.sqrt((vx1 - vx0) * (vy1 - vy0) / 70000)));
+  const gx0 = Math.floor(vx0 / g), gy0 = Math.floor(vy0 / g);
+  const gw = Math.ceil(vx1 / g) - gx0 + 1, gh = Math.ceil(vy1 / g) - gy0 + 1;
+  const need = gw * gh * 3;
+  if (!Light.buf || Light.buf.length < need) Light.buf = new Float32Array(need);
+  const buf = Light.buf; buf.fill(0, 0, need);
+  for (let k = 0; k < L.length; k += 6) {
+    const x = L[k], y = L[k + 1], r = L[k + 2], cr = L[k + 3], cg = L[k + 4], cb = L[k + 5];
+    const i0 = Math.max(0, Math.floor((x - r) / g) - gx0), i1 = Math.min(gw - 1, Math.floor((x + r) / g) - gx0);
+    const j0 = Math.max(0, Math.floor((y - r) / g) - gy0), j1 = Math.min(gh - 1, Math.floor((y + r) / g) - gy0);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const dx = (i + gx0 + 0.5) * g - x, dy = (j + gy0 + 0.5) * g - y;
+      const d = Math.sqrt(dx * dx + dy * dy) / r;
+      if (d >= 1) continue;
+      const f = (1 - d) * (1 - d);
+      const o = (j * gw + i) * 3;
+      buf[o] += cr * f; buf[o + 1] += cg * f; buf[o + 2] += cb * f;
+    }
+  }
+  ctx.globalCompositeOperation = "lighter";
+  const q = (v) => Math.min(LIGHT_BANDS * 1.5, Math.floor(v * LIGHT_BANDS)) / LIGHT_BANDS;
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+    const o = (j * gw + i) * 3;
+    const m = Math.max(buf[o], buf[o + 1], buf[o + 2]);
+    if (m < 1 / LIGHT_BANDS) continue;
+    const wx = (i + gx0) * g, wy = (j + gy0) * g;
+    const solid = g === 1 ? isSolid(wx, wy) : isSolid(wx + (g >> 1), wy + (g >> 1));
+    // Thin light in open space is dithered: every other block.
+    if (!solid && m < 3 / LIGHT_BANDS && ((i + j) & 1)) continue;
+    const k = (solid ? LIGHT_SOLID : LIGHT_AIR) * 255;
+    block(wx, wy, [q(buf[o]) * k, q(buf[o + 1]) * k, q(buf[o + 2]) * k], 1, g);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  Light.list = [];
+}
+function ring(x, y, r, c, a) {
+  const n = Math.max(8, Math.ceil(r * 7)), seen = new Set();
+  for (let i = 0; i < n; i++) {
+    const t = i / n * Math.PI * 2, gx = Math.floor(x + Math.cos(t) * r), gy = Math.floor(y + Math.sin(t) * r), k = gx * 7919 + gy;
+    if (seen.has(k)) continue; seen.add(k); block(gx, gy, c, a);
+  }
+}
+function blockLine(x0, y0, x1, y1, c, a) {
+  let ax = Math.floor(x0), ay = Math.floor(y0); const bx = Math.floor(x1), by = Math.floor(y1);
+  const dx = Math.abs(bx - ax), dy = -Math.abs(by - ay), sx = ax < bx ? 1 : -1, sy = ay < by ? 1 : -1;
+  let err = dx + dy;
+  for (let i = 0; i < 400; i++) {
+    block(ax, ay, c, a);
+    if (ax === bx && ay === by) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; ax += sx; }
+    if (e2 <= dx) { err += dx; ay += sy; }
+  }
+}
+// A burst: a white core, a shock ring of blocks running out, embers.
+function burst(x, y, size, c) { S.bursts.push({ x, y, t: 0, size, c }); spark(x, y, Math.round(size * 5), c, size * 4); }
+
+// ---------- block parts (baked to small canvases, 1 pixel = 1 m) ----------
+// A part is a list of cells; cells with `born` in the future are still to
+// be built (drawn glowing as they go on).
+function Part() { return { cells: [], canvas: null, ox: 0, oy: 0, w: 0, h: 0, lamps: [], baked: -1 }; }
+// (Blocks there from the start are long since built: they don't glow.)
+function put(P, x, y, c, born = -10) { P.cells.push({ x: x | 0, y: y | 0, c, born }); markSolid(x | 0, y | 0); }
+function bake(P, now) {
+  if (!P.cells.length) { P.canvas = null; return; }
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const k of P.cells) { if (k.x < x0) x0 = k.x; if (k.y < y0) y0 = k.y; if (k.x > x1) x1 = k.x; if (k.y > y1) y1 = k.y; }
+  P.ox = x0; P.oy = y0; P.w = x1 - x0 + 1; P.h = y1 - y0 + 1;
+  if (!P.canvas) P.canvas = document.createElement("canvas");
+  P.canvas.width = P.w; P.canvas.height = P.h;
+  const g = P.canvas.getContext("2d");
+  const img = g.createImageData(P.w, P.h);
+  const d = img.data;
+  let shown = 0;
+  for (const k of P.cells) {
+    if (k.born > now) continue;
+    shown++;
+    const i = ((P.h - 1 - (k.y - y0)) * P.w + (k.x - x0)) * 4;
+    d[i] = k.c[0]; d[i + 1] = k.c[1]; d[i + 2] = k.c[2]; d[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  P.baked = shown;
+}
+function drawPart(P, now, alpha = 1) {
+  if (!P.cells.length) return;
+  // Rebake while cells are still going on.
+  let shown = 0, pending = false;
+  for (const k of P.cells) { if (k.born <= now) shown++; else pending = true; }
+  if (shown !== P.baked) bake(P, now);
+  if (P.canvas) {
+    const [sx, sy] = ws(P.ox, P.oy + P.h);
+    ctx.globalAlpha = alpha;
+    const x0 = Math.round(sx), y0 = Math.round(sy);
+    ctx.drawImage(P.canvas, x0, y0, Math.round(sx + P.w * cam.z) - x0, Math.round(sy + P.h * cam.z) - y0);
+    ctx.globalAlpha = 1;
+  }
+  // Fresh blocks glow as they are set.
+  for (const k of P.cells) {
+    const age = now - k.born;
+    if (age >= 0 && age < 0.7) block(k.x, k.y, mix(LAMP, [255, 255, 255], 0.4), (1 - age / 0.7) * 0.9 * alpha);
+  }
+  if (pending) {
+    // The building sleeve: the next few blocks to go on, faint.
+    let n = 0;
+    for (const k of P.cells) { if (k.born > now && k.born < now + 0.25 && n++ < 40) block(k.x, k.y, LAMP, 0.25 * alpha); }
+  }
+}
+function lamps(P, t, now) {
+  for (const l of P.lamps) {
+    if (l.born > now) continue;
+    const p = pulse(t, l.x);
+    block(l.x, l.y, mix([20, 30, 24], LAMP, p));
+    emit(l.x + 0.5, l.y + 0.5, 5, LAMP, 0.55 * p);
+  }
+}
+
+// ---------- greebles ----------
+function antenna(P, x, y, h, r, s, born = -10) {
+  for (let k = 0; k < h; k++) put(P, x, y + k, k % 4 === 3 ? strut(x, y + k, s) : C.dark, born);
+  if (h > 6) { put(P, x - 1, y + (h * 0.6 | 0), strut(x, y, s), born); put(P, x + 1, y + (h * 0.6 | 0), strut(x, y, s), born); }
+  if (r() < 0.5 && h > 8) { put(P, x - 1, y + (h * 0.3 | 0), C.dark, born); put(P, x + 1, y + (h * 0.3 | 0), C.dark, born); }
+  P.lamps.push({ x, y: y + h, born });
+}
+function dish(P, cx, y, r, s, born = -10) {
+  for (let k = -r; k <= r; k++) { const hh = Math.round((k * k) / (r * 1.4)); put(P, cx + k, y + hh + 2, light(cx + k, y, s), born); }
+  put(P, cx, y, C.dark, born); put(P, cx, y + 1, C.dark, born);
+  put(P, cx, y + 3, C.dark, born);
+}
+function pipe(P, x0, x1, y, s, born = -10) {
+  for (let x = x0; x <= x1; x++) put(P, x, y, (x - x0) % 6 === 0 ? C.dark : strut(x, y, s), born);
+}
+function grille(P, x, y, w, h, born = -10) {
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(P, x + i, y + j, j % 2 ? C.vent : C.dark, born);
+}
+function fins(P, x, y, w, h, s, born = -10) {
+  for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) put(P, x + i, y + j, i % 2 ? C.dark : light(x + i, y + j, s), born);
+}
+
+// ---------- the scene ----------
+const T = { t: 0, paused: false };
+const S = {
+  labels: true, smoke: [], sparks: [], bursts: [], couriers: [], rings: [], bins: [], shipped: 0,
+};
+let SIZE = "small";
+
+// ---------- particles ----------
+function spark(x, y, n, hot = [255, 190, 90], speed = 14) {
+  for (let i = 0; i < n && S.sparks.length < 900; i++) {
+    const a = Math.random() * Math.PI * 2, v = speed * (0.3 + Math.random());
+    S.sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v + 4, life: 0.4 + Math.random() * 0.7, age: 0, c: hot });
+  }
+}
+function smoke(x, y) {
+  if (S.smoke.length > 600) return;
+  S.smoke.push({ x: x + (Math.random() - 0.5), y, vx: 1.5 + Math.random() * 2, vy: 5 + Math.random() * 4, s: 1 + Math.random(), life: 5 + Math.random() * 3, age: 0, g: 40 + Math.random() * 30 });
+}
+
+// A refined bar: brighter and more saturated than the ore it came from, a
+// bright top edge, a darker underside, and now and then a glint sweeping
+// across the hold, all in blocks.
+function drawBar(p, c, t, Sh) {
+  const lift = (v, k) => Math.min(255, v * k);
+  const top = c.map(v => lift(v, 1.18) * 0.7 + 255 * 0.3), base = c.map(v => lift(v, 1.08)), under = c.map(v => v * 0.78);
+  const sweep = (t * 0.22 + Sh.seed % 7 * 0.1) % 1.8;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) {
+    let col = j === 1 ? top : (i === 2 ? under : base);
+    const d = ((p.x + i - Sh.OX) + (p.y + j - Sh.OY) * 1.5) / 40;
+    if (Math.abs(d - sweep) < 0.05) col = mix(col, [255, 255, 255], 0.6);
+    block(p.x + i, p.y + j, col);
+  }
+}
+
+// ---------- storage ships ----------
+// A storage ship is a cargo hold you can see into: a boxy hull (a box, a
+// flattened hexagon, a box with a raised deck, or a lens-topped box), most
+// of its face one big window, split by bone ribs into bays, each bay
+// holding one kind of matter and showing it plainly as it fills and
+// empties. A little of the UFO stays: rim lights along the bottom, a
+// tractor beam underneath, sometimes a small glass cupola on top.
+// The bays come from the storage ships' own library, by the planet:
+//   bar rack (metal), ore bay (ore), canister rack (gas), liquid tank
+//   (fluid), organics rack (life: bales and drums, only where there is life).
+const CARGO_PROFILES = ["box", "hex", "decked", "lens"];
+const BAYS = {
+  barbay:  { name: "bar rack", type: "slots", cls: "metal" },
+  orebay:  { name: "ore bay", type: "level", cls: "ore" },
+  gasbay:  { name: "canister rack", type: "slots", cls: "gas" },
+  tankbay: { name: "liquid tank", type: "level", cls: "fluid" },
+  lifebay: { name: "organics rack", type: "slots", cls: "life" },
+};
+let ships = [];
+// How fitted out a storage ship is, by size.
+const HEAT = [255, 138, 42];
+const SHIP_LEVEL = { small: 0, medium: 1, large: 2, super: 3 };
+// Bulkheads: the bands and posts between holds. along runs the length of
+// the band, across its depth (n blocks).
+const BULKHEADS = { ribbed: "ribbed bulkheads", xbrace: "cross-braced bulkheads", riveted: "riveted bulkheads", vertebral: "vertebral bulkheads", rails: "lit double-rail bulkheads" };
+function bulkhead(style, a, b, n, x, y, s) {
+  const rim = b === 0 || b === n - 1, mid = b === n >> 1;
+  switch (style) {
+    case "ribbed": return a % 3 === 0 ? bone(x, y, s) : rim ? strut(x, y, s) : darkg(x, y, s);
+    case "xbrace": { const p = 2 * Math.max(1, n - 1), q = a % p; return q === b || p - q === b ? light(x, y, s) : rim ? strut(x, y, s) : darkg(x, y, s); }
+    case "riveted": return rim ? strut(x, y, s) : mid && a % 4 === 1 ? C.dark : a % 12 === 0 ? darkg(x, y, s) : armour(x, y, s).map(v => v * 1.12);
+    case "vertebral": return a % 5 < 2 ? bone(x, y, s) : mid ? sinew(x, y, s) : C.dark;
+    case "rails": return rim ? strut(x, y, s) : mid && a % 10 === 5 ? "lamp" : darkg(x, y, s);
+  }
+  return armour(x, y, s);
+}
+// Outside fittings that come with size: antennas and a top light row
+// (medium up), docking clamps at the ends and vent grilles (large up),
+// short ribs along the top (super).
+function shipDecor(Sh, G) {
+  const { P, r, seed, X, Y, inside, W, H, LV } = G;
+  if (LV < 1) return;
+  const topOf = (x) => { for (let y = H - 1; y >= 0; y--) if (inside(x, y)) return y; return -1; };
+  const busy = (x) => (Sh.cupolas || []).some(cu => Math.abs(cu.x - X(x)) < 9);
+  // Antennas in a cluster or two on the roof.
+  const nAnt = LV + ri(r, 0, 1);
+  for (let k = 0; k < nAnt; k++) {
+    const x0 = ri(r, Math.round(W * 0.1), Math.round(W * 0.9));
+    const n = ri(r, 2, 3);
+    for (let j = 0; j < n; j++) { const x = x0 + j * 2; if (x >= W || busy(x)) continue; const t = topOf(x); if (t < 0 || topOf(x) !== t) continue; antenna(P, X(x), Y(t + 1), ri(r, 3, 4 + 3 * LV), r, seed); }
+  }
+  Sh.pieces.push("antenna arrays");
+  // A row of running lights along the top edge.
+  for (let x = 3; x < W - 3; x += 7) { const t = topOf(x); if (t > 2 && !busy(x) && inside(x - 1, t) && inside(x + 1, t)) { put(P, X(x), Y(t), C.dark); P.lamps.push({ x: X(x), y: Y(t), born: -10 }); } }
+  if (LV >= 2) {
+    // Docking clamps on both ends, at mid height: a stem and two jaws.
+    const ym = Math.round((G.wy0 + G.wy1) / 2);
+    for (const side of [-1, 1]) {
+      let lx = side < 0 ? 0 : W - 1; while (lx >= 0 && lx < W && !inside(lx, ym)) lx -= side;
+      for (let d = 1; d <= 2; d++) for (let j = -1; j <= 1; j++) put(P, X(lx + side * d), Y(ym + j), strut(X(lx + side * d), ym + j, seed));
+      const jl = 2 + LV, jr = LV;   // bigger ships, bigger jaws
+      for (let d = 2; d <= jl; d++) for (let j = 2; j <= 1 + jr; j++) for (const sg of [-1, 1]) put(P, X(lx + side * d), Y(ym + sg * j), d === jl && j === 2 ? C.dark : bone(X(lx + side * d), ym + sg * j, seed));
+      P.lamps.push({ x: X(lx + side * 2), y: Y(ym), born: -10 });
+    }
+    Sh.pieces.push("docking clamps");
+    // Vent grilles in the frame below the holds, between the beams.
+    Sh.vents = [];
+    const vy = 2, vh = Math.max(1, G.wy0 - 3);
+    if (vh >= 1) for (let k = 0; k < LV; k++) {
+      const vx = Math.round(W * (0.3 + 0.4 * (LV === 1 ? 0.5 : k / (LV - 1)))) - 2, vw = 4;
+      let ok = true; for (let i = -1; i <= vw; i++) for (let j = 0; j < vh; j++) if (!inside(vx + i, vy + j)) ok = false;
+      if (!ok || Sh.beams.some(b => Math.abs(b.x - X(vx + 2)) < 5)) continue;
+      grille(P, X(vx), Y(vy), vw, vh);
+      Sh.vents.push({ x: X(vx), y: Y(vy), w: vw, h: vh, ph: r() * 6 });
+    }
+    if (Sh.vents.length) Sh.pieces.push("vent grilles");
+  }
+  if (LV >= 3) {
+    // Short ribs standing along the roof, each its own, not a continuous bar.
+    let n = 0;
+    for (let x = 6; x < W - 6; x += 9) {
+      if (busy(x)) continue;
+      const t = topOf(x); if (t < 0 || topOf(x + 1) !== t) continue;
+      const h = 2 + (hash(x, 3, seed) * 3 | 0);
+      for (let j = 1; j <= h; j++) { put(P, X(x), Y(t + j), bone(X(x), t + j, seed)); put(P, X(x + 1), Y(t + j), j === h ? bone(X(x + 1), t + j, seed) : sinew(X(x + 1), t + j, seed)); }
+      n++;
+    }
+    if (n) Sh.pieces.push("roof ribs");
+  }
+}
+function makeStorageShip(seed, cx, cy) {
+  const r = mulberry32(seed * 1543 + 7);
+  const profile = pick(r, CARGO_PROFILES);
+  const P = Part();
+  const Sh = { seed, profile, part: P, holds: [], pieces: [], bays: [], tendrils: [], grafts: [], works: [], out: [], stacks: [], globes: [], rim: [], slots: [], bins: [], raw: [] };
+  const SS = SHIP_SIZES[SIZE], F = SS.frame;
+  const W = 2 * ri(r, ...SS.W), H = ri(r, ...SS.H);
+  const deckH = profile === "decked" ? Math.round(H * 0.62) : H, deckX0 = Math.round(W * 0.18), deckX1 = W - 1 - Math.round(W * 0.18);
+  const c = profile === "hex" ? Math.round(H * 0.38) : profile === "lens" ? Math.round(H * 0.42) : 2 + (F - 2);
+  const inside = (x, y) => {
+    if (x < 0 || x >= W || y < 0) return false;
+    if (profile === "decked") {
+      if (y < deckH) return Math.min(x, W - 1 - x) + Math.min(y, deckH - 1 - y) >= 2;
+      return y < H && x >= deckX0 && x <= deckX1 && Math.min(x - deckX0, deckX1 - x) + Math.min(y - deckH, H - 1 - y) >= 1;
+    }
+    if (y >= H) return false;
+    const dx = Math.min(x, W - 1 - x);
+    if (profile === "lens") return y < H / 2 ? dx + Math.min(y, H - 1 - y) >= 2 : dx + (H - 1 - y) >= c;
+    return dx + Math.min(y, H - 1 - y) >= c;
+  };
+  const OX = Math.round(cx - W / 2), OY = Math.round(cy - H / 2);
+  const X = (v) => OX + v, Y = (v) => OY + v;
+  Sh.OX = OX; Sh.OY = OY - 3; Sh.W = W; Sh.H = H + 4;
+  // The glazed area: the widest rectangle that keeps a frame all round (on
+  // a decked ship, in its lower hull).
+  const wy0 = F + 1, wy1 = (profile === "decked" ? deckH : H) - F - 2;
+  let wx0 = 0, wx1 = W - 1;
+  const deep = (x, y) => { for (let dy = -F; dy <= F; dy++) for (let dx = -F; dx <= F; dx++) if (!inside(x + dx, y + dy)) return false; return true; };
+  for (let y = wy0; y <= wy1; y++) { let a = 0; while (a < W && !deep(a, y)) a++; let b = W - 1; while (b >= 0 && !deep(b, y)) b--; wx0 = Math.max(wx0, a); wx1 = Math.min(wx1, b); }
+  // Rows of holds, frame bands between them; in each row, windows split
+  // by frame posts. A window is either one big hold or bays split by ribs.
+  const wins = [];
+  const nRows = Math.max(1, Math.min(ri(r, ...SS.rows), Math.floor((wy1 - wy0 + 1 + F) / (8 + F))));
+  const rowH = Math.floor((wy1 - wy0 + 1 - (nRows - 1) * F) / nRows);
+  for (let i = 0; i < nRows; i++) {
+    const ry0 = wy0 + i * (rowH + F), ry1 = i === nRows - 1 ? wy1 : ry0 + rowH - 1;
+    const ww = wx1 - wx0 + 1, nw = Math.max(1, Math.min(ri(r, ...SS.wins), Math.floor((ww + F) / (14 + F))));
+    const winW = Math.floor((ww - (nw - 1) * F) / nw);
+    for (let k = 0; k < nw; k++) {
+      const x0 = wx0 + k * (winW + F), x1 = k === nw - 1 ? wx1 : x0 + winW - 1;
+      wins.push({ x0, x1, y0: ry0, y1: ry1, single: r() < (SIZE === "small" ? 0.15 : 0.35) });
+    }
+  }
+  const inWin = (x, y) => wins.some(w => x >= w.x0 && x <= w.x1 && y >= w.y0 && y <= w.y1);
+  const nearWin = (x, y) => wins.some(w => x >= w.x0 - 1 && x <= w.x1 + 1 && y >= w.y0 - 1 && y <= w.y1 + 1);
+  // Bigger ships are the same shape, better fitted out (one hull, scaled: an
+  // efficiency measure): a bulkhead style on the bands and posts between
+  // the holds, and more on the outside as the size goes up.
+  const LV = SHIP_LEVEL[SIZE];
+  const bulk = LV > 0 ? pick(r, Object.keys(BULKHEADS)) : null;
+  if (bulk) Sh.pieces.push(BULKHEADS[bulk]);
+  const inBox = (x, y) => x >= wx0 && x <= wx1 && y >= wy0 && y <= wy1;
+  const rowAt = (y) => wins.some(w => y >= w.y0 && y <= w.y1);
+  // The hull and its frame: shared armour with carapace plate lines; a
+  // sinew seal round every window; the bottom two rows a pale rim band.
+  for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) {
+    if (!inside(x, y) || inWin(x, y)) continue;
+    const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+    let col = armour(X(x), Y(y), seed);
+    if (y <= 1) col = bone(X(x), Y(y), seed);
+    else if (edge) col = strut(X(x), Y(y), seed);
+    else if (bulk && inBox(x, y)) {
+      // A band runs along x between rows; a post runs along y between windows.
+      const band = !rowAt(y);
+      let a0 = band ? y : x; while (inBox(band ? x : a0 - 1, band ? a0 - 1 : y) && !inWin(band ? x : a0 - 1, band ? a0 - 1 : y)) a0--;
+      let a1 = band ? y : x; while (inBox(band ? x : a1 + 1, band ? a1 + 1 : y) && !inWin(band ? x : a1 + 1, band ? a1 + 1 : y)) a1++;
+      const along = band ? x - wx0 : y - wy0, across = (band ? y : x) - a0, n = a1 - a0 + 1;
+      col = bulkhead(bulk, along, across, n, X(x), Y(y), seed);
+      if (col === "lamp") { put(P, X(x), Y(y), C.dark); P.lamps.push({ x: X(x), y: Y(y), born: -10 }); continue; }
+    }
+    else if (nearWin(x, y)) col = sinew(X(x), Y(y), seed);
+    else if (LV >= 3 && x % 14 === 7) col = C.dark;   // panel seams on the biggest hulls
+    else if (y % 3 === 2) col = darkg(X(x), Y(y), seed);
+    put(P, X(x), Y(y), col);
+  }
+  for (let x = 2; x < W - 2; x += 3) if (inside(x, 1)) Sh.rim.push(X(x));
+  Sh.rimY = Y(1);
+  // The bays, each one kind of matter, by the planet.
+  const pool = Object.keys(BAYS).filter(k => k !== "lifebay" || lifeOn);
+  for (const w of wins) {
+    const ww = w.x1 - w.x0 + 1, wh = w.y1 - w.y0 + 1;
+    const nb = w.single ? 1 : Math.max(1, Math.min(4, Math.floor(ww / 11)));
+    const kinds = [];
+    for (let i = 0; i < nb; i++) kinds.push(wpick(r, pool));
+    let x = w.x0;
+    kinds.forEach((k, i) => {
+      const bw = i === nb - 1 ? w.x1 - x + 1 : Math.floor((ww - (nb - 1)) / nb);
+      const b = { kind: k, type: BAYS[k].type, x0: X(x), y0: Y(w.y0), w: bw, h: wh, ph: r() * 6 };
+      for (let yy = w.y0; yy <= w.y1; yy++) for (let xx = x; xx < x + bw; xx++) put(P, X(xx), Y(yy), C.glass);
+      if (b.type === "slots") {
+        const cols = Math.floor(bw / 3), rows = Math.floor(wh / 2), off = Math.floor((bw - cols * 3) / 2);
+        b.slots = []; for (let j = 0; j < rows; j++) for (let q = 0; q < cols; q++) b.slots.push({ x: X(x + off + q * 3), y: Y(w.y0 + j * 2) });
+        b.bins = []; b.cap = b.slots.length;
+      } else {
+        b.cap = wh * 2; b.level = Math.floor(b.cap * (0.2 + r() * 0.4));
+        b.c = k === "orebay" ? null : pick(r, FLUIDS);
+      }
+      Sh.bays.push(b);
+      Sh.holds.push(BAYS[k].name);
+      x += bw;
+      if (i < nb - 1) { for (let yy = w.y0; yy <= w.y1; yy++) put(P, X(x), Y(yy), (yy - w.y0) % 4 === 0 ? sinew(X(x), yy, seed) : bone(X(x), yy, seed)); x++; }
+    });
+  }
+  // Every ship has a rack somewhere.
+  if (!Sh.bays.some(b => b.type === "slots")) {
+    const b = Sh.bays[0], k = wpick(r, pool.filter(q => BAYS[q].type === "slots"));
+    b.kind = k; b.type = "slots"; Sh.holds[0] = BAYS[k].name;
+    const cols = Math.floor(b.w / 3), rows = Math.floor(b.h / 2), off = Math.floor((b.w - cols * 3) / 2);
+    b.slots = []; for (let j = 0; j < rows; j++) for (let q = 0; q < cols; q++) b.slots.push({ x: b.x0 + off + q * 3, y: b.y0 + j * 2 });
+    b.bins = []; b.cap = b.slots.length;
+  }
+  const wx0g = wx0, wx1g = wx1, wy1g = Math.max(...wins.map(w => w.y1));
+  // Glass cupolas on top: one on some small ships, more on big ones.
+  const nCup = SIZE === "small" ? (r() < 0.55 ? 1 : 0) : ri(r, 1, Math.min(3, SS.beams));
+  for (let k = 0; k < nCup; k++) {
+    const xc = Math.round(W * (k + 1) / (nCup + 1)), top = (() => { for (let y = H + 12; y >= 0; y--) if (inside(xc, y)) return y; return H - 1; })(), rc = ri(r, 3, 3 + F);
+    for (let y = 1; y <= rc; y++) for (let xx = -rc; xx <= rc; xx++) {
+      if (Math.abs(xx) + y > rc + 1) continue;
+      const shell = Math.abs(xx) + y === rc + 1 || Math.abs(xx) === rc || y === rc;
+      put(P, X(xc + xx), Y(top + y), shell ? bone(X(xc + xx), y, seed) : C.glass);
+    }
+    (Sh.cupolas = Sh.cupolas || []).push({ x: X(xc), y: Y(top + 2) });
+    Sh.pieces.push("cupola");
+  }
+  // Tractor beams underneath, evenly along the belly.
+  const xm = Math.floor(W / 2);
+  Sh.beams = [];
+  for (let k = 0; k < SS.beams; k++) {
+    const bx = SS.beams === 1 ? xm : Math.round(W * (0.2 + 0.6 * k / (SS.beams - 1)));
+    if (!inside(bx, 0)) continue;
+    for (let xx = -2; xx <= 2; xx++) put(P, X(bx + xx), Y(-1), Math.abs(xx) === 2 ? bone(X(bx + xx), 0, seed) : sinew(X(bx + xx), 0, seed));
+    Sh.beams.push({ x: X(bx), y: Y(-2), on: 0 });
+  }
+  Sh.beam = Sh.beams[0];
+  shipDecor(Sh, { P, r, seed, X, Y, inside, W, H, LV, wx0, wx1, wy0, wy1: wy1g });
+  // Tendrils, only where there is life, and only a few.
+  if (lifeOn) for (let k = 0; k < Math.round(3 * SS.beams * classWeight("lifebay") / 5 * r()); k++) {
+    const tx = ri(r, 3, W - 4);
+    if (Sh.beams.some(b => Math.abs(b.x - X(tx)) < 4) || !inside(tx, 0)) continue;
+    Sh.tendrils.push({ x: X(tx), y: Y(-1), len: ri(r, 4, 9), ph: r() * 6, curl: (r() < 0.5 ? -1 : 1) * (0.6 + r()), lamp: r() < 0.3 });
+  }
+  applyGrafts("ship", { P, Sh, seed, X, Y, inside, W, H, wx0: wx0g, wx1: wx1g, wy0, wy1: wy1g, xm });
+  Sh.loose = weld(P, seed);
+  // (For the couriers: every slot of every rack, in bay order.)
+  Sh.cap = Sh.bays.reduce((a, b) => a + b.cap, 0);
+  return Sh;
+}
+// Grafts that suit a cargo ship: eyes on the frame, veins along the rim,
+// hands underneath.
+const UFO_GRAFTS = {
+  eyes(G, r) {
+    const y = G.wy1 + 2;
+    for (const side of [-1, 1]) {
+      const x = side < 0 ? G.wx0 + 1 : G.wx1 - 3;
+      let ok = true; for (let i = -1; i <= 3; i++) for (let j = -1; j <= 1; j++) if (!G.inside(x + i, y + j)) ok = false;
+      if (ok) eyes(G.P, G.X(x), G.Y(y), 3, 1, r);
+    }
+    // Large and up: a cluster at each lower corner of the hold frame.
+    if (SHIP_LEVEL[SIZE] >= 2) for (const side of [-1, 1]) {
+      const x = side < 0 ? G.wx0 - 1 : G.wx1 - 1, y = G.wy0 - 3;
+      let ok = true; for (let i = -1; i <= 2; i++) for (let j = -1; j <= 2; j++) if (!G.inside(x + i, y + j)) ok = false;
+      if (ok) { eyes(G.P, G.X(x), G.Y(y), 1, 1, r); eyes(G.P, G.X(x + 1), G.Y(y + 1), 1, 1, r); }
+    }
+  },
+  veins(G, r) {
+    const path = [];
+    for (let x = 2; x < G.W - 2; x++) if (G.inside(x, 2) && G.inside(x, 3) && G.inside(x - 1, 2) && G.inside(x + 1, 2)) { path.push([G.X(x), G.Y(2)]); put(G.P, G.X(x), G.Y(2), sinew(x, 2, G.seed).map(v => v * 0.7)); }
+    if (path.length > 4) G.Sh.grafts.push({ kind: "vein", path, c: LAMP, sp: 12 + r() * 6, ph: r() * 20 });
+  },
+  hands(G, r) {
+    const x = r() < 0.5 ? Math.round(G.W * 0.25) : Math.round(G.W * 0.75);
+    if (!G.inside(x, 0) || G.Sh.beams.some(b => Math.abs(b.x - G.X(x)) < 5) || G.Sh.tendrils.some(td => Math.abs(td.x - G.X(x)) < 3)) return;
+    put(G.P, G.X(x), G.Y(-1), sinew(x, 1, G.seed)); put(G.P, G.X(x), G.Y(-2), sinew(x, 2, G.seed));
+    for (let k = -1; k <= 1; k++) put(G.P, G.X(x + k), G.Y(-3), bone(x + k, 3, G.seed));
+    G.Sh.grafts.push({ kind: "hand", x: G.X(x), y: G.Y(-4), fingers: 3, len: ri(r, 3, 4), per: 6 + r() * 3, ph: r() * 6 });
+  },
+};
+// Bays: what goes where, and filling and emptying them.
+const BAY_FOR = { metal: "barbay", ore: "orebay", gas: "gasbay", fluid: "tankbay", life: "lifebay" };
+function bayFull(b) { return b.type === "slots" ? b.bins.length >= b.cap : b.level >= b.cap; }
+function bayFill(b) { return (b.type === "slots" ? b.bins.length : b.level) / Math.max(1, b.cap); }
+function bayFor(Sh, it) {
+  // The emptiest bay that holds its kind; else the emptiest rack.
+  const want = BAY_FOR[it.cls], least = (l) => l.sort((a, b) => bayFill(a) - bayFill(b))[0];
+  return least(Sh.bays.filter(b => b.kind === want && !bayFull(b))) || least(Sh.bays.filter(b => b.type === "slots" && !bayFull(b)));
+}
+function bayTarget(b) {
+  if (b.type === "slots") { const s = b.slots[Math.min(b.bins.length, b.cap - 1)]; return { x: s.x + 1.5, y: s.y + 1 }; }
+  return { x: b.x0 + b.w / 2, y: b.y0 + Math.min(b.h - 1, Math.floor(b.level / 2)) + 0.5 };
+}
+function bayAdd(b, it) { if (bayFull(b)) { S.shipped++; return; } if (b.type === "slots") b.bins.push(it); else { b.level++; if (b.kind === "tankbay" && it.cls === "fluid") b.c = mix(b.c, it.c, 0.15); } }
+function bayTake(b) {
+  if (b.type === "slots") return b.bins.pop() || null;
+  if (b.level <= 0) return null;
+  b.level--;
+  return { kind: b.kind === "orebay" ? "bar" : "drum", c: b.kind === "orebay" ? ORES[b.level % ORES.length] : b.c };
+}
+function shipRaw(Sh) { const b = Sh.bays.find(q => q.kind === "orebay") || Sh.bays[0]; return bayTarget(b); }
+function drawShip(Sh, t) {
+  drawPart(Sh.part, t);
+  lamps(Sh.part, t, t);
+  // The bays, plainly: racks of bars, canisters and bales; ore heaped to its
+  // level; liquid to its level with bubbles; a glint now and then.
+  for (const b of Sh.bays) {
+    if (b.type === "slots") b.bins.forEach((it, k) => drawItem(b.slots[k], it, t, Sh));
+    else {
+      const rows = Math.min(b.h, Math.floor(b.level / 2));
+      for (let j = 0; j < rows; j++) for (let x = 0; x < b.w; x++) {
+        const X0 = b.x0 + x, Y0 = b.y0 + j;
+        if (b.kind === "orebay") { const o = ORES[Math.floor(hash(X0 >> 1, Y0 >> 1, Sh.seed + 3) * ORES.length)]; block(X0, Y0, o.map(v => v * (0.85 + 0.3 * hash(X0, Y0, 5)) * (j === rows - 1 ? 1.12 : 1))); }
+        else block(X0, Y0, b.c.map(v => v * (0.55 + 0.45 * (j + 1) / Math.max(1, rows)) * (j === rows - 1 ? 1.15 : 1)));
+      }
+      if (b.kind === "tankbay" && rows > 1) { for (let k = 0; k < 2; k++) { const p = (t * 0.5 + k * 0.5 + b.ph) % 1; block(b.x0 + 1 + ((k * 5 + Math.floor(b.ph * 3)) % Math.max(1, b.w - 2)), b.y0 + Math.floor(p * (rows - 1)), mix(b.c, [255, 255, 255], 0.5)); } emit(b.x0 + b.w / 2, b.y0 + rows / 2, b.w / 2 + 4, b.c, 0.2); }
+    }
+    const g = Math.floor(((t * 0.15 + b.ph) % 1.6) * (b.w + b.h));
+    for (let k = 0; k < b.h; k++) { const gx = g - k; if (gx >= 0 && gx < b.w) block(b.x0 + gx, b.y0 + k, [255, 255, 255], 0.12); }
+  }
+  // Rim lights chasing along the bottom.
+  const lead = Math.floor(t * 8) % Math.max(1, Sh.rim.length);
+  Sh.rim.forEach((x, i) => { const d = (i - lead + Sh.rim.length) % Sh.rim.length, on = d < 3; block(x, Sh.rimY, on ? mix(LAMP, [255, 255, 255], d === 0 ? 0.4 : 0) : [24, 40, 30]); if (on) emit(x + 0.5, Sh.rimY + 0.5, 4, LAMP, d === 0 ? 0.5 : 0.25); });
+  for (const cu of Sh.cupolas || []) emit(cu.x + 0.5, cu.y, 4, LAMP, 0.25 * pulse(t, cu.x));
+  // Vent grilles breathe warm.
+  for (const v of Sh.vents || []) { const p = 0.5 + 0.5 * Math.sin(t * 1.3 + v.ph); for (let i = 0; i < v.w; i++) for (let j = 0; j < v.h; j += 2) block(v.x + i, v.y + j, mix([40, 18, 8], HEAT, p * 0.8)); emit(v.x + v.w / 2, v.y + v.h / 2, v.w / 2 + 4, HEAT, 0.3 * p); }
+  // The tractor beams: each on while a courier loads or unloads near it.
+  for (const bm of Sh.beams) {
+    let on = false;
+    for (const c of S.couriers) if (c.t > c.dur * 0.55 && Math.abs(c.to.x - bm.x) < Sh.W / (2 * Sh.beams.length) + 6 && c.to.y > Sh.OY - 10 && c.to.y < Sh.OY + Sh.H + 10) on = true;
+    bm.on = Math.max(0, Math.min(1, bm.on + (on ? 0.12 : -0.05)));
+    if (bm.on > 0) {
+      ctx.globalCompositeOperation = "lighter";
+      for (let k = 1; k <= 14; k++) { const half = 1 + Math.floor(k / 3); for (let xx = -half; xx <= half; xx++) { if ((xx + k + Math.floor(t * 10)) & 1 && Math.abs(xx) === half) continue; block(bm.x + xx, bm.y - k, LAMP, bm.on * 0.16 * (1 - k / 14) * (Math.abs(xx) === half ? 0.5 : 1)); } }
+      ctx.globalCompositeOperation = "source-over";
+      emit(bm.x + 0.5, bm.y - 4, 8, LAMP, 0.5 * bm.on);
+    }
+    for (let xx = -1; xx <= 1; xx++) block(bm.x + xx, bm.y, bm.on > 0 ? mix([20, 30, 24], LAMP, bm.on) : C.vent);
+  }
+  for (const td of Sh.tendrils) drawTendril(td, t);
+  for (const o of Sh.grafts) drawGraft(o, t);
+}
+
+// ---------- biomechanical parts ----------
+// The machines look grown as much as built (the Matrix's machines): rounded
+// carapace over the frame, exposed ribs, vertebrae, sagging sinew cables,
+// swaying tendrils, clusters of sensor eyes. Sinew is a dark, cold metal;
+// bone is a pale one. Everything still in 1 m blocks, everything joined.
+function sinew(x, y, s) { const k = (0.11 + 0.05 * hash(x, y, s)) * 255; return [k * 0.9, k * 0.97, k * 1.14]; }
+function bone(x, y, s) { const k = (0.37 + 0.07 * hash(x, y, s)) * 255; return [k * 0.95, k, k * 1.05]; }
+// A run of blocks from one point to another, one axis at a time, so it is
+// always joined edge to edge (never a diagonal).
+function stairs(P, x0, y0, x1, y1, colour) {
+  let x = Math.round(x0), y = Math.round(y0);
+  const bx = Math.round(x1), by = Math.round(y1);
+  put(P, x, y, colour(x, y));
+  for (let i = 0; i < 400 && (x !== bx || y !== by); i++) {
+    const ex = Math.abs(bx - x), ey = Math.abs(by - y);
+    if (ex >= ey) x += Math.sign(bx - x); else y += Math.sign(by - y);
+    put(P, x, y, colour(x, y));
+  }
+}
+// A cable sagging between two points, with pale nodes along it.
+function cableSag(P, ax, ay, bx, by, sag, seed) {
+  const n = Math.max(4, Math.ceil(Math.abs(bx - ax) / 2));
+  let px = ax, py = ay, k = 0;
+  for (let i = 1; i <= n; i++) {
+    const u = i / n, x = ax + (bx - ax) * u, y = ay + (by - ay) * u - sag * 4 * u * (1 - u);
+    stairs(P, px, py, x, y, (cx, cy) => (k++ % 5 === 0) ? bone(cx, cy, seed) : sinew(cx, cy, seed));
+    px = x; py = y;
+  }
+}
+// A rib: a curved spine rising from (x, y), bending toward `dir`.
+function rib(P, x, y, h, dir, seed) {
+  let px = x, py = y;
+  for (let i = 1; i <= h; i++) {
+    const u = i / h, nx = x + dir * Math.round(Math.pow(u, 2) * h * 0.3), ny = y + i;
+    stairs(P, px, py, nx, ny, (cx, cy) => (cy - y) % 3 === 0 ? sinew(cx, cy, seed) : bone(cx, cy, seed));
+    px = nx; py = ny;
+  }
+}
+// A cluster of sensor eyes in a dark socket.
+function eyes(P, x, y, w, h, r) {
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(P, x + i, y + j, C.vent);
+  const n = ri(r, 2, Math.max(2, Math.min(5, w * h - 2)));
+  const used = new Set();
+  for (let k = 0; k < n; k++) {
+    const i = ri(r, 0, w - 1), j = ri(r, 0, h - 1), key = i * 16 + j;
+    if (used.has(key)) continue;
+    used.add(key);
+    P.lamps.push({ x: x + i, y: y + j, born: -10 });
+  }
+}
+// Tendrils hang and sway, curling at the tips; drawn each frame.
+function drawTendril(td, t) {
+  let px = td.x, py = td.y;
+  for (let k = 1; k <= td.len; k++) {
+    const u = k / td.len;
+    const nx = Math.round(td.x + Math.sin(t * 0.7 + td.ph + k * 0.3) * td.curl * u * u * 3);
+    const ny = td.y - k;
+    // Joined edge to edge: a sideways step gets its own blocks.
+    for (let sx = Math.min(px, nx); sx <= Math.max(px, nx); sx++) if (sx !== px) block(sx, py, sinew(sx, py, SEED));
+    block(nx, ny, k % 4 === 0 ? bone(nx, ny, SEED) : sinew(nx, ny, SEED));
+    px = nx; py = ny;
+  }
+  if (td.lamp) { const p = pulse(t, td.x); block(px, py - 1, mix([20, 30, 24], LAMP, p)); emit(px + 0.5, py - 0.5, 4, LAMP, 0.4 * p); }
+}
+
+// ---------- welding ----------
+// A facility must be one piece: every block joined edge to edge with the
+// rest. After a refinery or ship is generated, any group of blocks not
+// joined to the main hull gets the shortest strut path to it (through open
+// space, never through a block of its own group); a group with no way back
+// within reach is cut off. Returns how many groups it found loose.
+function pieces(P) {
+  const at = new Map();
+  for (const c of P.cells) at.set(c.x * 65536 + c.y, c);
+  const label = new Map();
+  const groups = [];
+  for (const [k] of at) {
+    if (label.has(k)) continue;
+    const g = [k]; label.set(k, groups.length);
+    for (let i = 0; i < g.length; i++) {
+      const x = Math.floor(g[i] / 65536), y = g[i] - x * 65536;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const n = (x + dx) * 65536 + (y + dy); if (at.has(n) && !label.has(n)) { label.set(n, groups.length); g.push(n); } }
+    }
+    groups.push(g);
+  }
+  return { at, label, groups };
+}
+function weld(P, seed, reach = 60) {
+  const KEY = (x, y) => x * 65536 + y;
+  // (Cells are kept at non-negative coordinates in the keys.)
+  const OFF = 20000;
+  for (const c of P.cells) { c.x += OFF; c.y += OFF; }
+  let { at, label, groups } = pieces(P);
+  const loose = groups.length - 1;
+  if (loose > 0) {
+    let main = 0; groups.forEach((g, i) => { if (g.length > groups[main].length) main = i; });
+    const inMain = new Set(groups[main]);
+    const cut = new Set();
+    // Nearest groups first, so each weld can lean on the last.
+    const order = groups.map((g, i) => i).filter(i => i !== main).sort((a, b) => groups[b].length - groups[a].length);
+    for (const gi of order) {
+      const g = groups[gi];
+      if (g.every(k => inMain.has(k))) continue;
+      // How far the search may go: the group's own extent and `reach` round it.
+      let gx0 = Infinity, gx1 = -Infinity, gy0 = Infinity, gy1 = -Infinity;
+      for (const k of g) { const x = Math.floor(k / 65536), y = k - x * 65536; if (x < gx0) gx0 = x; if (x > gx1) gx1 = x; if (y < gy0) gy0 = y; if (y > gy1) gy1 = y; }
+      // Breadth-first from the group through open space to the main piece;
+      // failing that, a wider search that may pass through other loose
+      // groups (they are joined up on the way).
+      let from, found = -1;
+      for (const pass of [0, 1]) {
+        const R2 = pass ? reach * 4 : reach;
+        from = new Map();
+        const q = g.slice();
+        for (const k of q) from.set(k, -1);
+        for (let i = 0; i < q.length && found < 0; i++) {
+          const k = q[i], x = Math.floor(k / 65536), y = k - x * 65536;
+          for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+            const n = KEY(x + dx, y + dy);
+            if (from.has(n)) continue;
+            if (inMain.has(n)) { from.set(n, k); found = n; break; }
+            if (!pass && at.has(n)) continue;            // another loose group's block: go round
+            if (x + dx < gx0 - R2 || x + dx > gx1 + R2 || y + dy < gy0 - R2 || y + dy > gy1 + R2) continue;
+            from.set(n, k); q.push(n);
+          }
+        }
+        if (found >= 0) break;
+      }
+      if (found < 0) { for (const k of g) cut.add(k); continue; }
+      // Lay struts along the path (not on the group's or the main piece's own blocks).
+      let k = from.get(found);
+      while (k !== -1 && !g.includes(k)) {
+        if (at.has(k)) { for (const kk of groups[label.get(k)] || [k]) inMain.add(kk); }   // a loose group on the way joins too
+        else {
+          const x = Math.floor(k / 65536), y = k - x * 65536;
+          const c = { x, y, c: strut(x - OFF, y - OFF, seed), born: -10 };
+          P.cells.push(c); at.set(k, c); inMain.add(k);
+        }
+        k = from.get(k);
+      }
+      for (const kk of g) inMain.add(kk);
+    }
+    if (cut.size) { P.cells = P.cells.filter(c => !cut.has(KEY(c.x, c.y))); P.cut = (P.cut || 0) + cut.size; }
+  }
+  for (const c of P.cells) { c.x -= OFF; c.y -= OFF; markSolid(c.x, c.y); }
+  P.baked = -1;
+  return loose;
+}
+
+// ---------- work appendages ----------
+// Besides the drop-hammers, seven kinds of work hang under a refinery's
+// modules, for solids, fluids and gases. Each has a frame built into the
+// hull (static blocks) and moving parts drawn each frame; most make a
+// product that couriers carry to the storage ships: bars (solids), drums
+// (fluids) or canisters (gases).
+const GASES = [[235, 240, 255], [255, 236, 160], [170, 200, 255], [214, 170, 255], [160, 224, 255]];
+const FLUIDS = [[70, 196, 214], [214, 120, 60], [120, 214, 110], [220, 196, 80], [180, 90, 200]];
+const WORKS = {
+  crucible:   { w: 7,  h: 10, name: "crucible pour", takes: "molten metal" },
+  column:     { w: 7,  h: 16, name: "fractionating column", takes: "gases" },
+  centrifuge: { w: 9,  h: 10, name: "centrifuge", takes: "fluids" },
+  electro:    { w: 11, h: 8,  name: "electrolysis bank", takes: "fluids to light metals" },
+  crusher:    { w: 7,  h: 10, name: "jaw crusher", takes: "ore" },
+  mill:       { w: 13, h: 9,  name: "rolling mill", takes: "hot metal" },
+  cryo:       { w: 10, h: 12, name: "cryo condenser", takes: "gases to liquid" },
+};
+const WORK_TYPES = Object.keys(WORKS);
+const COPPER = [176, 108, 62], ICE = [176, 214, 232], FROST = [236, 248, 255];
+
+// Static blocks of a work's frame. (x0, top): its left column and the row
+// it hangs from; it reaches down `h` rows. Returns its state.
+function placeWork(P, type, x0, top, seed, r) {
+  if (LIFE_WORKS[type]) return placeLife(P, type, x0, top, seed, r);
+  const S_ = { type, x0, top, ph: r() * 10, made: 0, t0: 0 };
+  const at = (x, d, c) => put(P, x0 + x, top - d, c);
+  const st = (x, d) => at(x, d, strut(x0 + x, top - d, seed));
+  const ar = (x, d) => at(x, d, armour(x0 + x, top - d, seed));
+  switch (type) {
+    case "crucible":
+      // Arms down to the pivots and on down to the mould: one frame.
+      for (let d = 0; d <= 9; d++) { st(0, d); st(6, d); }
+      at(0, 3, C.dark); at(6, 3, C.dark);
+      for (let x = 1; x <= 5; x++) { at(x, 8, C.dark); st(x, 9); }
+      S_.metal = pick(r, ELEMENTS); S_.per = 5.5 + r() * 2;
+      break;
+    case "column":
+      for (let d = 0; d <= 12; d++) { st(1, d); st(5, d); }
+      for (let d = 1; d <= 11; d++) { at(2, d, d % 3 === 0 ? C.dark : armour(x0 + 2, top - d, seed)); at(4, d, d % 3 === 0 ? C.dark : armour(x0 + 4, top - d, seed)); }
+      for (let x = 1; x <= 5; x++) at(x, 13, C.dark);
+      st(1, 14); st(5, 14); st(1, 15); st(5, 15);
+      for (const d of [4, 8]) { st(6, d); at(0, d + 1, strut(x0, top - d, seed)); }
+      S_.gas = pick(r, GASES); S_.per = 6 + r() * 3;
+      break;
+    case "centrifuge":
+      st(1, 0); st(1, 1); st(7, 0); st(7, 1);
+      for (let d = 2; d <= 9; d++) for (let x = 0; x <= 8; x++) {
+        const dx = x - 3.5, dy = d - 5.5;
+        if (Math.hypot(dx, dy) < 2.9 || (x === 7 && d >= 3 && d <= 8)) continue;
+        at(x, d, (x === 0 || x === 8 || d === 2 || d === 9) ? strut(x0 + x, top - d, seed) : armour(x0 + x, top - d, seed));
+      }
+      S_.fluid = pick(r, FLUIDS); S_.per = 7 + r() * 3;
+      break;
+    case "electro":
+      st(0, 0); st(0, 1); st(10, 0); st(10, 1);
+      for (let x = 0; x <= 10; x++) at(x, 2, COPPER.map(v => v * (0.85 + 0.3 * hash(x, 2, seed))));
+      for (const x of [2, 5, 8]) { at(x, 3, C.dark); at(x, 4, strut(x0 + x, top - 4, seed)); }
+      for (let d = 2; d <= 7; d++) { st(0, d); st(10, d); }
+      for (let x = 1; x <= 9; x++) st(x, 7);
+      S_.bath = pick(r, [[60, 200, 200], [90, 220, 140], [80, 160, 230]]); S_.metal = pick(r, [[204, 208, 214], [190, 196, 200], [172, 172, 190]]); S_.per = 5 + r() * 3;
+      break;
+    case "crusher":
+      // The chute, stepped in, then the jaw frame and the bin.
+      for (let d = 0; d <= 2; d++) { st(1, d); st(5, d); }
+      st(2, 2); st(4, 2); st(0, 2); st(6, 2);
+      for (let d = 3; d <= 9; d++) { st(0, d); st(6, d); }
+      for (let x = 1; x <= 5; x++) st(x, 9);
+      S_.per = 0.8 + r() * 0.4;
+      break;
+    case "mill":
+      st(2, 0); st(2, 1); st(10, 0); st(10, 1);
+      for (let x = 1; x <= 11; x++) ar(x, 2);
+      // The feed table and the tray, each on a post from the housing.
+      for (let d = 3; d <= 5; d++) st(1, d);
+      for (let x = 0; x <= 4; x++) st(x, 6);
+      for (let d = 3; d <= 6; d++) st(11, d);
+      for (let x = 9; x <= 12; x++) st(x, 7);
+      st(12, 6); st(10, 3); st(10, 4);
+      S_.metal = pick(r, ELEMENTS); S_.per = 5 + r() * 2;
+      break;
+    case "cryo":
+      st(1, 0); st(8, 0);
+      for (let x = 0; x <= 9; x++) ar(x, 1);
+      // The condenser coil: a zigzag of icy pipe.
+      for (let d = 2; d <= 7; d++) { at(5, d, ICE); at(8, d, ICE); }
+      for (const d of [2, 5]) { at(6, d, ICE); at(7, d, ICE); }
+      for (const d of [3, 6]) { at(6, d + 1, ICE.map(v => v * 0.85)); }
+      at(6, 8, C.dark);
+      // The dewar flask.
+      for (let d = 9; d <= 11; d++) for (let x = 5; x <= 7; x++) at(x, d, d === 9 ? [70, 120, 170] : light(x0 + x, d, seed).map(v => v * (x === 5 ? 1.15 : x === 7 ? 0.85 : 1)));
+      S_.gas = pick(r, GASES); S_.per = 8 + r() * 3;
+      break;
+  }
+  return S_;
+}
+
+function workMade(R, w, kind, c, x, y) { w.made++; R.out.push({ kind, c, x, y }); }
+
+function stepWork(R, w, dt, t) {
+  if (LIFE_WORKS[w.type]) return stepLife(R, w, dt, t);
+  const X = (x) => w.x0 + x, Y = (d) => w.top - d;
+  const u = ((t + w.ph) % w.per) / w.per;
+  const cyc = Math.floor((t + w.ph) / w.per);
+  switch (w.type) {
+    case "crucible":
+      if (cyc !== w.last && u > 0.92) { w.last = cyc; workMade(R, w, "bar", w.metal, X(3), Y(8)); }
+      if (u > 0.55 && u < 0.78 && Math.random() < dt * 20) spark(X(3), Y(7), 1, [255, 200, 90], 4);
+      break;
+    case "column":
+      if (cyc !== w.last && u > 0.95) { w.last = cyc; workMade(R, w, "canister", w.gas, X(3), Y(15)); }
+      if (Math.random() < dt * 1.2) smokeC(X(6) + 1, Y(4), w.gas.map(v => v * 0.6));
+      break;
+    case "centrifuge":
+      if (cyc !== w.last && u > 0.95) { w.last = cyc; workMade(R, w, "drum", w.fluid, X(4), Y(9)); }
+      break;
+    case "electro":
+      if (cyc !== w.last && u > 0.95) { w.last = cyc; workMade(R, w, "bar", w.metal, X(5), Y(7)); }
+      break;
+    case "crusher":
+      if (cyc !== w.last && u > 0.5) { w.last = cyc; spark(X(3), Y(7), 2, [150, 140, 125], 3); if (Math.random() < 0.6) smokeC(X(3), Y(8), [96, 92, 86]); }
+      break;
+    case "mill":
+      if (cyc !== w.last && u > 0.9) { w.last = cyc; workMade(R, w, "bar", w.metal, X(11), Y(7)); spark(X(10), Y(5), 4, [255, 200, 120], 5); }
+      break;
+    case "cryo":
+      if (cyc !== w.last && u > 0.95) { w.last = cyc; workMade(R, w, "canister", w.gas, X(6), Y(11)); }
+      if (Math.random() < dt * 1.5) smokeC(X(6) + Math.random() * 3, Y(4), [150, 190, 210]);
+      break;
+  }
+}
+
+function drawWork(w, t) {
+  if (LIFE_WORKS[w.type]) return drawLife(w, t);
+  const X = (x) => w.x0 + x, Y = (d) => w.top - d;
+  const B = (x, d, c, a = 1) => block(X(x), Y(d), c, a);
+  const u = ((t + w.ph) % w.per) / w.per;
+  const hot = (k) => k > 0.75 ? [255, 244, 200] : k > 0.5 ? [255, 190, 80] : k > 0.25 ? [230, 100, 30] : [120, 40, 14];
+  switch (w.type) {
+    case "crucible": {
+      // Heats, tips on its pivots, pours into the mould, rights itself.
+      const tilt = u < 0.45 ? 0 : u < 0.55 ? (u - 0.45) / 0.1 : u < 0.78 ? 1 : u < 0.88 ? 1 - (u - 0.78) / 0.1 : 0;
+      const a = tilt * 1.15, cs = Math.cos(a), sn = Math.sin(a);
+      const glow = Math.min(1, u / 0.45);
+      for (let ox = -2; ox <= 2; ox++) for (let oy = 1; oy <= 4; oy++) {
+        const wall = ox === -2 || ox === 2 || oy === 4;
+        if (!wall && oy > 2 - (tilt > 0.5 ? 1 : 0)) continue;
+        const rx = Math.round(3 + ox * cs + oy * sn), ry = Math.round(3 + oy * cs - ox * sn);
+        B(rx, ry, wall ? strut(X(ox), oy, SEED) : hot(glow));
+      }
+      emit(X(3) + 0.5, Y(4), 6, [255, 150, 60], 0.5 * glow);
+      // The stream, while pouring.
+      if (tilt > 0.6) {
+        const lx = Math.round(3 + 2 * cs + 1 * sn);
+        for (let d = Math.round(3 + 1 * cs - 2 * sn) + 1; d <= 7; d++) B(lx, d, hot(0.8 + 0.2 * Math.random()));
+        emit(X(lx) + 0.5, Y(6), 5, [255, 170, 60], 0.9);
+      }
+      // The mould: filling, then cooling.
+      const fill = u < 0.55 ? 0 : Math.min(1, (u - 0.55) / 0.23);
+      const cool = u < 0.78 ? 1 : 1 - (u - 0.78) / 0.14;
+      if (fill > 0) for (let x = 1; x <= Math.max(1, Math.round(fill * 5)); x++) B(x, 8, cool > 0.3 ? hot(cool) : w.metal);
+      if (cool > 0.3 && fill > 0) emit(X(3), Y(8), 5, [255, 140, 50], 0.6 * cool);
+      break;
+    }
+    case "column": {
+      // Bubbles rising through the window, amber at the bottom to pale at the top.
+      for (let d = 1; d <= 11; d++) B(3, d, C.glass);
+      for (let k = 0; k < 5; k++) {
+        const p = ((t * 0.5 + k / 5 + w.ph) % 1);
+        const d = Math.round(11 - p * 10);
+        const c = mix([255, 170, 60], w.gas, p);
+        B(3, d, c); emit(X(3) + 0.5, Y(d) + 0.5, 3, c, 0.35);
+      }
+      // The canister filling under it.
+      const fill = Math.round(u * 3);
+      for (let x = 2; x <= 4; x++) for (let d = 14; d <= 15; d++) B(x, d, x - 2 < fill ? w.gas.map(v => v * (d === 14 ? 1 : 0.8)) : [40, 44, 46]);
+      B(3, 13, mix([20, 30, 24], LAMP, pulse(t, X(3))));
+      break;
+    }
+    case "centrifuge": {
+      // The rotor through its round window, spinning fast.
+      const cx = 3.5, cy = 5.5, rot = t * 11 + w.ph;
+      for (let d = 3; d <= 8; d++) for (let x = 1; x <= 6; x++) if (Math.hypot(x - cx, d - cy) < 2.9) B(x, d, [24, 34, 38]);
+      for (let k = 0; k < 3; k++) {
+        const a = rot + k * 2.094;
+        for (let s = 0.5; s <= 2.4; s += 0.6) B(Math.round(cx + Math.cos(a) * s - 0.5), Math.round(cy + Math.sin(a) * s - 0.5), light(k, 1, SEED));
+      }
+      B(3, 5, C.dark);
+      // The sight glass: the liquid settling into layers.
+      const settle = Math.min(1, u * 1.6);
+      for (let d = 3; d <= 8; d++) {
+        const layer = settle > 0.5 ? (d <= 4 ? 0 : d <= 6 ? 1 : 2) : (Math.floor(t * 6 + d) % 3);
+        B(7, d, w.fluid.map(v => v * [1.15, 0.85, 0.6][layer]));
+      }
+      emit(X(7) + 0.5, Y(5), 3, w.fluid, 0.3);
+      break;
+    }
+    case "electro": {
+      // The bath, bubbling, and arcs crackling off the electrodes.
+      for (let x = 1; x <= 9; x++) for (let d = 5; d <= 6; d++) B(x, d, w.bath.map(v => v * (d === 5 ? 1 : 0.75) * (0.9 + 0.2 * hash(x, d + ((t * 4) | 0), 3))));
+      for (const ex of [2, 5, 8]) B(ex, 5, C.dark);
+      for (const ex of [2, 5, 8]) {
+        if (Math.random() < 0.35) {
+          const tx = ex + Math.round((Math.random() - 0.5) * 4), td = 6;
+          let x = ex, d = 5;
+          while (d < td || x !== tx) { if (Math.random() < 0.5 && x !== tx) x += Math.sign(tx - x); else if (d < td) d++; else x += Math.sign(tx - x); B(x, d, [220, 236, 255]); }
+          emit(X(ex) + 0.5, Y(5), 5, [170, 210, 255], 1.0);
+        }
+      }
+      if (Math.random() < 0.3) B(1 + Math.floor(Math.random() * 9), 5, [230, 250, 255]);
+      break;
+    }
+    case "crusher": {
+      // Two jaws chomping, ore chunks dropping in, gravel falling out.
+      const shut = u < 0.5 ? u / 0.5 : 1 - (u - 0.5) / 0.5;
+      const k = Math.round(shut);
+      for (let d = 3; d <= 7; d++) {
+        const lw = 1 + (d >= 5 ? 1 : 0), rw = lw;
+        for (let x = 1; x < 1 + lw + k; x++) B(x, d, light(x, d, SEED));
+        for (let x = 5; x > 5 - rw - k; x--) B(x, d, light(x, d, SEED));
+      }
+      const fall = (t * 1.3 + w.ph) % 1;
+      B(3, Math.round(fall * 4), ORES[(Math.floor(t * 1.3 + w.ph)) % ORES.length]);
+      for (let x = 1; x <= 5; x++) B(x, 8, ORES[(x + 2) % ORES.length].map(v => v * 0.8));
+      if (shut > 0.6) for (let i = 0; i < 2; i++) B(2 + Math.floor(Math.random() * 3), 8 - (Math.random() < 0.5 ? 0 : 1), [120, 112, 100]);
+      break;
+    }
+    case "mill": {
+      // Rollers turning; a glowing slab in, a thin sheet out, cut by the shear.
+      for (const [rx, rd] of [[5, 3], [5, 6]]) {
+        for (let x = 0; x < 3; x++) for (let d = 0; d < 3; d++) if (!((x === 0 || x === 2) && (d === 0 || d === 2))) B(rx + x, rd + d - 1, strut(rx + x, d, SEED));
+        const a = t * 4 * (rd === 3 ? 1 : -1);
+        B(rx + 1 + Math.round(Math.cos(a)), rd + Math.round(Math.sin(a)), light(rx, rd, SEED));
+      }
+      const heat = 1 - u * 0.6;
+      const slabLen = Math.max(0, 4 - Math.floor(u * 6));
+      for (let x = 5 - slabLen; x < 5; x++) { B(x, 4, hot(heat)); B(x, 5, hot(heat * 0.9)); }
+      const sheet = Math.min(6, Math.floor(u * 9));
+      for (let x = 7; x < 7 + sheet; x++) B(x, 5, hot(heat * 0.85));
+      if (u > 0.85) { B(10, 3, light(10, 3, SEED)); B(10, 4, light(10, 4, SEED)); }
+      emit(X(5) + 1.5, Y(4.5), 7, [255, 150, 60], 0.6 * heat);
+      break;
+    }
+    case "cryo": {
+      // The bellows pumping, frost glittering on the coil, drips into the dewar.
+      const open = 0.5 + 0.5 * Math.sin(t * 2.4 + w.ph);
+      const bw = 1 + Math.round(open * 2);
+      for (let d = 2; d <= 7; d++) for (let x = 3 - bw; x <= 3; x++) B(Math.max(0, x), d, d % 2 ? C.dark : strut(x, d, SEED));
+      for (let i = 0; i < 3; i++) { const fx = [5, 6, 7, 8][Math.floor(Math.random() * 4)], fd = 2 + Math.floor(Math.random() * 6); B(fx, fd, FROST, 0.9); }
+      const dp = (t * 1.8 + w.ph) % 1;
+      if (dp < 0.6) B(6, 8 + Math.round(dp / 0.6), mix(w.gas, [200, 230, 255], 0.5));
+      emit(X(6.5), Y(5), 6, [150, 210, 255], 0.35);
+      const lvl = Math.round(u * 2);
+      for (let k = 0; k < lvl; k++) B(6, 11 - k, w.gas.map(v => v * 0.9), 0.85);
+      break;
+    }
+  }
+}
+// Smoke with a colour (vapour, dust, cold mist).
+function smokeC(x, y, c) {
+  if (S.smoke.length > 600) return;
+  S.smoke.push({ x: x + (Math.random() - 0.5), y, vx: (Math.random() - 0.5) * 3, vy: 2 + Math.random() * 3, s: 1, life: 2.5 + Math.random() * 2, age: 0, g: 0, c });
+}
+// An item in a rack: a bar (solid), a canister (gas) or a drum (fluid).
+function drawItem(p, item, t, Sh) {
+  if (item.kind === "bar") return drawBar(p, item.c, t, Sh);
+  const c = item.c;
+  if (item.kind === "canister") {
+    // Banded cylinder lying down: a dark valve cap, the gas's colour band, a bright top.
+    block(p.x, p.y, C.dark); block(p.x, p.y + 1, light(p.x, p.y, SEED));
+    block(p.x + 1, p.y, c.map(v => v * 0.85)); block(p.x + 1, p.y + 1, mix(c, [255, 255, 255], 0.35));
+    block(p.x + 2, p.y, light(p.x + 2, p.y, SEED).map(v => v * 0.8)); block(p.x + 2, p.y + 1, light(p.x + 2, p.y + 1, SEED));
+  } else {
+    // A ribbed drum in the fluid's colour.
+    block(p.x, p.y, c.map(v => v * 0.8)); block(p.x, p.y + 1, c);
+    block(p.x + 1, p.y, C.dark); block(p.x + 1, p.y + 1, strut(p.x, p.y, SEED));
+    block(p.x + 2, p.y, c.map(v => v * 0.7)); block(p.x + 2, p.y + 1, mix(c, [255, 255, 255], 0.25));
+  }
+}
+
+// ---------- planets shape their refineries ----------
+// Every feature is classed by the kind of matter it works best: metal, ore
+// (rock and solids), fluid, gas or life. A planet has a weight for each
+// class, from what it is made of, and its refineries and ships grow the
+// features that suit it: a living world's sprout bones, hearts and hands, a
+// metallic world's stay metallurgical. Life works appear only where there
+// is life.
+const FEATURE_CLASS = {
+  // Works.
+  crucible: "metal", mill: "metal", electro: "fluid", crusher: "ore", centrifuge: "fluid", column: "gas", cryo: "gas",
+  chipper: "life", digester: "life", renderer: "life", bloodstill: "life", bonemill: "life", sifter: "ore",
+  // Module jobs.
+  forge: "metal", crane: "metal", furnace: "ore", stacks: "ore", vats: "fluid", globes: "gas", plain: null,
+  // Grafts (eyes are for any world).
+  eyes: null, bones: "life", ribcage: "life", heart: "life", hands: "life", skull: "life", jaws: "ore", muscles: "metal", veins: "fluid", lungs: "gas",
+  // Storage ship parts (their own library).
+  barbay: "metal", orebay: "ore", gasbay: "gas", tankbay: "fluid", lifebay: "life",
+};
+const PLANETS = {
+  balanced: { name: "Balanced", w: { metal: 1, ore: 1, fluid: 1, gas: 1, life: 1 } },
+  metallic: { name: "Metallic world", w: { metal: 5, ore: 1.5, fluid: 0.6, gas: 0.3, life: 0 } },
+  rocky:    { name: "Rocky world", w: { metal: 1, ore: 5, fluid: 0.5, gas: 0.5, life: 0 } },
+  volcanic: { name: "Volcanic world", w: { metal: 3, ore: 4, fluid: 1, gas: 1.5, life: 0 } },
+  living:   { name: "Living world", w: { metal: 0.6, ore: 1, fluid: 1.5, gas: 0.8, life: 5 } },
+  ocean:    { name: "Ocean world", w: { metal: 0.5, ore: 0.6, fluid: 5, gas: 1, life: 1.5 } },
+  fungal:   { name: "Fungal swamp", w: { metal: 0.4, ore: 1, fluid: 2.5, gas: 1.5, life: 4 } },
+  icy:      { name: "Ice moon", w: { metal: 0.4, ore: 0.8, fluid: 1.2, gas: 5, life: 0 } },
+  hothouse: { name: "Hothouse world", w: { metal: 0.5, ore: 0.8, fluid: 2, gas: 4, life: 0.5 } },
+  carbon:   { name: "Carbon world", w: { metal: 1, ore: 3, fluid: 3, gas: 1, life: 0 } },
+};
+// The nine shown, left to right, top to bottom.
+const GRID = ["metallic", "rocky", "volcanic", "living", "ocean", "fungal", "icy", "hothouse", "carbon"];
+// What a planet's matter looks like as cargo, by class.
+function planetItem(id) {
+  const w = PLANETS[id].w, cls = Object.keys(w).filter(c => w[c] > 0);
+  let x = Math.random() * cls.reduce((a, c) => a + w[c], 0), c = cls[0];
+  for (const k of cls) { x -= w[k]; if (x < 0) { c = k; break; } }
+  const any = (l) => l[Math.floor(Math.random() * l.length)];
+  return itemOfClass(c);
+}
+// One piece of cargo of a class, as it looks in a rack.
+function itemOfClass(c) {
+  const any = (l) => l[Math.floor(Math.random() * l.length)];
+  switch (c) {
+    case "metal": return { kind: "bar", c: any(ELEMENTS), cls: "metal" };
+    case "ore": return { kind: "bar", c: any(ORES).map(v => v * 1.1), cls: "ore" };
+    case "fluid": return { kind: "drum", c: any(FLUIDS), cls: "fluid" };
+    case "gas": return { kind: "canister", c: any(GASES), cls: "gas" };
+    default: return Object.assign(any([{ kind: "bar", c: WOOD }, { kind: "bar", c: BONEMEAL }, { kind: "drum", c: TALLOW }, { kind: "drum", c: BLOOD }, { kind: "canister", c: METHANE }]), { cls: "life" });
+  }
+}
+let PLANET = "balanced";
+const classWeight = (f) => { const c = FEATURE_CLASS[f]; return c ? PLANETS[PLANET].w[c] : 1; };
+// A pick weighted by the planet (one random number, like `pick`).
+function wpick(r, list) {
+  const ws = list.map(classWeight), tot = ws.reduce((a, b) => a + b, 0);
+  let x = r() * tot;
+  for (let i = 0; i < list.length; i++) { x -= ws[i]; if (x < 0) return list[i]; }
+  return list[list.length - 1];
+}
+// How likely a graft is on this planet: certain where its class is the
+// planet's strongest, never where the planet has none of it.
+function graftChance(id) {
+  const c = FEATURE_CLASS[id]; if (!c) return 1;
+  const w = PLANETS[PLANET].w, top = Math.max(...Object.values(w));
+  return Math.pow(w[c] / top, 0.6);
+}
+
+// ---------- grafts: machine twists on body parts ----------
+// Each graft is one self-contained entry here, applied after a machine's
+// base design, with its own random numbers. Switching one off removes just
+// that feature; the base design does not change. (If the machines go too
+// far toward the biological, these are the dials.)
+const CRIMSON = [[70, 12, 16], [140, 28, 30], [214, 58, 48], [255, 120, 96]];
+function disc(cx, cy, rad) { const v = []; for (let y = -Math.ceil(rad); y <= Math.ceil(rad); y++) for (let x = -Math.ceil(rad); x <= Math.ceil(rad); x++) if (Math.hypot(x, y) <= rad + 0.3) v.push([cx + x, cy + y]); return v; }
+// A polyline of blocks, joined edge to edge, drawn this frame.
+function drawPath(pts, colour) {
+  let [px, py] = [Math.round(pts[0][0]), Math.round(pts[0][1])];
+  block(px, py, colour(0));
+  for (let i = 1; i < pts.length; i++) {
+    const bx = Math.round(pts[i][0]), by = Math.round(pts[i][1]);
+    for (let s = 0; s < 60 && (px !== bx || py !== by); s++) {
+      if (Math.abs(bx - px) >= Math.abs(by - py)) px += Math.sign(bx - px); else py += Math.sign(by - py);
+      block(px, py, colour(i));
+    }
+  }
+}
+function nearestCourier(x, y, range) {
+  let best = null, bd = range * range;
+  for (const c of S.couriers) { const p = courierPos(c), d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d < bd) { bd = d; best = p; } }
+  return best;
+}
+const GRAFTS = [
+  { id: "eyes", name: "Eyes", desc: "Big mechanical eyes: an iris ring, a pupil lamp that tracks the nearest courier, lids that blink.", salt: 11,
+    refinery(G, r) {
+      let n = 0;
+      for (const m of G.real.slice().sort(() => r() - 0.5)) {
+        if (n >= 2 || r() < 0.35) continue;
+        const rad = ri(r, 2, 4), d = 2 * rad + 1;
+        for (let a = 0; a < 12; a++) {
+          const ex = ri(r, m.x + 1, m.x + m.w - d - 1), ey = ri(r, m.y + 1, m.y + m.h - d - 1);
+          if (!G.roomFor(m, ex - 1, ey - 1, d + 2, d + 2)) continue;
+          G.claim(ex - 1, ey - 1, d + 2, d + 2);
+          const cx = G.X(ex + rad), cy = G.Y(ey + rad);
+          for (const [x, y] of disc(cx, cy, rad + 1)) put(G.P, x, y, Math.hypot(x - cx, y - cy) > rad + 0.3 ? sinew(x, y, G.seed) : C.vent);
+          G.R.grafts.push({ kind: "eye", cx, cy, rad, ph: r() * 9, per: 4 + r() * 4 });
+          n++;
+          break;
+        }
+      }
+    },
+    ship(G, r) {
+      const mid = Math.round((G.hy0 + G.hy1) / 2) + 1, rad = 2 + (r() < 0.5 ? 1 : 0), cx = G.bow + rad + 1;
+      for (const [x, y] of disc(cx, mid, rad + 1)) if (!G.inside(x, y)) return;
+      for (const [x, y] of disc(cx, mid, rad + 1)) put(G.P, G.X(x), G.Y(y), Math.hypot(x - cx, y - mid) > rad + 0.3 ? sinew(x, y, G.seed) : C.vent);
+      G.Sh.grafts.push({ kind: "eye", cx: G.X(cx), cy: G.Y(mid), rad, ph: r() * 9, per: 5 + r() * 3 });
+    } },
+  { id: "bones", name: "Bones", desc: "Exposed metal bones with knuckled ends, bolted across hull faces or bracing between modules.", salt: 23,
+    refinery(G, r) {
+      const knob = (x, y) => { for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]]) put(G.P, x + dx, y + dy, bone(x + dx, y + dy, G.seed).map(v => v * (dy > 0 ? 1.12 : 1))); };
+      for (let k = 0; k < ri(r, 1, 3); k++) {
+        if (r() < 0.5) {
+          // Across a module's face.
+          const m = pick(r, G.real), len = ri(r, 6, Math.max(6, Math.min(16, m.w - 4)));
+          for (let a = 0; a < 10; a++) {
+            const bx = ri(r, m.x + 2, m.x + m.w - len - 2), by = ri(r, m.y + 2, m.y + m.h - 4);
+            if (!G.roomFor(m, bx - 2, by - 2, len + 4, 5)) continue;
+            G.claim(bx - 2, by - 2, len + 4, 5);
+            for (let x = bx; x <= bx + len; x++) { put(G.P, G.X(x), G.Y(by), bone(G.X(x), by, G.seed)); put(G.P, G.X(x), G.Y(by) - 1, sinew(G.X(x), by, G.seed)); }
+            knob(G.X(bx), G.Y(by)); knob(G.X(bx + len), G.Y(by));
+            break;
+          }
+        } else {
+          // A brace from one module's back to another's.
+          const a = pick(r, G.real), b = pick(r, G.real);
+          if (a === b) continue;
+          const ca = G.topCols(a), cb = G.topCols(b);
+          if (!ca.length || !cb.length) continue;
+          const [xa, ta] = ca[Math.floor(r() * ca.length)], [xb, tb] = cb[Math.floor(r() * cb.length)];
+          if (Math.abs(xa - xb) < 8 || Math.abs(xa - xb) > 40) continue;
+          const lift = ri(r, 4, 9);
+          const A = [G.X(xa), G.Y(ta) + 1], B = [G.X(xb), G.Y(tb) + 1];
+          const M = [(A[0] + B[0]) / 2, Math.max(A[1], B[1]) + lift];
+          stairs(G.P, A[0], A[1], M[0], M[1], (x, y) => bone(x, y, G.seed));
+          stairs(G.P, M[0], M[1], B[0], B[1], (x, y) => bone(x, y, G.seed));
+          knob(Math.round(M[0]), Math.round(M[1]));
+        }
+      }
+    },
+    ship(G, r) {
+      for (let k = 0; k < ri(r, 1, 2); k++) {
+        const s = pick(r, G.secs), len = s.x1 - s.x0;
+        if (len < 8) continue;
+        stairs(G.P, G.X(s.x0 + 1), G.Y(G.hy0 + 3), G.X(s.x1 - 1), G.Y(G.hy1 - 1), (x, y) => bone(x, y, G.seed));
+        for (const [x, y] of [[s.x0 + 1, G.hy0 + 3], [s.x1 - 1, G.hy1 - 1]]) for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) put(G.P, G.X(x + dx), G.Y(y + dy), bone(x, y, G.seed));
+      }
+    } },
+  { id: "ribcage", name: "Ribcage", desc: "Bone bars caging the molten vats.", salt: 37,
+    refinery(G, r) { for (const v of G.R.vats) G.R.grafts.push({ kind: "ribcage", v, gap: r() < 0.5 ? 2 : 3 }); } },
+  { id: "heart", name: "Heart", desc: "A metal heart in a chamber, thumping a double beat with a pulse of light.", salt: 41,
+    refinery(G, r) {
+      for (const m of G.real.slice().sort((a, b) => b.w * b.h - a.w * a.h)) {
+        const d = 7;
+        for (let a = 0; a < 14; a++) {
+          const ex = ri(r, m.x + 1, m.x + m.w - d - 1), ey = ri(r, m.y + 1, m.y + m.h - d - 1);
+          if (!G.roomFor(m, ex - 1, ey - 1, d + 2, d + 2)) continue;
+          G.claim(ex - 1, ey - 1, d + 2, d + 2);
+          const cx = G.X(ex + 3), cy = G.Y(ey + 3);
+          for (const [x, y] of disc(cx, cy, 4)) put(G.P, x, y, Math.hypot(x - cx, y - cy) > 3.3 ? bone(x, y, G.seed) : C.vent);
+          G.R.grafts.push({ kind: "heart", cx, cy, ph: r() * 3, per: 1.0 + r() * 0.4 });
+          G.R.heart = [cx, cy];
+          return;
+        }
+      }
+    } },
+  { id: "jaws", name: "Jaws", desc: "Mandibles with teeth at the ore intake that chomp; a lower jaw under a ship's bow.", salt: 53,
+    refinery(G, r) { if (G.R.hopper) G.R.grafts.push({ kind: "jaws", x: G.R.hopper.x, y: G.R.hopper.y, per: 1.6 + r() * 1.2, ph: r() * 3 }); },
+    ship(G, r) { G.Sh.grafts.push({ kind: "lowerjaw", x: G.X(Math.max(1, G.bow - 2)), y: G.Y(G.hy0), len: ri(r, 6, 9), per: 3 + r() * 2, ph: r() * 3 }); } },
+  { id: "muscles", name: "Muscles", desc: "Striated piston-muscle slings between modules that contract and relax.", salt: 67,
+    refinery(G, r) {
+      for (let k = 0; k < ri(r, 1, 2); k++) {
+        const a = pick(r, G.real), b = pick(r, G.real);
+        if (a === b) continue;
+        const ca = G.botCols(a).filter(([x]) => !G.R.under.has(x)), cb = G.botCols(b).filter(([x]) => !G.R.under.has(x));
+        if (!ca.length || !cb.length) continue;
+        const [xa, ya] = ca[Math.floor(r() * ca.length)], [xb, yb] = cb[Math.floor(r() * cb.length)];
+        if (Math.abs(xa - xb) < 8) continue;
+        G.R.grafts.push({ kind: "muscle", ax: G.X(xa), ay: G.Y(ya) - 1, bx: G.X(xb), by: G.Y(yb) - 1, sag: ri(r, 4, 8), per: 2.5 + r() * 2, ph: r() * 3 });
+      }
+    },
+    ship(G, r) { if (G.Sh.works.length) return; const a = G.bow + 3, b = G.W - G.stern - 3; G.Sh.grafts.push({ kind: "muscle", ax: G.X(a), ay: G.Y(G.hy0 - 2), bx: G.X(b), by: G.Y(G.hy0 - 2), sag: ri(r, 3, 6), per: 3 + r() * 2, ph: r() * 3 }); } },
+  { id: "veins", name: "Veins", desc: "Channels in the carapace with pulses of light running along them.", salt: 79,
+    refinery(G, r) {
+      const srcs = [];
+      if (G.R.heart) srcs.push(G.R.heart);
+      for (const m of G.R.maws) srcs.push([m.x + (m.w >> 1), m.y - 1]);
+      for (const v of G.R.vats) srcs.push([v.x + (v.w >> 1), v.y - 2]);
+      if (!srcs.length) return;
+      for (let k = 0; k < ri(r, 2, 4); k++) {
+        let [x, y] = pick(r, srcs), dir = pick(r, [[1, 0], [-1, 0], [0, 1], [0, -1]]);
+        const path = [];
+        for (let s = 0; s < ri(r, 10, 26); s++) {
+          if (r() < 0.3) dir = pick(r, [[1, 0], [-1, 0], [0, 1], [0, -1]]);
+          const nx = x + dir[0], ny = y + dir[1], lx = nx - G.R.OX, ly = ny - G.R.OY;
+          if (!G.ins(lx, ly) || G.R.used.has(lx * 4096 + ly) || !G.ins(lx, ly + 1) || !G.ins(lx, ly - 1)) { dir = pick(r, [[1, 0], [-1, 0], [0, 1], [0, -1]]); continue; }
+          x = nx; y = ny; path.push([x, y]); put(G.P, x, y, sinew(x, y, G.seed).map(v => v * 0.7));
+        }
+        if (path.length > 4) G.R.grafts.push({ kind: "vein", path, c: [255, 120, 50], sp: 8 + r() * 6, ph: r() * 20 });
+      }
+    },
+    ship(G, r) {
+      for (const yy of [G.hy0 + 1]) {
+        const path = [];
+        for (let x = G.bow + 1; x < G.W - 2; x++) if (G.inside(x, yy)) { path.push([G.X(x), G.Y(yy)]); put(G.P, G.X(x), G.Y(yy), sinew(x, yy, G.seed).map(v => v * 0.7)); }
+        if (path.length > 4) G.Sh.grafts.push({ kind: "vein", path, c: LAMP, sp: 10 + r() * 6, ph: r() * 20 });
+      }
+    } },
+  { id: "hands", name: "Hands", desc: "Skeletal metal hands hanging underneath, fingers slowly curling and opening.", salt: 89,
+    refinery(G, r) {
+      let n = 0;
+      for (const m of G.real.slice().sort(() => r() - 0.5)) {
+        if (n >= 2) break;
+        const cols = G.botCols(m).filter(([x]) => !G.R.under.has(x) && !G.R.under.has(x - 2) && !G.R.under.has(x + 2) && !G.R.under.has(x - 3) && !G.R.under.has(x + 3));
+        if (!cols.length || r() < 0.4) continue;
+        const [x, b] = cols[Math.floor(cols.length / 2)];
+        const wrist = ri(r, 2, 4), hx = G.X(x), top = G.Y(b) - 1;
+        for (let k = 0; k < wrist; k++) put(G.P, hx, top - k, k % 2 ? bone(hx, k, G.seed) : sinew(hx, k, G.seed));
+        for (let k = -1; k <= 1; k++) { put(G.P, hx + k, top - wrist, bone(hx + k, wrist, G.seed)); put(G.P, hx + k, top - wrist - 1, sinew(hx + k, wrist, G.seed)); }
+        for (let k = x - 3; k <= x + 3; k++) G.R.under.add(k);
+        G.R.grafts.push({ kind: "hand", x: hx, y: top - wrist - 2, fingers: ri(r, 3, 4), len: ri(r, 3, 5), per: 5 + r() * 4, ph: r() * 6 });
+        n++;
+      }
+    },
+    ship(G, r) {
+      const x = ri(r, G.bow + 4, G.W - G.stern - 4);
+      if (!G.inside(x, G.hy0) || [x - 2, x - 1, x, x + 1, x + 2].some(q => G.Sh.under.has(q))) return;
+      for (let q = x - 2; q <= x + 2; q++) G.Sh.under.add(q);
+      for (let k = 0; k < 2; k++) put(G.P, G.X(x), G.Y(G.hy0 - 2 - k), sinew(x, k, G.seed));
+      for (let k = -1; k <= 1; k++) put(G.P, G.X(x + k), G.Y(G.hy0 - 4), bone(x + k, 4, G.seed));
+      G.Sh.grafts.push({ kind: "hand", x: G.X(x), y: G.Y(G.hy0 - 5), fingers: 3, len: ri(r, 3, 4), per: 6 + r() * 3, ph: r() * 6 });
+    } },
+  { id: "lungs", name: "Lungs", desc: "Breathing bladders on top that inflate and deflate.", salt: 97,
+    refinery(G, r) {
+      let n = 0;
+      for (const m of G.real.slice().sort(() => r() - 0.5)) {
+        if (n >= 2 || r() < 0.5) continue;
+        const cols = G.topCols(m).filter(([x]) => !G.R.stacks.some(s => Math.abs(s.x - G.X(x)) < 5) && !G.R.globes.some(g => Math.abs(g.x - G.X(x)) < g.rad + 5));
+        if (cols.length < 9) continue;
+        const [x, t] = cols[Math.floor(cols.length / 2)];
+        const w = ri(r, 6, 9);
+        for (let k = -1; k <= 1; k++) put(G.P, G.X(x) + k, G.Y(t) + 1, sinew(G.X(x) + k, t, G.seed));
+        G.R.grafts.push({ kind: "lung", x: G.X(x), y: G.Y(t) + 2, w, h: ri(r, 5, 8), per: 4 + r() * 2, ph: r() * 6 });
+        n++;
+      }
+    },
+    ship(G, r) {
+      const s = pick(r, G.secs.filter(q => q.kind !== "hopper").concat([G.secs[0]]));
+      const x = Math.round((s.x0 + s.x1) / 2);
+      const d = G.deck(x);
+      for (let k = -1; k <= 1; k++) put(G.P, G.X(x) + k, d, sinew(x + k, 0, G.seed));
+      G.Sh.grafts.push({ kind: "lung", x: G.X(x), y: d + 1, w: ri(r, 5, 7), h: ri(r, 4, 6), per: 5 + r() * 2, ph: r() * 6 });
+    } },
+  { id: "skull", name: "Skull", desc: "On ships: a plated cranium over the bow, with eye sockets and a row of teeth.", salt: 101,
+    ship(G, r) {
+      const bx0 = 0, bx1 = G.bow + 5, top = (x) => G.topAt(Math.min(G.W - 1, Math.max(0, x)));
+      const h = ri(r, 3, 5);
+      for (let x = bx0 + 1; x <= bx1; x++) {
+        const u = (x - bx0) / (bx1 - bx0), dome = Math.round(h * Math.sin(Math.PI * Math.min(1, u * 1.1)));
+        for (let k = 1; k <= dome; k++) put(G.P, G.X(x), G.Y(top(x) + k), k === dome ? bone(x, k, G.seed).map(v => v * 1.1) : bone(x, k, G.seed));
+      }
+      // Sockets.
+      const sy = G.hy0 + 4 + 2;
+      for (const sx of [2, 5]) if (G.inside(sx, sy) && G.inside(sx + 1, sy)) { put(G.P, G.X(sx), G.Y(sy), C.vent); put(G.P, G.X(sx + 1), G.Y(sy), C.vent); G.P.lamps.push({ x: G.X(sx), y: G.Y(sy), born: -10 }); }
+      // Teeth along the jaw line.
+      for (let x = Math.max(1, G.bow - 6); x <= G.bow + 3; x++) if (G.inside(x, G.hy0 + 3)) put(G.P, G.X(x), G.Y(G.hy0 + 3), x % 2 ? bone(x, 0, G.seed).map(v => v * 1.15) : C.vent);
+    } },
+];
+const graftOn = Object.fromEntries(GRAFTS.map(g => [g.id, true]));
+function applyGrafts(kind, G) {
+  for (const g of GRAFTS) {
+    const fn = kind === "ship" ? UFO_GRAFTS[g.id] : g[kind];
+    if (!graftOn[g.id] || !fn) continue;
+    const r = mulberry32((G.seed >>> 0) * 31 + g.salt * 7919);
+    if (r() < graftChance(g.id)) fn(G, r);
+  }
+}
+
+// Drawing the moving grafts.
+function drawGraft(o, t) {
+  switch (o.kind) {
+    case "eye": {
+      const u = ((t + o.ph) % o.per) / o.per, blink = u > 0.96 ? 1 - Math.abs(u - 0.98) / 0.02 : 0;
+      const target = nearestCourier(o.cx, o.cy, 70) || { x: o.cx + Math.sin(t * 0.4 + o.ph) * 20, y: o.cy + Math.cos(t * 0.3 + o.ph) * 10 };
+      const ang = Math.atan2(target.y - o.cy, target.x - o.cx), lim = Math.max(1, o.rad - 1.5);
+      const px = Math.round(o.cx + Math.cos(ang) * lim), py = Math.round(o.cy + Math.sin(ang) * lim);
+      for (const [x, y] of disc(o.cx, o.cy, o.rad)) {
+        const d = Math.hypot(x - o.cx, y - o.cy);
+        if (d > o.rad - 1.2) block(x, y, (Math.round(Math.atan2(y - o.cy, x - o.cx) * 3) & 1) ? bone(x, y, SEED) : [150, 160, 166]);   // the iris ring, slatted
+        else block(x, y, [30, 40, 44]);
+      }
+      const p = pulse(t, o.cx);
+      block(px, py, mix([40, 120, 70], LAMP, p)); if (o.rad >= 3) block(px + 1, py, mix([40, 120, 70], LAMP, p * 0.8));
+      emit(px + 0.5, py + 0.5, o.rad + 4, LAMP, 0.6 * p);
+      if (blink > 0) { const rows = Math.round(blink * (o.rad + 1)); for (const [x, y] of disc(o.cx, o.cy, o.rad)) if (y > o.cy + o.rad - rows || y < o.cy - o.rad + rows) block(x, y, armour(x, y, SEED)); }
+      break;
+    }
+    case "ribcage": {
+      const v = o.v;
+      for (let y = v.y + 1; y < v.y + v.h - 1; y += o.gap + 1) {
+        for (let x = v.x; x < v.x + v.w; x++) { const bulge = (x === v.x || x === v.x + v.w - 1) ? 0 : 0; block(x, y + bulge, bone(x, y, SEED).map(c => c * (x === v.x || x === v.x + v.w - 1 ? 1.1 : 0.95))); }
+      }
+      for (let y = v.y; y < v.y + v.h; y++) block(v.x + (v.w >> 1), y, bone(v.x, y, SEED).map(c => c * 1.1));   // the sternum
+      break;
+    }
+    case "heart": {
+      const u = ((t + o.ph) % o.per) / o.per;
+      const beat = Math.max(Math.exp(-((u - 0.05) ** 2) / 0.002), 0.7 * Math.exp(-((u - 0.22) ** 2) / 0.002));
+      const s = 1.6 + 1.1 * beat;
+      for (const [x, y] of disc(o.cx, o.cy, s)) {
+        const d = Math.hypot(x - o.cx, y - o.cy) / Math.max(1, s);
+        const k = Math.max(0, Math.min(3, Math.floor((1 - d) * 2 + beat * 2)));
+        block(x, y, CRIMSON[k]);
+      }
+      block(o.cx - 1, o.cy + 1, CRIMSON[3]);
+      emit(o.cx + 0.5, o.cy + 0.5, 8, [255, 70, 50], 0.25 + 1.2 * beat);
+      break;
+    }
+    case "jaws": {
+      const u = ((t + o.ph) % o.per) / o.per, open = u < 0.7 ? 1 : u < 0.8 ? 1 - (u - 0.7) / 0.1 : (u - 0.8) / 0.2;
+      for (const side of [-1, 1]) {
+        const pts = [];
+        for (let k = 0; k <= 6; k++) {
+          const a = Math.PI / 2 + side * (0.25 + open * 0.55) - side * k * 0.22;
+          const prev = pts.length ? pts[pts.length - 1] : [o.x + side * 6, o.y];
+          pts.push(k === 0 ? prev : [prev[0] + Math.cos(a), prev[1] + Math.sin(a)]);
+        }
+        drawPath(pts, (i) => i % 2 ? bone(o.x, i, SEED) : sinew(o.x, i, SEED));
+        for (let k = 2; k <= 5; k++) block(Math.round(pts[k][0]) - side, Math.round(pts[k][1]), [214, 220, 222]);   // teeth
+      }
+      break;
+    }
+    case "lowerjaw": {
+      const u = ((t + o.ph) % o.per) / o.per, open = 0.5 - 0.5 * Math.cos(u * Math.PI * 2);
+      const a = Math.PI + 0.1 + open * 0.45;
+      const pts = [[o.x, o.y]]; for (let k = 1; k <= o.len; k++) pts.push([o.x + Math.cos(a) * k, o.y + Math.sin(a) * k * 0.9 - 0.4 * k * 0]);
+      drawPath(pts, (i) => i % 2 ? bone(o.x, i, SEED) : sinew(o.x, i, SEED));
+      for (let k = 2; k < o.len; k += 2) block(Math.round(pts[k][0]), Math.round(pts[k][1]) + 1, [214, 220, 222]);
+      break;
+    }
+    case "muscle": {
+      const u = ((t + o.ph) % o.per) / o.per, c = 0.5 - 0.5 * Math.cos(u * Math.PI * 2);
+      const sag = o.sag * (1 - 0.45 * c), thick = c > 0.5 ? 3 : 2;
+      const n = Math.max(6, Math.ceil(Math.abs(o.bx - o.ax) / 2));
+      const pts = []; for (let i = 0; i <= n; i++) { const v = i / n; pts.push([o.ax + (o.bx - o.ax) * v, o.ay + (o.by - o.ay) * v - sag * 4 * v * (1 - v)]); }
+      for (let k = 0; k < thick; k++) drawPath(pts.map(([x, y]) => [x, y - k]), (i) => ((i + Math.floor(t * 4)) % 3 === 0) ? [120, 58, 60] : (k === 0 ? sinew(i, k, SEED) : [92, 44, 48]));
+      break;
+    }
+    case "vein": {
+      const L = o.path.length, head = (t * o.sp + o.ph) % (L + 10);
+      o.path.forEach(([x, y], i) => {
+        const d = head - i;
+        if (d >= 0 && d < 3) { const k = 1 - d / 3; block(x, y, mix([60, 30, 20], o.c, 0.4 + 0.6 * k)); emit(x + 0.5, y + 0.5, 3, o.c, 0.4 * k); }
+        else block(x, y, mix([24, 20, 22], o.c, 0.12));
+      });
+      break;
+    }
+    case "hand": {
+      const u = ((t + o.ph) % o.per) / o.per, curl = 0.5 - 0.5 * Math.cos(u * Math.PI * 2);
+      for (let k = -1; k <= 1; k++) block(o.x + k, o.y, bone(o.x + k, o.y, SEED));
+      for (let f = 0; f < o.fingers; f++) {
+        const fx = o.x - 1 + Math.round(f * 2 / Math.max(1, o.fingers - 1)), side = fx < o.x ? -1 : fx > o.x ? 1 : 0;
+        let a = -Math.PI / 2 + side * 0.4, pts = [[fx, o.y - 1]];
+        for (let s = 1; s <= o.len; s++) { a += (side >= 0 ? -1 : 1) * curl * 0.5; const [px, py] = pts[pts.length - 1]; pts.push([px + Math.cos(a), py + Math.sin(a)]); }
+        drawPath(pts, (i) => i % 2 ? [36, 38, 44] : bone(fx, i, SEED));
+      }
+      break;
+    }
+    case "lung": {
+      const u = ((t + o.ph) % o.per) / o.per, br = 0.5 - 0.5 * Math.cos(u * Math.PI * 2);
+      const rx = (o.w / 2) * (0.7 + 0.3 * br), ry = o.h * (0.6 + 0.4 * br);
+      for (let y = 0; y <= Math.ceil(ry); y++) for (let x = -Math.ceil(rx); x <= Math.ceil(rx); x++) {
+        const e = (x / rx) ** 2 + ((y - ry / 2) / (ry / 2 + 0.01)) ** 2;
+        if (y > ry || e > 1.05) continue;
+        const edge = e > 0.7;
+        block(o.x + x, o.y + y, edge ? bone(o.x + x, y, SEED).map(v => v * 0.85) : (x % 2 === 0 ? [58, 46, 54] : [74, 58, 66]));
+      }
+      break;
+    }
+  }
+}
+
+// ---------- life works ----------
+// Planets with life give the swarm trunks, biomass, meat, blood, bones and
+// living soil to refine, and refineries grow works for them. These hang
+// under modules like the other works, but only when the planet has life
+// (in the game: only where the body's life allows it).
+const LIFE_WORKS = {
+  chipper:   { w: 11, h: 8,  name: "log chipper", takes: "tree trunks", life: true },
+  digester:  { w: 10, h: 12, name: "digester", takes: "biomass", life: true },
+  renderer:  { w: 12, h: 10, name: "rendering press", takes: "meat", life: true },
+  bloodstill:{ w: 9,  h: 10, name: "blood still", takes: "blood", life: true },
+  bonemill:  { w: 9,  h: 10, name: "bone mill", takes: "bones", life: true },
+  sifter:    { w: 13, h: 8,  name: "soil sifter", takes: "soil, peat, humus", life: true },
+};
+const LIFE_TYPES = Object.keys(LIFE_WORKS);
+Object.assign(WORKS, LIFE_WORKS);
+let lifeOn = true;   // (set from the planet: life works only where it has life)
+const workPool = () => WORK_TYPES.concat(lifeOn ? LIFE_TYPES : []);
+const BARK = [92, 62, 40], WOOD = [176, 136, 90], MEAT = [150, 40, 48], FAT = [230, 200, 180], BLOOD = [118, 10, 18], PLASMA = [230, 200, 110];
+const BONEMEAL = [232, 228, 214], SOIL = [64, 48, 36], SLUDGE = [[40, 50, 20], [70, 84, 30], [110, 124, 46], [150, 160, 70]], METHANE = [196, 232, 120], TALLOW = [220, 180, 90];
+
+function placeLife(P, type, x0, top, seed, r) {
+  const S_ = { type, x0, top, ph: r() * 10, made: 0 };
+  const at = (x, d, c) => put(P, x0 + x, top - d, c);
+  const st = (x, d) => at(x, d, strut(x0 + x, top - d, seed));
+  const sn = (x, d) => at(x, d, sinew(x0 + x, top - d, seed));
+  const bn = (x, d) => at(x, d, bone(x0 + x, top - d, seed));
+  switch (type) {
+    case "chipper":
+      sn(2, 0); sn(2, 1); sn(8, 0); sn(8, 1);
+      for (let x = 2; x <= 8; x++) bn(x, 2);
+      for (let d = 2; d <= 6; d++) { st(4, d); st(8, d); }
+      for (let x = 4; x <= 8; x++) st(x, 7);
+      for (let x = 0; x <= 3; x++) st(x, 6);                 // the infeed trough
+      st(0, 5); st(9, 6); st(10, 7); st(9, 7);                // the chip chute
+      S_.per = 4 + r() * 2;
+      break;
+    case "digester":
+      sn(2, 0); sn(2, 1); sn(7, 0); sn(7, 1);
+      for (let x = 2; x <= 7; x++) bn(x, 2);
+      for (let d = 2; d <= 11; d++) for (let x = 0; x <= 9; x++) {
+        const e = ((x - 4.5) / 4.8) ** 2 + ((d - 6.5) / 4.6) ** 2;
+        if (e <= 1.05 && e > 0.62) at(x, d, (d % 3 === 0) ? bone(x0 + x, d, seed) : sinew(x0 + x, top - d, seed));
+      }
+      st(4, 11); st(5, 11);
+      S_.per = 6 + r() * 2;
+      break;
+    case "renderer":
+      for (let x = 0; x <= 11; x++) sn(x, 2);                 // the hook rail
+      st(1, 0); st(1, 1); st(10, 0); st(10, 1);
+      for (let d = 3; d <= 8; d++) { st(7, d); st(11, d); }
+      for (let x = 7; x <= 11; x++) st(x, 8);
+      for (let x = 8; x <= 10; x++) { bn(x, 9); }
+      st(7, 9); st(11, 9);
+      S_.per = 5 + r() * 2;
+      break;
+    case "bloodstill":
+      sn(1, 0); sn(1, 1); sn(7, 0); sn(7, 1);
+      for (let x = 0; x <= 8; x++) bn(x, 2);
+      for (let d = 3; d <= 5; d++) for (let x = 0; x <= 2; x++) if (!(x !== 1 && (d === 3 || d === 5))) sn(x, d);   // the pump
+      for (let d = 3; d <= 7; d++) { at(4, d, C.glass); at(7, d, C.glass); }
+      for (const d of [3, 5, 7]) { at(5, d, C.glass); at(6, d, C.glass); }
+      at(3, 4, C.glass);
+      for (let x = 5; x <= 7; x++) bn(x, 8);
+      bn(4, 9); bn(8, 9); bn(4, 8); bn(8, 8);
+      S_.per = 6 + r() * 2;
+      break;
+    case "bonemill":
+      for (let d = 0; d <= 2; d++) { st(2, d); st(6, d); }
+      st(1, 2); st(7, 2);
+      for (let d = 3; d <= 9; d++) { st(1, d); st(7, d); }
+      for (let x = 1; x <= 7; x++) st(x, 9);
+      S_.per = 4 + r() * 2;
+      break;
+    case "sifter":
+      sn(2, 0); sn(2, 1); sn(10, 0); sn(10, 1);
+      for (let x = 2; x <= 10; x++) bn(x, 2);
+      for (let d = 2; d <= 7; d++) { st(1, d); st(11, d); }
+      for (let x = 1; x <= 11; x++) st(x, 7);
+      S_.per = 4 + r() * 2;
+      break;
+  }
+  return S_;
+}
+
+function stepLife(R, w, dt, t) {
+  const X = (x) => w.x0 + x, Y = (d) => w.top - d;
+  const u = ((t + w.ph) % w.per) / w.per, cyc = Math.floor((t + w.ph) / w.per);
+  const once = (at, fn) => { if (cyc !== w.last && u > at) { w.last = cyc; fn(); } };
+  switch (w.type) {
+    case "chipper":
+      if (u > 0.3 && u < 0.8 && Math.random() < dt * 30) spark(X(9), Y(6), 1, mix(WOOD, [255, 230, 180], Math.random() * 0.4), 6);
+      once(0.85, () => workMade(R, w, "bar", WOOD, X(9), Y(7)));
+      break;
+    case "digester":
+      if (Math.random() < dt * 1.2) smokeC(X(5), Y(2) + 1, [130, 160, 80]);
+      once(0.95, () => workMade(R, w, cyc % 2 ? "canister" : "drum", cyc % 2 ? METHANE : SLUDGE[2], X(5), Y(11)));
+      break;
+    case "renderer":
+      once(0.9, () => workMade(R, w, "drum", TALLOW, X(9), Y(9)));
+      break;
+    case "bloodstill":
+      once(0.95, () => workMade(R, w, "drum", BLOOD, X(6), Y(9)));
+      break;
+    case "bonemill":
+      if (u > 0.4 && Math.random() < dt * 4) smokeC(X(4), Y(7), [210, 206, 196]);
+      once(0.9, () => workMade(R, w, "bar", BONEMEAL, X(4), Y(9)));
+      break;
+    case "sifter":
+      if (Math.random() < dt * 1.5) spark(X(12), Y(4), 1, [120, 116, 110], 3);
+      once(0.9, () => workMade(R, w, "bar", SOIL, X(6), Y(7)));
+      break;
+  }
+}
+
+function drawLife(w, t) {
+  const X = (x) => w.x0 + x, Y = (d) => w.top - d;
+  const B = (x, d, c, a = 1) => block(X(x), Y(d), c, a);
+  const u = ((t + w.ph) % w.per) / w.per;
+  switch (w.type) {
+    case "chipper": {
+      // A trunk slides in and is eaten by the toothed drum.
+      const fed = Math.min(1, u / 0.8), len = Math.max(0, Math.round(5 * (1 - fed)));
+      for (let x = 4 - len; x < 4; x++) { B(x, 4, BARK); B(x, 5, x === 3 ? WOOD : BARK); }
+      for (let d = 3; d <= 6; d++) for (let x = 5; x <= 7; x++) B(x, d, [34, 30, 28]);
+      const rot = Math.floor(t * 12) % 4;
+      for (let k = 0; k < 4; k++) { const [tx, td] = [[5, 3], [7, 3], [7, 6], [5, 6]][(k + rot) % 4]; B(tx, td, light(tx, td, SEED)); }
+      if (u < 0.8) emit(X(4.5), Y(4.5), 4, [255, 200, 140], 0.2);
+      break;
+    }
+    case "digester": {
+      // Sludge churning in the sac, bubbles rising, gas bled off the top.
+      for (let d = 3; d <= 10; d++) for (let x = 1; x <= 8; x++) {
+        const e = ((x - 4.5) / 4.8) ** 2 + ((d - 6.5) / 4.6) ** 2;
+        if (e > 0.62) continue;
+        const swirl = 0.5 + 0.5 * Math.sin(t * 1.5 + x * 0.9 + d * 0.7);
+        B(x, d, SLUDGE[Math.min(3, Math.floor((d - 3) / 2.5 * 0.5 + swirl * 1.5))]);
+      }
+      for (let k = 0; k < 3; k++) { const p = (t * 0.4 + k / 3 + w.ph) % 1; B(3 + k * 2 - (k === 2 ? 1 : 0), Math.round(10 - p * 6), [200, 220, 140]); }
+      emit(X(4.5), Y(6.5), 7, [140, 200, 80], 0.25);
+      break;
+    }
+    case "renderer": {
+      // Meat on hooks along the rail into the press; oil drips into the drum.
+      const pos = Math.min(1, u / 0.5);
+      for (let k = 0; k < 2; k++) {
+        const mx = Math.round(-2 + (pos + k * 0.5) * 8);
+        if (mx < 0 || mx > 6) continue;
+        B(mx, 3, C.dark);
+        B(mx, 4, MEAT); B(mx + 1, 4, MEAT.map(v => v * 0.8)); B(mx, 5, FAT); B(mx + 1, 5, MEAT);
+      }
+      const press = u < 0.5 ? 0 : u < 0.7 ? (u - 0.5) / 0.2 : u < 0.85 ? 1 : 1 - (u - 0.85) / 0.15;
+      const pd = 3 + Math.round(press * 3);
+      for (let x = 8; x <= 10; x++) B(x, pd, light(x, pd, SEED));
+      if (press > 0.5) { for (let x = 8; x <= 10; x++) B(x, 7, MEAT.map(v => v * 0.7)); if (Math.random() < 0.6) B(9, 8, TALLOW); }
+      break;
+    }
+    case "bloodstill": {
+      // The pump throbs; pulses of red run round the coil; the flask fills and separates.
+      const beat = Math.exp(-((((t * 1.3 + w.ph) % 1) - 0.1) ** 2) / 0.004);
+      B(1, 4, mix(CRIMSON[1], CRIMSON[3], beat));
+      emit(X(1.5), Y(4), 4, [255, 60, 50], 0.6 * beat);
+      const coil = [[3, 4], [4, 3], [5, 3], [6, 3], [7, 3], [7, 4], [7, 5], [6, 5], [5, 5], [4, 5], [4, 6], [4, 7], [5, 7], [6, 7], [7, 7]];
+      const head = (t * 9 + w.ph) % (coil.length + 6);
+      coil.forEach(([x, d], i) => B(x, d, Math.abs(head - i) < 2 ? CRIMSON[3] : BLOOD.map(v => v * 0.8)));
+      const fill = Math.round(u * 2);
+      for (let k = 0; k < fill; k++) B(6, 8 - k + 0, k === fill - 1 && u > 0.6 ? PLASMA : BLOOD);
+      B(5, 8, BLOOD); B(7, 8, BLOOD);
+      break;
+    }
+    case "bonemill": {
+      // Bones tumble down the chute; rollers turn; white meal falls into the bin.
+      const p = (t * 0.9 + w.ph) % 1, bd = Math.round(p * 3);
+      B(3, bd, BONEMEAL); B(4, bd, bone(4, bd, SEED)); B(5, bd, BONEMEAL);
+      for (const rx of [3, 5]) { for (let d = 4; d <= 5; d++) for (let x = rx; x <= rx; x++) B(x, d, strut(x, d, SEED)); B(rx, 4 + (Math.floor(t * 6 + rx) % 2), light(rx, 4, SEED)); }
+      B(4, 4, [40, 38, 36]); B(4, 5, [40, 38, 36]);
+      if (u > 0.4) B(4, 6 + (Math.floor(t * 8) % 2), BONEMEAL, 0.8);
+      const level = 1 + Math.round(u * 1);
+      for (let x = 2; x <= 6; x++) for (let k = 0; k < level; k++) B(x, 8 - k, BONEMEAL.map(v => v * (0.9 + 0.1 * hash(x, k, 3))));
+      break;
+    }
+    case "sifter": {
+      // The sieve shakes; soil falls through; stones roll off the end.
+      const shake = Math.round(Math.sin(t * 18 + w.ph));
+      for (let x = 2; x <= 10; x++) B(x + shake, 4, x % 2 ? strut(x, 4, SEED) : [28, 26, 24]);
+      for (let x = 3; x <= 9; x++) if (hash(x, Math.floor(t * 3), 7) < 0.6) B(x + shake, 5, SOIL.map(v => v * (0.8 + 0.4 * hash(x, 5, 3))));
+      for (let k = 0; k < 3; k++) { const fx = 3 + ((Math.floor(t * 5) + k * 3) % 7); B(fx, 5 + ((Math.floor(t * 10) + k) % 1), SOIL); }
+      const sx = 2 + Math.floor(((t * 2 + w.ph) % 1) * 10);
+      B(sx + shake, 3, [112, 108, 104]);
+      for (let x = 2; x <= 10; x++) B(x, 6, SOIL.map(v => v * (0.85 + 0.3 * hash(x, 6, 5))));
+      break;
+    }
+  }
+}
+
+// ---------- refineries, built from modules ----------
+// A refinery is a cluster of hull modules joined edge to edge. Each module
+// is a shape (box, keel, wedge, drum, tower, pod, or a bridge between two)
+// and has a job that decides what is built on it: furnace, vats, forge
+// (drop-hammers under it), stacks, globe tanks or a crane. The size class
+// sets how many modules and how big: small is 3 to 6 (medium, large and
+// super come later, from the same parts).
+const LIQUIDS = [
+  { name: "molten iron", lo: [150, 30, 8], hi: [255, 196, 80], blob: [255, 240, 170] },
+  { name: "white-hot", lo: [214, 120, 40], hi: [255, 248, 214], blob: [255, 255, 255] },
+  { name: "crimson", lo: [86, 6, 16], hi: [232, 48, 46], blob: [255, 150, 120] },
+  { name: "toxic green", lo: [18, 66, 10], hi: [146, 236, 58], blob: [222, 255, 160] },
+  { name: "cyan salt", lo: [6, 46, 78], hi: [66, 214, 236], blob: [200, 250, 255] },
+  { name: "violet", lo: [40, 10, 70], hi: [186, 88, 255], blob: [236, 200, 255] },
+];
+// Size classes: more modules and bigger ones, from the same parts.
+const SIZES = {
+  small:  { modules: [3, 6],   scale: 1 },
+  medium: { modules: [6, 10],  scale: 1.3 },
+  large:  { modules: [10, 16], scale: 1.6 },
+  super:  { modules: [16, 26], scale: 2.0 },
+};
+// Storage ships by size: length (half, m), height, rows of holds, windows
+// per row, frame thickness, tractor beams.
+const SHIP_SIZES = {
+  small:  { W: [30, 44],   H: [18, 25], rows: [1, 1], wins: [1, 1], frame: 2, beams: 1 },
+  medium: { W: [50, 75],   H: [28, 38], rows: [1, 2], wins: [1, 2], frame: 3, beams: 2 },
+  large:  { W: [80, 115],  H: [42, 56], rows: [2, 2], wins: [1, 3], frame: 4, beams: 3 },
+  super:  { W: [130, 180], H: [62, 82], rows: [2, 3], wins: [2, 4], frame: 5, beams: 4 },
+};
+// The grid's spacing for each size.
+const CELL_SIZE = { small: [180, 128], medium: [250, 170], large: [370, 240], super: [560, 340] };
+const KINDS = {
+  box:    { w: [16, 30], h: [11, 20] },
+  keel:   { w: [18, 32], h: [12, 20] },
+  wedgeL: { w: [12, 22], h: [10, 18] },
+  wedgeR: { w: [12, 22], h: [10, 18] },
+  drum:   { w: [14, 26], h: [10, 16] },
+  tower:  { w: [7, 11],  h: [18, 30] },
+  pod:    { w: [8, 13],  h: [6, 10] },
+  bridge: { w: [5, 12],  h: [3, 5] },
+  carapace: { w: [16, 28], h: [10, 17] },
+  segment:  { w: [12, 22], h: [8, 13] },
+};
+function shapeOf(kind, w, h) {
+  const corner = (x, y, c) => Math.min(x, w - 1 - x) + Math.min(y, h - 1 - y) >= c;
+  const round = (x, y, r) => {
+    const cx = x < r ? r - 0.5 : x > w - 1 - r ? w - r - 0.5 : x, cy = y < r ? r - 0.5 : y > h - 1 - r ? h - r - 0.5 : y;
+    return Math.hypot(x - cx, y - cy) <= r - 0.3 || (x >= r && x <= w - 1 - r) || (y >= r && y <= h - 1 - r);
+  };
+  switch (kind) {
+    case "box": return (x, y) => corner(x, y, 3);
+    // A dome of carapace over a flat belly.
+    case "carapace": return (x, y) => { const sy = h * 0.42; if (y < sy) return corner(x, y, 2); const ex = (x - (w - 1) / 2) / (w / 2), ey = (y - sy) / (h - sy); return ex * ex + ey * ey <= 1.02; };
+    // A segment of abdomen: a lens.
+    case "segment": return (x, y) => { const ex = (x - (w - 1) / 2) / (w / 2), ey = (y - (h - 1) / 2) / (h / 2); return ex * ex + ey * ey <= 1.04; };
+    case "keel": return (x, y) => { const n = Math.max(0, Math.round((h * 0.5 - y) * 0.8)); return x >= n && x < w - n; };
+    case "wedgeL": return (x, y) => x >= Math.round((h - 1 - y) * 0.55) && corner(x, y, 1);
+    case "wedgeR": return (x, y) => x < w - Math.round((h - 1 - y) * 0.55) && corner(x, y, 1);
+    case "drum": return (x, y) => round(x, y, Math.min(Math.floor(h / 2), 6));
+    case "tower": return (x, y) => { const n = Math.min(Math.floor(w / 2) - 1, Math.round(y * 0.16)); return x >= n && x < w - n; };   // a horn, tapering
+    case "pod": return (x, y) => round(x, y, Math.min(Math.floor(h / 2), 4));
+    default: return () => true;
+  }
+}
+const ri = (r, a, b) => a + Math.floor(r() * (b - a + 1));
+const pick = (r, list) => list[Math.floor(r() * list.length)];
+
+// The glazed walkway down a corridor.
+const WALKWAY = [46, 74, 82];
+// Sector themes and the shapes each is built from.
+const THEMES = {
+  forge:   { kinds: ["box", "keel", "segment"], towers: 0.1 },
+  furnace: { kinds: ["drum", "carapace", "box"], towers: 0.2 },
+  vats:    { kinds: ["box", "drum"], towers: 0 },
+  stacks:  { kinds: ["carapace", "box"], towers: 0.6 },
+  globes:  { kinds: ["drum", "pod", "segment"], towers: 0.1 },
+  crane:   { kinds: ["keel", "box"], towers: 0.3 },
+};
+// Corridor width, row depth and sector widths by size.
+const TOWN = {
+  medium: { cw: 5, row: [14, 22], spines: 1, cross: 1, sectorW: [40, 56] },
+  large:  { cw: 6, row: [22, 32], spines: 1, cross: 2, sectorW: [46, 62] },
+  super:  { cw: 7, row: [22, 34], spines: 2, cross: 3, sectorW: [52, 70] },
+};
+function planTown(r, size, SZ, mods, dims) {
+  const T = TOWN[size], cw = T.cw, nSec = T.cross + 1, hub = cw + 4;
+  // Along the spine: end hub, sector, cross, sector, ..., end hub.
+  let x = hub; const secs = [];
+  for (let k = 0; k < nSec; k++) { const w = ri(r, ...T.sectorW); secs.push({ x0: x, x1: x + w }); x += w; if (k < nSec - 1) x += cw; }
+  const L = x + hub;
+  // One spine at y = 0 (y grows upward), or two with a fitted row between.
+  const between = ri(r, ...T.row);
+  const spines = T.spines === 1 ? [0] : [0, cw + between];
+  const yTop = spines[spines.length - 1] + cw;
+  const rows = [{ side: "below", base: 0 }];
+  if (T.spines === 2) rows.push({ side: "fit", base: cw, top: cw + between });
+  rows.push({ side: "above", base: yTop });
+  // A theme per row of a sector; the first four are the four every refinery has.
+  const groups = [];
+  for (const s of secs) for (const ro of rows) groups.push({ s, ro });
+  const must = ["forge", "stacks", "vats", "furnace"].sort(() => r() - 0.5);
+  groups.map((g, i) => i).sort(() => r() - 0.5).forEach((gi, k) => { groups[gi].theme = k < must.length ? must[k] : wpick(r, ["vats", "furnace", "globes", "crane", "stacks", "forge"]); });
+  for (const sy of spines) mods.push({ kind: "corridor", dir: "h", x: 0, y: sy, w: L, h: cw });
+  // Cross corridors run through every row so the sectors read as blocks
+  // (medium has only a hub between its two sectors).
+  const stub = Math.round(T.row[0] * 0.7);
+  if (size !== "medium") for (let k = 0; k < nSec - 1; k++) mods.push({ kind: "corridor", dir: "v", x: secs[k].x1, y: -stub, w: cw, h: yTop + 2 * stub });
+  // Rows of modules in each sector, packed side by side, one family of shapes each.
+  const gap = size === "medium" ? 0 : 1;
+  for (const g of groups) {
+    const { s, ro } = g, fam = THEMES[g.theme];
+    let x = s.x0 + gap;
+    const end = s.x1 - gap;
+    while (end - x >= 8) {
+      let kind = pick(r, fam.kinds);
+      const d = dims(kind);
+      let w = Math.min(d.w, Math.round(ri(r, 10, 17) * SZ.scale), end - x); if (end - x - w < 8) w = end - x;
+      const h = ro.side === "fit" ? ro.top - ro.base : Math.max(T.row[0], Math.min(T.row[1] + 6, d.h));
+      // A fitted row is squared off to meet both spines; domes only go on top.
+      if (ro.side === "fit" && kind !== "box" && kind !== "keel") kind = "box";
+      if (ro.side === "below" && kind === "carapace") kind = "keel";
+      const y = ro.side === "below" ? ro.base - h : ro.base;
+      mods.push({ kind, x, y, w, h, theme: g.theme, flip: ro.side === "below" });
+      // Towers and horns on some top-row modules.
+      if (ro.side === "above" && r() < fam.towers && w >= 10) {
+        const td = dims("tower"), tw = Math.min(td.w, w - 4);
+        mods.push({ kind: "tower", x: x + ri(r, 2, w - 2 - tw), y: y + h, w: tw, h: td.h, theme: g.theme });
+      }
+      x += w;
+    }
+  }
+  // Hubs where corridors meet and at the ends of every spine, last so they draw over the corridors.
+  for (const sy of spines) {
+    mods.push({ kind: "drum", hub: true, x: 0, y: sy - 2, w: hub, h: cw + 4 });
+    mods.push({ kind: "drum", hub: true, x: L - hub, y: sy - 2, w: hub, h: cw + 4 });
+    for (let k = 0; k < nSec - 1; k++) mods.push({ kind: "drum", hub: true, x: secs[k].x1 - 2, y: sy - 2, w: cw + 4, h: cw + 4 });
+  }
+}
+
+function makeRefinery(seed, cx, cy, size = SIZE, must = []) {
+  const r = mulberry32(seed * 977 + 13);
+  const SZ = SIZES[size];
+  const mods = [];
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const dims = (kind) => ({ w: Math.round(ri(r, ...KINDS[kind].w) * (kind === "bridge" ? 1 : SZ.scale)), h: Math.round(ri(r, ...KINDS[kind].h) * (kind === "bridge" ? 1 : SZ.scale)) });
+  // Medium and up: a planned town. Spine corridors run the length, cross
+  // corridors cut it into sectors, hubs sit where they meet, and each
+  // sector's rows are built round one job from one family of shapes.
+  if (size !== "small") planTown(r, size, SZ, mods, dims);
+  // Small: the core module, then the rest joined on.
+  else {
+  const coreKind = pick(r, ["carapace", "keel", "drum", "segment", "carapace"]);
+  mods.push({ kind: coreKind, x: 0, y: 0, ...dims(coreKind) });
+  const want = ri(r, ...SZ.modules);
+  let tries = 0;
+  while (mods.filter(m => m.kind !== "bridge").length < want && tries++ < 80 * want) {
+    const parent = mods[Math.floor(r() * mods.length)];
+    if (parent.kind === "bridge") continue;
+    const roll = r();
+    const side = roll < 0.32 ? "right" : roll < 0.64 ? "left" : roll < 0.84 ? "top" : "bottom";
+    const kind = side === "top" ? pick(r, ["tower", "carapace", "drum", "pod"]) : side === "bottom" ? pick(r, ["pod", "keel", "segment"]) : pick(r, ["carapace", "segment", "keel", "wedgeL", "wedgeR", "drum", "pod", "box"]);
+    const d = dims(kind);
+    if (side === "top" || side === "bottom") { d.w = Math.min(d.w, parent.w - 2); if (d.w < 6) continue; }
+    let m, bridge = null;
+    if (side === "right" || side === "left") {
+      const gap = r() < 0.35 ? ri(r, 3, 7) : 0;
+      const lo = parent.y - d.h + 5, hi = parent.y + parent.h - 5;
+      if (hi < lo) continue;
+      const y = ri(r, lo, hi);
+      const x = side === "right" ? parent.x + parent.w + gap : parent.x - gap - d.w;
+      m = { kind: (kind === "wedgeL" && side === "left") || (kind === "wedgeR" && side === "right") ? kind : kind === "wedgeL" || kind === "wedgeR" ? (side === "right" ? "wedgeR" : "wedgeL") : kind, x, y, ...d };
+      if (gap > 0) {
+        const y0 = Math.max(parent.y, y) + 2, y1 = Math.min(parent.y + parent.h, y + d.h) - 2;
+        const bh = ri(r, 3, 5);
+        if (y1 - y0 < bh) continue;
+        bridge = { kind: "bridge", x: side === "right" ? parent.x + parent.w : x + d.w, y: ri(r, y0, y1 - bh), w: gap, h: bh };
+      }
+    } else {
+      const x = ri(r, parent.x + 1, parent.x + parent.w - 1 - d.w);
+      m = { kind, x, y: side === "top" ? parent.y + parent.h : parent.y - d.h, ...d };
+    }
+    if (mods.some(o => overlaps(o, m))) continue;
+    if (bridge && mods.some(o => overlaps(o, bridge))) continue;
+    if (bridge) mods.push(bridge);
+    mods.push(m);
+  }
+  }
+  // Union of the modules on a grid, each cell knowing its module.
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const m of mods) { x0 = Math.min(x0, m.x); y0 = Math.min(y0, m.y); x1 = Math.max(x1, m.x + m.w); y1 = Math.max(y1, m.y + m.h); }
+  const GW = x1 - x0, GH = y1 - y0;
+  const grid = new Int16Array(GW * GH).fill(-1);
+  mods.forEach((m, i) => { m.x -= x0; m.y -= y0; m.mask = shapeOf(m.kind, m.w, m.h); m.i = i; for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) if (m.mask(x, y)) grid[(m.y + y) * GW + m.x + x] = i; });
+  const at = (x, y) => (x < 0 || y < 0 || x >= GW || y >= GH) ? -1 : grid[y * GW + x];
+  const ins = (x, y) => at(x, y) >= 0;
+  // Where it sits: centred on (cx, cy).
+  const OX = Math.round(cx - GW / 2), OY = Math.round(cy - GH / 2);
+  const R = { seed, size, mods, GW, GH, OX, OY, part: Part(), seams: [], embers: [], maws: [], vats: [], globes: [], hammers: [], stacks: [], chains: [], cranes: [], hopper: null, ingots: [], works: [], out: [], under: new Set(), tendrils: [], grafts: [], nextOre: Math.random() * 2, used: new Set() };
+  const P = R.part, X = (x) => OX + x, Y = (y) => OY + y;
+  const free = (x, y) => !R.used.has(x * 4096 + y);
+  const claim = (x0, y0, w, h) => { for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) R.used.add(x * 4096 + y); };
+  const roomFor = (m, x0, y0, w, h) => { for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (at(x, y) !== m.i || !free(x, y)) return false; return true; };
+  // The hull: shared armour, struts on the outline, dark joints where modules meet.
+  mods.forEach(m => { m.seam = 4 + (hash(m.i, 1, seed) * 4 | 0); m.hot = 0.15 + hash(m.i, 2, seed) * 0.25; });
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    const i = at(x, y); if (i < 0) continue;
+    const m = mods[i];
+    let c = armour(X(x), Y(y), seed);
+    const ly = y - m.y;
+    // Bridges are vertebrae: a sinew core through pale bone nodes.
+    if (m.kind === "bridge") {
+      const mid = m.y + (m.h >> 1);
+      if (y !== mid && (x - m.x) % 3 === 2) continue;
+      put(P, X(x), Y(y), y === mid ? sinew(X(x), Y(y), seed) : bone(X(x), Y(y), seed));
+      continue;
+    }
+    // Corridors: rails on both sides, bone rings every few metres, and a
+    // glazed walkway down the middle with lamps in it.
+    if (m.kind === "corridor") {
+      const v = m.dir === "v", a = v ? y - m.y : x - m.x, b = v ? x - m.x : y - m.y, n = v ? m.w : m.h, mid = n >> 1;
+      if (b === 0 || b === n - 1) c = strut(X(x), Y(y), seed);
+      else if (a % 6 === 0) c = bone(X(x), Y(y), seed);
+      else if (b === mid) { if (a % 12 === 3) { put(P, X(x), Y(y), C.dark); P.lamps.push({ x: X(x), y: Y(y), born: -10 }); continue; } c = WALKWAY; }
+      else c = (b === mid - 1 || b === mid + 1) ? darkg(X(x), Y(y), seed) : armour(X(x), Y(y), seed);
+      put(P, X(x), Y(y), c);
+      continue;
+    }
+    // Hubs: a ring of strut and bone round a dark core with a lamp.
+    if (m.hub) {
+      const dx = x - m.x - (m.w - 1) / 2, dy = y - m.y - (m.h - 1) / 2, d = Math.max(Math.abs(dx), Math.abs(dy));
+      const rr = Math.min(m.w, m.h) / 2;
+      c = d > rr - 1.5 ? strut(X(x), Y(y), seed) : d > rr - 3 ? bone(X(x), Y(y), seed) : darkg(X(x), Y(y), seed);
+      if (Math.abs(dx) <= 0.5 && Math.abs(dy) <= 0.5) { put(P, X(x), Y(y), C.dark); P.lamps.push({ x: X(x), y: Y(y), born: -10 }); continue; }
+      put(P, X(x), Y(y), c);
+      continue;
+    }
+    // Overlapping carapace plates: a dark shadow row under each pale lip.
+    if (ly % m.seam === m.seam >> 1) { c = darkg(X(x), Y(y), seed); if (hash(x, y, seed + 41) < m.hot) R.seams.push([X(x), Y(y)]); }
+    else if (ly % m.seam === (m.seam >> 1) + 1) c = light(X(x), Y(y), seed).map(v => v * 0.88);
+    const nb = [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)];
+    if (nb.some(n => n < 0)) c = strut(X(x), Y(y), seed);
+    else if (nb.some(n => n !== i)) c = C.dark;
+    put(P, X(x), Y(y), c);
+  }
+  const topOf = (x) => { for (let y = GH - 1; y >= 0; y--) if (ins(x, y)) return y; return -1; };
+  const botOf = (x) => { for (let y = 0; y < GH; y++) if (ins(x, y)) return y; return -1; };
+  // Jobs: every refinery gets a furnace, vats, a forge and stacks somewhere;
+  // the rest roll.
+  const real = mods.filter(m => m.kind !== "bridge" && m.kind !== "corridor" && !m.hub);
+  const order = real.slice().sort(() => r() - 0.5);
+  const jobs = ["forge", "stacks", "vats", "furnace"];
+  order.forEach((m, k) => { m.job = k < jobs.length ? jobs[k] : wpick(r, ["vats", "furnace", "globes", "crane", "stacks", "forge", "plain"]); });
+  real.forEach(m => { if (m.theme) m.job = m.theme; });
+  // A module's free top and bottom columns (nothing of the refinery above or below).
+  const topCols = (m) => { const v = []; for (let x = m.x; x < m.x + m.w; x++) { const t = topOf(x); if (t >= 0 && at(x, t) === m.i) v.push([x, t]); } return v; };
+  const botCols = (m) => { const v = []; for (let x = m.x; x < m.x + m.w; x++) { const b = botOf(x); if (b >= 0 && at(x, b) === m.i) v.push([x, b]); } return v; };
+  // Each feature is placed by its own routine, which returns how many it
+  // placed (a module may have no room for it).
+  function forge(m, n) {
+    const cols = botCols(m).filter(([x]) => !R.under.has(x));
+    n = Math.min(n, Math.floor(cols.length / 6));
+    let placed = 0;
+    for (let k = 0; k < n; k++) {
+      const [x, b] = cols[Math.floor((k + 0.5) * cols.length / n)];
+      const fh = ri(r, 6, 11), hw = ri(r, 2, 3), hx = X(x), ytop = Y(b) - 1, anvil = ytop - fh;
+      let clear = true; for (let xx = x - hw - 1; xx <= x + hw + 1; xx++) if (R.under.has(xx)) clear = false;
+      if (!clear) continue;
+      for (let xx = x - hw - 1; xx <= x + hw + 1; xx++) R.under.add(xx);
+      placed++;
+      // Legs like an insect's, bent outward at the knee.
+      for (let y = anvil; y <= ytop; y++) {
+        const d = (y - anvil) / Math.max(1, ytop - anvil), knee = d > 0.3 && d < 0.7 ? 1 : 0;
+        const c = (Math.abs(d - 0.3) < 0.08 || Math.abs(d - 0.7) < 0.08) ? bone(hx, y, seed) : sinew(hx, y, seed);
+        put(P, hx - hw - knee, y, c); put(P, hx + hw + knee, y, c);
+        if (knee) { put(P, hx - hw, y, c); put(P, hx + hw, y, c); }
+      }
+      for (let kk = -hw; kk <= hw; kk++) { put(P, hx + kk, anvil, strut(hx + kk, anvil, seed)); put(P, hx + kk, anvil - 1, C.dark); }
+      R.hammers.push({ x: hx, hw, top: ytop, anvil, per: 0.55 + r() * 0.8, phase: r() * 2, count: 0, last: -1, flash: 0 });
+      R.ingots.push(null);
+    }
+    return placed;
+  }
+  // One of the seven works, hung under the module where a run of its free
+  // bottom columns is wide enough.
+  function work(m, type) {
+    const need = WORKS[type].w + 2;
+    const cols = botCols(m).filter(([x]) => !R.under.has(x));
+    const wins = [];
+    for (let i = 0; i + need <= cols.length; i++) if (cols[i + need - 1][0] - cols[i][0] === need - 1) wins.push(i);
+    if (!wins.length) return 0;
+    const i = wins[Math.floor(r() * wins.length)];
+    const run = cols.slice(i + 1, i + need - 1);
+    const lowest = Math.min(...run.map(([, b]) => b));
+    const x0 = X(run[0][0]), top = Y(lowest) - 1;
+    // Brackets up to the hull where it is higher than the lowest point.
+    for (const [x, b] of [run[0], run[run.length - 1]]) for (let y = top + 1; y < Y(b); y++) put(P, X(x), y, strut(X(x), y, seed));
+    R.works.push(placeWork(P, type, x0, top, seed, r));
+    for (let k = i; k < i + need; k++) R.under.add(cols[k][0]);
+    return 1;
+  }
+  function stacks(m, n) {
+    const cols = topCols(m);
+    n = Math.min(n, Math.floor(cols.length / 4));
+    for (let k = 0; k < n; k++) {
+      // A horn: wide at the root, tapering and curling as it rises, ringed.
+      const sw = ri(r, 2, 5), sh = ri(r, 7, 22), dir = r() < 0.5 ? -1 : 1, curl = 0.15 + r() * 0.3;
+      const [x, t] = cols[Math.min(cols.length - 1, Math.floor((k + 0.3 + r() * 0.4) * cols.length / n))];
+      const base = Y(t) + 1;
+      let prev = 0, wy = sw;
+      for (let y = 0; y < sh; y++) {
+        const u = y / sh;
+        wy = Math.max(1, Math.round(sw * (1 - u * 0.75)));
+        const off = dir * Math.round(u * u * sh * curl) + Math.floor((sw - wy) / 2) * (dir < 0 ? 1 : 0);
+        for (let kk = 0; kk < wy; kk++) put(P, X(x) + off + kk, base + y, y % 3 === 0 ? bone(X(x) + kk, y, seed) : (kk === 0 || kk === wy - 1) ? sinew(X(x) + kk, y, seed) : armour(X(x) + kk, base + y, seed + 2));
+        if (off !== prev) put(P, X(x) + prev, base + y, sinew(X(x) + prev, y, seed));
+        prev = off;
+      }
+      R.stacks.push({ x: X(x) + prev + wy / 2, y: base + sh, rate: 3 + sw * 2.5 });
+    }
+    return Math.max(0, n);
+  }
+  function furnace(m, n) {
+    let placed = 0;
+    for (let k = 0; k < n; k++) {
+      const mw = ri(r, 3, Math.max(3, Math.min(10, m.w - 4))), mh = ri(r, 3, Math.max(3, Math.min(6, m.h - 4)));
+      for (let a = 0; a < 16; a++) {
+        const mx = ri(r, m.x + 1, m.x + m.w - mw - 2), my = ri(r, m.y + 1, m.y + m.h - mh - 2);
+        if (!roomFor(m, mx - 1, my - 1, mw + 2, mh + 2)) continue;
+        claim(mx - 1, my - 1, mw + 2, mh + 2);
+        for (let y = my - 1; y <= my + mh; y++) for (let x = mx - 1; x <= mx + mw; x++) put(P, X(x), Y(y), (y === my - 1 || y === my + mh || x === mx - 1 || x === mx + mw) ? strut(X(x), y, seed) : C.vent);
+        R.maws.push({ x: X(mx), y: Y(my), w: mw, h: mh, ph: r() * 6 });
+        placed++;
+        break;
+      }
+    }
+    return placed;
+  }
+  function grilleOn(m) {
+    const gw = ri(r, 3, 7), gh = ri(r, 2, 4);
+    for (let a = 0; a < 10; a++) {
+      const gx = ri(r, m.x + 1, m.x + m.w - gw - 2), gy = ri(r, m.y + 1, m.y + m.h - gh - 2);
+      if (!roomFor(m, gx - 1, gy - 1, gw + 2, gh + 2)) continue;
+      claim(gx, gy, gw, gh);
+      for (let y = gy; y < gy + gh; y++) for (let x = gx; x < gx + gw; x++) {
+        if ((y - gy) % 2 === 0) { put(P, X(x), Y(y), C.vent); R.embers.push([X(x), Y(y), hash(x, y, seed) * 6]); }
+        else put(P, X(x), Y(y), strut(X(x), Y(y), seed));
+      }
+      return 1;
+    }
+    return 0;
+  }
+  function vats(m, n) {
+    let placed = 0;
+    for (let k = 0; k < n; k++) {
+      const vw = ri(r, 3, Math.max(3, Math.min(9, m.w - 4))), vh = ri(r, 5, Math.max(5, m.h - 3));
+      for (let a = 0; a < 18; a++) {
+        const vx = ri(r, m.x + 1, m.x + m.w - vw - 2), vy = ri(r, m.y + 1, m.y + m.h - vh - 2);
+        if (!roomFor(m, vx - 1, vy - 1, vw + 2, vh + 2)) continue;
+        claim(vx - 1, vy - 1, vw + 2, vh + 2);
+        for (let y = vy - 1; y <= vy + vh; y++) for (let x = vx - 1; x <= vx + vw; x++) {
+          if ((y === vy - 1 || y === vy + vh) && (x === vx - 1 || x === vx + vw)) continue;   // rounded
+          if (y === vy - 1 || y === vy + vh || x === vx - 1 || x === vx + vw) put(P, X(x), Y(y), y === vy + vh ? sinew(X(x), y, seed) : bone(X(x), y, seed));
+        }
+        R.vats.push({ x: X(vx), y: Y(vy), w: vw, h: vh, liq: pick(r, LIQUIDS), level: 0.55 + r() * 0.3, ph: r() * 10, blobs: Array.from({ length: ri(r, 1, 4) }, () => ({ u: r(), v: r(), s: r() < 0.6 ? 1 : 2, sp: 0.1 + r() * 0.3 })) });
+        placed++;
+        break;
+      }
+    }
+    return placed;
+  }
+  function globes(m, n) {
+    const cols = topCols(m);
+    n = Math.min(n, Math.floor(cols.length / 9));
+    for (let k = 0; k < n; k++) {
+      const rad = ri(r, 3, 5);
+      const [x, t] = cols[Math.floor((k + 0.5) * cols.length / n)];
+      const gx = X(x), gy = Y(t) + 2 + rad;
+      for (let y = -rad - 1; y <= rad + 1; y++) for (let xx = -rad - 1; xx <= rad + 1; xx++) {
+        const d = Math.hypot(xx, y);
+        if (d <= rad + 0.6 && d > rad - 0.5) put(P, gx + xx, gy + y, strut(gx + xx, gy + y, seed));
+      }
+      for (let y = Y(t) + 1; y < gy - rad; y++) { put(P, gx - 1, y, C.dark); put(P, gx + 1, y, C.dark); }
+      R.globes.push({ x: gx, y: gy, rad, liq: pick(r, LIQUIDS), level: 0.4 + r() * 0.4, ph: r() * 6 });
+    }
+    return Math.max(0, n);
+  }
+  function crane(m) {
+    const cols = topCols(m);
+    if (cols.length <= 4) return 0;
+    const [x, t] = cols[ri(r, 1, cols.length - 2)];
+    const mh = ri(r, 8, 16), jl = ri(r, 8, 16), dir = r() < 0.5 ? -1 : 1;
+    for (let y = 1; y <= mh; y++) put(P, X(x), Y(t) + y, y % 3 ? strut(X(x), y, seed) : C.dark);
+    for (let k = 0; k <= jl; k++) { put(P, X(x) + dir * k, Y(t) + mh, strut(X(x) + k, mh, seed)); if (k % 3 === 0) put(P, X(x) + dir * k, Y(t) + mh - 1, C.dark); }
+    R.chains.push({ x: X(x) + dir * jl, y: Y(t) + mh - 1, len: ri(r, 4, 10), ph: r() * 6, hook: true });
+    P.lamps.push({ x: X(x) + dir * jl, y: Y(t) + mh + 1, born: -10 });
+    return 1;
+  }
+  // What this refinery must hang is placed first, widest first.
+  for (const type of must.slice().sort((a, b) => WORKS[b].w - WORKS[a].w)) for (const m of real.slice().sort((a, b) => b.w - a.w)) if (work(m, type)) break;
+  for (const m of real) {
+    if (m.job === "forge") { if (r() < 0.6) work(m, wpick(r, workPool())); forge(m, ri(r, 1, 4)); }
+    if (m.job === "stacks") stacks(m, ri(r, 2, 4));
+    if (m.job === "furnace") { furnace(m, ri(r, 1, 2)); grilleOn(m); }
+    if (m.job === "vats") vats(m, ri(r, 1, 3));
+    if (m.job === "globes") globes(m, ri(r, 1, 3));
+    if (m.job === "crane") crane(m);
+  }
+  // Every refinery has a forge, stacks, vats and a furnace: if the module
+  // given the job had no room, any other module that does takes it.
+  const fallback = (have, fn, n) => { if (have()) return; for (const m of real.slice().sort(() => r() - 0.5)) if (fn(m, n)) return; };
+  fallback(() => R.hammers.length, forge, 2);
+  fallback(() => R.stacks.length, stacks, 2);
+  fallback(() => R.vats.length + R.globes.length, (m, n) => vats(m, n) || globes(m, 1), 1);
+  fallback(() => R.maws.length, furnace, 1);
+  // Extras rolled on any module.
+  for (const m of real) {
+    if (m.job !== "forge" && m.job !== "stacks" && r() < 0.25) forge(m, ri(r, 1, 2));
+    // (Bigger refineries hang more: a second try, and better odds.)
+    for (let q = 0; q < (size === "small" ? 1 : 2); q++) if (r() < (size === "small" ? 0.3 : 0.55)) work(m, wpick(r, workPool()));
+    if (m.job !== "stacks" && r() < 0.3) stacks(m, 1);
+    if (r() < 0.4) grilleOn(m);
+    // Raised plates, rivets, and a lamp on every module.
+    for (let k = 0; k < ri(r, 1, 3); k++) {
+      const pw = ri(r, 3, Math.max(3, Math.min(10, m.w - 4))), ph = ri(r, 2, 4);
+      const px = ri(r, m.x + 1, m.x + m.w - pw - 1), py = ri(r, m.y + 1, m.y + m.h - ph - 1);
+      if (!roomFor(m, px, py, pw, ph)) continue;
+      claim(px, py, pw, ph);
+      const tone = r() < 0.5 ? 1.12 : 0.85;
+      for (let y = py; y < py + ph; y++) for (let x = px; x < px + pw; x++) {
+        const edge = y === py || x === px || x === px + pw - 1;
+        put(P, X(x), Y(y), edge ? darkg(X(x), Y(y), seed) : armour(X(x), Y(y), seed + 5).map(v => v * tone));
+      }
+      if (pw > 5) for (let x = px + 1; x < px + pw - 1; x += 2) put(P, X(x), Y(py + ph - 1), light(X(x), py, seed));
+    }
+    const lc = topCols(m);
+    if (lc.length) { const [x, t] = lc[Math.floor(r() * lc.length)]; if (t > m.y + 1) P.lamps.push({ x: X(x), y: Y(t) - 1, born: -10 }); }
+  }
+  // Chains and spikes hanging under free bottoms, away from the hammers.
+  for (let x = 2; x < GW - 2; x++) {
+    const b = botOf(x); if (b < 0) continue;
+    if (R.hammers.some(h => Math.abs(h.x - X(x)) < h.hw + 3)) continue;
+    const roll = hash(x, 7, seed);
+    if (roll < 0.08) {
+      const len = 3 + (hash(x, 8, seed) * 6 | 0);
+      for (let k = 1; k <= len; k++) put(P, X(x), Y(b) - k, k === len ? C.dark : armour(X(x), Y(b) - k, seed));
+    } else if (roll < 0.17 && !R.under.has(x)) R.tendrils.push({ x: X(x), y: Y(b) - 1, len: 4 + (hash(x, 9, seed) * 10 | 0), ph: hash(x, 10, seed) * 6, curl: (hash(x, 11, seed) < 0.5 ? -1 : 1) * (0.6 + hash(x, 12, seed)), lamp: hash(x, 13, seed) < 0.3 });
+  }
+  // Sinew cables sagging in loops between modules, under their bellies.
+  for (let k = 0; k < ri(r, 1, 3); k++) {
+    const a = pick(r, real), b = pick(r, real);
+    if (a === b) continue;
+    const ca = botCols(a).filter(([x]) => !R.under.has(x)), cb = botCols(b).filter(([x]) => !R.under.has(x));
+    if (!ca.length || !cb.length) continue;
+    const [xa, ya] = ca[Math.floor(r() * ca.length)], [xb, yb] = cb[Math.floor(r() * cb.length)];
+    if (Math.abs(xa - xb) < 6) continue;
+    cableSag(P, X(xa), Y(ya) - 1, X(xb), Y(yb) - 1, ri(r, 3, 8), seed);
+  }
+  // Ribs rising off a module's back, and clusters of sensor eyes.
+  for (const m of real) {
+    if (r() < 0.45) {
+      const cols = topCols(m).filter(([x]) => !R.stacks.some(s => Math.abs(s.x - X(x)) < 4) && !R.globes.some(g => Math.abs(g.x - X(x)) < g.rad + 2));
+      const dir = r() < 0.5 ? -1 : 1;
+      for (let k = 2; k < cols.length - 2; k += 4) rib(P, X(cols[k][0]), Y(cols[k][1]) + 1, ri(r, 3, 5), dir, seed);
+    }
+    if (r() < 0.5) {
+      const ew = ri(r, 3, 5), eh = ri(r, 2, 3);
+      for (let a = 0; a < 10; a++) {
+        const ex = ri(r, m.x + 1, m.x + m.w - ew - 1), ey = ri(r, m.y + 1, m.y + m.h - eh - 1);
+        if (!roomFor(m, ex - 1, ey - 1, ew + 2, eh + 2)) continue;
+        claim(ex - 1, ey - 1, ew + 2, eh + 2);
+        eyes(P, X(ex), Y(ey), ew, eh, r);
+        break;
+      }
+    }
+  }
+  // The ore hopper on the highest point at one end.
+  const ends = [2, GW - 7];
+  const hxl = ends[Math.floor(r() * 2)], ht = Math.max(topOf(hxl), topOf(hxl + 4));
+  for (let y = 0; y < 5; y++) { put(P, X(hxl) - y, Y(ht) + 2 + y, strut(X(hxl) - y, y, seed)); put(P, X(hxl) + 4 + y, Y(ht) + 2 + y, strut(X(hxl) + 4 + y, y, seed)); }
+  for (let x = 0; x < 5; x++) put(P, X(hxl) + x, Y(ht) + 1, C.dark);
+  R.hopper = { x: X(hxl) + 2, y: Y(ht) + 6 };
+  applyGrafts("refinery", { P, R, seed, X, Y, at, ins, mods, real, roomFor, claim, topCols, botCols, topOf, botOf, GW, GH });
+  R.loose = weld(P, seed);
+  R.count = { modules: real.length, stacks: R.stacks.length, vats: R.vats.length + R.globes.length, hammers: R.hammers.length, works: R.works.map(w => WORKS[w.type].name) };
+  R.w = GW; R.h = GH;
+  return R;
+}
+
+// ---------- the gallery: six small refineries round the storage ship ----------
+// Nine cells, one planet each: a refinery built for it, or a storage ship.
+let CELLS = [];
+function layoutCells() { const [cw, ch] = CELL_SIZE[SIZE]; CELLS = GRID.map((id, k) => ({ id, x: -cw + (k % 3) * cw, y: 128 + ch - Math.floor(k / 3) * ch })); }
+layoutCells();
+let PAGE = "refineries";
+let refineries = [];
+function build() {
+  Light.solid.fill(0);
+  refineries = []; ships = [];
+  CELLS.forEach((cell, k) => {
+    PLANET = cell.id; lifeOn = PLANETS[cell.id].w.life > 0;
+    if (PAGE === "refineries") {
+      const ranked = workPool().slice().sort((a, b) => classWeight(b) - classWeight(a) || a.localeCompare(b));
+      const must = [ranked[k % 2], ranked[2 + (k % 3)]];
+      let R;
+      for (let a = 0; a < 40; a++) { Light.solid.fill(0); R = makeRefinery(SEED * 31 + k * 7919 + a * 104659, cell.x, cell.y, SIZE, must); if (must.every(t => R.works.some(w => w.type === t))) break; }
+      R.cell = cell; R.planet = cell.id;
+      refineries.push(R);
+    } else {
+      const Sh = makeStorageShip(SEED * 53 + k * 104729, cell.x, cell.y);
+      // Racks start part stocked with what the bay holds.
+      for (const b of Sh.bays) if (b.type === "slots") { const cls = BAYS[b.kind].cls, n = Math.floor(b.cap * (0.3 + 0.4 * Math.random())); for (let q = 0; q < n; q++) b.bins.push(itemOfClass(cls)); }
+      Sh.cell = cell; Sh.planet = cell.id; Sh.nextIn = Math.random() * 2;
+      ships.push(Sh);
+    }
+  });
+  PLANET = "balanced"; lifeOn = true;
+  // (The light's solid map, rebuilt once the layouts are settled.)
+  Light.solid.fill(0);
+  for (const Sh of ships) for (const c of Sh.part.cells) markSolid(c.x, c.y);
+  for (const R of refineries) for (const c of R.part.cells) markSolid(c.x, c.y);
+}
+
+// ---------- couriers ----------
+function courier(from, to, cargo, onArrive, dur = 2.2) {
+  S.couriers.push({ from, to, cargo, onArrive, t: 0, dur, arc: 8 + Math.random() * 10 });
+  S.rings.push({ x: from.x, y: from.y, t: 0 });
+}
+function courierPos(c) {
+  const u = Math.min(1, c.t / c.dur), e = u * u * (3 - 2 * u);
+  const mx = (c.from.x + c.to.x) / 2, my = Math.max(c.from.y, c.to.y) + c.arc;
+  return { x: (1 - e) * (1 - e) * c.from.x + 2 * (1 - e) * e * mx + e * e * c.to.x, y: (1 - e) * (1 - e) * c.from.y + 2 * (1 - e) * e * my + e * e * c.to.y };
+}
+let nextShipOut = 0;
+
+// ---------- step ----------
+function step(dt) {
+  T.t += dt;
+  const t = T.t;
+  for (const R of refineries) {
+    for (const s of R.stacks) { if (Math.random() < dt * s.rate) smoke(s.x, s.y); if (Math.random() < dt * 2) spark(s.x, s.y + 0.5, 2, [255, 150, 60], 8); }
+    R.hammers.forEach((h, i) => {
+      const u = ((t + h.phase) % h.per) / h.per;
+      const yTop = h.top - 2, yLow = h.anvil + 2;
+      h.y = Math.round(u < 0.8 ? yLow + (yTop - yLow) * (u / 0.8) : yTop + (yLow - yTop) * Math.min(1, (u - 0.8) / 0.12));
+      const cyc = Math.floor((t + h.phase) / h.per);
+      if (u > 0.92 && h.last !== cyc) {
+        h.last = cyc; h.flash = 0.2; h.count++;
+        burst(h.x + 0.5, h.anvil + 1.5, 1.6, [255, 200, 110]);
+        if (h.count % 3 === 0 && !R.ingots[i]) R.ingots[i] = { c: ELEMENTS[(Math.random() * ELEMENTS.length) | 0], heat: 1 };
+      }
+      if (h.flash > 0) h.flash -= dt;
+    });
+    R.ingots.forEach(g => { if (g) g.heat = Math.max(0, g.heat - dt * 0.5); });
+    for (const w of R.works) stepWork(R, w, dt, t);
+    // (Storage is off in the swarm: couriers come and go at the cell's lower edge.)
+    const edge = () => ({ x: R.cell.x + (Math.random() - 0.5) * 60, y: R.cell.y - CELL_SIZE[SIZE][1] * 0.48 });
+    while (R.out.length) { const it = R.out.shift(); courier({ x: it.x + 0.5, y: it.y }, edge(), it.c, () => S.shipped++, 2.6); }
+    // Raw matter in.
+    if (t >= R.nextOre) {
+      R.nextOre = t + 1.4 + Math.random() * 0.6;
+      const hp = R.hopper, it = planetItem(R.planet);
+      courier(edge(), hp, it.c, () => burst(hp.x, hp.y - 2, 0.8, [255, 140, 60]), 2.6);
+    }
+    // Cooled ingots out to storage.
+    R.ingots.forEach((g, i) => {
+      if (!g || g.heat > 0.35) return;
+      const h = R.hammers[i];
+      courier({ x: h.x + 0.5, y: h.anvil + 1 }, edge(), g.c, () => S.shipped++, 2.6);
+      R.ingots[i] = null;
+    });
+  }
+  // Storage ships: cargo of their planet's kind comes in from the refineries
+  // (off at the cell's top edge) into the bay that holds its kind; a full
+  // bay sends a load on to the fabricators (the bottom edge).
+  for (const Sh of ships) {
+    if (t >= Sh.nextIn) {
+      Sh.nextIn = t + (0.6 + Math.random() * 0.6) / Math.sqrt(Sh.bays.length);
+      const it = planetItem(Sh.planet), b = bayFor(Sh, it);
+      if (b) { const to = bayTarget(b); courier({ x: Sh.cell.x + (Math.random() - 0.5) * Sh.W * 0.8, y: Sh.cell.y + CELL_SIZE[SIZE][1] * 0.45 }, to, it.c, () => bayAdd(b, it), 2.4); }
+    }
+    for (const b of Sh.bays) {
+      if (!bayFull(b) || t < (b.nextOut || 0)) continue;
+      b.nextOut = t + 1.8;
+      for (let k = 0; k < 5; k++) { const from = bayTarget(b), it = bayTake(b); if (!it) break; S.shipped++; courier(from, { x: Sh.cell.x + (Math.random() - 0.5) * Sh.W * 0.8, y: Sh.cell.y - CELL_SIZE[SIZE][1] * 0.45 }, it.c, null, 2.4); }
+    }
+  }
+  for (const c of S.couriers) { c.t += dt; if (c.t >= c.dur && !c.done) { c.done = true; S.rings.push({ x: c.to.x, y: c.to.y, t: 0 }); if (c.onArrive) c.onArrive(); } }
+  S.couriers = S.couriers.filter(c => !c.done);
+  for (const r of S.rings) r.t += dt;
+  S.rings = S.rings.filter(r => r.t < 0.45);
+  for (const b of S.bursts) b.t += dt;
+  S.bursts = S.bursts.filter(b => b.t < 0.35);
+  for (const p of S.sparks) { p.age += dt; p.vy -= 26 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
+  S.sparks = S.sparks.filter(p => p.age < p.life);
+  for (const p of S.smoke) { p.age += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy *= 1 - 0.15 * dt; p.s += dt * 1.1; }
+  S.smoke = S.smoke.filter(p => p.age < p.life);
+}
+
+// ---------- drawing ----------
+const swarm = [];
+(function makeSwarm() {
+  const r = mulberry32(42);
+  for (let i = 0; i < 4200; i++) {
+    const a = r() * Math.PI * 2, rr = Math.sqrt(r());
+    swarm.push({ cx: Math.cos(a) * rr * 300, cy: 120 + Math.sin(a) * rr * 130, ph: r() * 6.28, sp: 0.05 + r() * 0.2, rad: 2 + r() * 8, lit: r() < 0.08 });
+  }
+})();
+const stars = [];
+(function makeStars() { const r = mulberry32(9); for (let i = 0; i < 380; i++) stars.push({ x: r(), y: r(), b: 0.25 + r() * 0.75 }); })();
+function drawSky() {
+  ctx.fillStyle = "#06080d"; ctx.fillRect(0, 0, W, H);
+  for (const s of stars) {
+    const x = ((s.x * W * 1.4 - cam.x * 0.08) % W + W) % W, y = ((s.y * H * 1.2 + cam.y * 0.08) % H + H) % H;
+    ctx.fillStyle = `rgba(200,215,230,${s.b * 0.6})`; ctx.fillRect(x | 0, y | 0, Math.round(DPR), Math.round(DPR));
+  }
+}
+function drawSwarm(t) {
+  for (const d of swarm) {
+    const a = d.ph + t * d.sp;
+    const sc = CELL_SIZE[SIZE][0] / 180;
+    const x = Math.floor(d.cx * sc + Math.cos(a) * d.rad), y = Math.floor(120 + (d.cy - 120) * sc + Math.sin(a * 1.3) * d.rad * 0.5);
+    const [sx, sy] = ws(x, y);
+    if (sx < -20 || sy < -20 || sx > W + 20 || sy > H + 20) continue;
+    if (d.lit) block(x, y, mix([30, 50, 40], LAMP, pulse(t, x)), 0.32);
+    else block(x, y, [130, 142, 140], 0.13);
+  }
+}
+function drawGlobe(g, t) {
+    const L = g.liq, lvl = -g.rad + Math.floor(2 * g.rad * (g.level + 0.05 * Math.sin(t * 1.1 + g.ph)));
+    for (let y = -g.rad; y <= g.rad; y++) for (let x = -g.rad; x <= g.rad; x++) {
+      if (Math.hypot(x, y) > g.rad - 0.5) continue;
+      if (y <= lvl) block(g.x + x, g.y + y, mix(L.lo, L.hi, Math.floor(((y + g.rad) / Math.max(1, lvl + g.rad + 1)) * 4) / 3));
+      else block(g.x + x, g.y + y, (x === -g.rad + 2 && y > 0) ? [52, 70, 76] : C.glass);
+    }
+    const by = g.y - g.rad + 1 + Math.floor((lvl + g.rad - 2) * (0.5 + 0.5 * Math.sin(t * 0.7 + g.ph)));
+    block(g.x + Math.round(Math.sin(t * 0.4 + g.ph) * (g.rad - 2)), by, L.blob);
+    emit(g.x + 0.5, g.y, g.rad + 7, L.hi, 0.65);
+  }
+function drawRefinery(R, t) {
+  emit(R.OX + R.w / 2, R.OY + R.h / 2, Math.max(R.w, R.h) * 0.6, [255, 80, 24], 0.08 + 0.02 * Math.sin(t * 3 + R.seed));
+  drawPart(R.part, t);
+  for (const [x, y] of R.seams) {
+    const f = 0.5 + 0.5 * Math.sin(t * 2.3 + x * 0.3);
+    block(x, y, f > 0.66 ? [255, 160, 70] : f > 0.33 ? [200, 80, 26] : [110, 34, 14]);
+    if (f > 0.33) emit(x + 0.5, y + 0.5, 3, [255, 120, 40], 0.35 * f);
+  }
+  for (const [x, y, ph] of R.embers) { const f = 0.5 + 0.5 * Math.sin(t * 3.1 + ph) * Math.sin(t * 1.3 + ph * 2); block(x, y, f > 0.7 ? [255, 150, 60] : f > 0.4 ? [170, 54, 18] : [60, 16, 8]); if (f > 0.4) emit(x + 0.5, y + 0.5, 4, [255, 110, 40], 0.4 * f); }
+  for (const m of R.maws) {
+    for (let x = 0; x < m.w; x++) for (let y = 0; y < m.h; y++) {
+      const v = (1 - y / m.h) * (0.55 + 0.45 * Math.sin(t * 9 + x * 1.7 + m.ph)) * (0.7 + 0.3 * hash(x, y + ((t * 8) | 0), 5));
+      block(m.x + x, m.y + y, v > 0.75 ? [255, 236, 170] : v > 0.5 ? [255, 160, 50] : v > 0.25 ? [200, 70, 20] : [70, 18, 8]);
+    }
+    emit(m.x + m.w / 2, m.y + m.h / 2, m.w + 5, [255, 120, 40], 0.7 * (0.8 + 0.2 * Math.sin(t * 9 + m.ph)));
+  }
+  for (const v of R.vats) {
+    const L = v.liq;
+    for (let x = 0; x < v.w; x++) {
+      const lvl = Math.floor(v.h * (v.level + 0.05 * Math.sin(t * 1.3 + v.ph + x * 0.9)));
+      for (let y = 0; y < v.h; y++) {
+        if (y < lvl) block(v.x + x, v.y + y, mix(L.lo, L.hi, Math.floor((y / Math.max(1, lvl)) * 4) / 3));
+        else block(v.x + x, v.y + y, x === 1 ? [46, 64, 70] : C.glass);
+      }
+    }
+    for (const b of v.blobs) {
+      const bx = Math.floor(v.x + (v.w - b.s) * (0.5 + 0.45 * Math.sin(t * 0.3 + b.u * 6)));
+      const top = Math.floor(v.h * v.level) - b.s;
+      const by = Math.floor(v.y + Math.max(0, top * (0.5 + 0.5 * Math.sin(((b.v + t * b.sp * 0.12) % 1) * Math.PI * 2))));
+      for (let i = 0; i < b.s; i++) for (let j = 0; j < b.s; j++) block(bx + i, by + j, L.blob);
+    }
+    emit(v.x + v.w / 2, v.y + v.h * 0.45, v.w + 8, L.hi, 0.75);
+  }
+  for (const g of R.globes) drawGlobe(g, t);
+  for (const td of R.tendrils) drawTendril(td, t);
+  for (const c of R.chains) {
+    let x = c.x;
+    for (let k = 0; k < c.len; k++) { x = c.x + Math.round(Math.sin(t * 0.9 + c.ph) * k / c.len); block(x, c.y - k, k % 2 ? C.dark : strut(c.x, k, SEED)); }
+    if (c.hook) { block(x - 1, c.y - c.len, light(x, 1, SEED)); block(x, c.y - c.len, light(x, 2, SEED)); block(x + 1, c.y - c.len + 1, light(x, 3, SEED)); }
+  }
+  R.hammers.forEach((h, i) => {
+    for (let y = h.y + 2; y <= h.top; y++) block(h.x, y, y % 2 ? C.dark : strut(h.x, y, SEED));
+    for (let k = -h.hw + 1; k <= h.hw - 1; k++) { block(h.x + k, h.y, light(h.x + k, 1, SEED)); block(h.x + k, h.y + 1, strut(h.x + k, 2, SEED)); }
+    const g = R.ingots[i];
+    if (g) { const c = g.heat > 0.66 ? [255, 236, 170] : g.heat > 0.33 ? mix(g.c, [255, 150, 60], 0.6) : g.c; for (let k = -1; k <= 1; k++) block(h.x + k, h.anvil + 1, c); if (g.heat > 0.1) emit(h.x + 0.5, h.anvil + 1.5, 6, [255, 140, 50], 0.7 * g.heat); }
+    if (h.flash > 0) emit(h.x + 0.5, h.anvil + 1.5, 9, [255, 200, 120], h.flash * 5);
+  });
+  for (const w of R.works) drawWork(w, t);
+  for (const o of R.grafts) drawGraft(o, t);
+  lamps(R.part, t, t);
+}
+function drawSmoke() {
+  for (const p of S.smoke) {
+    const life = p.age / p.life, sz = Math.min(3, 1 + Math.floor(p.s));
+    block(Math.floor(p.x / sz) * sz, Math.floor(p.y / sz) * sz, p.c || [p.g, p.g * 0.95, p.g * 0.92], 0.1 * Math.ceil((1 - life) * 4), sz);
+  }
+}
+function drawSparks() {
+  ctx.globalCompositeOperation = "lighter";
+  for (let n = 0; n < S.sparks.length; n++) {
+    const p = S.sparks[n];
+    const a = Math.ceil((1 - p.age / p.life) * 3) / 3;
+    block(Math.floor(p.x), Math.floor(p.y), p.c, a);
+    if (n % 4 === 0) emit(p.x, p.y, 3, p.c, 0.3 * a);
+  }
+  for (const b of S.bursts) {
+    const u = b.t / 0.35;
+    if (u < 0.3) { const c = Math.ceil(b.size); for (let i = -c; i < c; i++) for (let j = -c; j < c; j++) if (Math.abs(i + 0.5) + Math.abs(j + 0.5) <= c) block(Math.floor(b.x) + i, Math.floor(b.y) + j, [255, 250, 230], 0.9); }
+    ring(b.x, b.y, 1 + u * b.size * 2.2, b.c, 0.7 * (1 - u));
+    emit(b.x, b.y, b.size * 6, b.c, 2.2 * (1 - u));
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+function drawCouriers(t) {
+  for (const c of S.couriers) {
+    const p = courierPos(c);
+    const appear = Math.min(1, c.t / 0.2, (c.dur - c.t) / 0.2);
+    const x = Math.floor(p.x), y = Math.floor(p.y);
+    block(x - 1, y, light(1, 1, SEED), appear); block(x, y, light(2, 1, SEED), appear);
+    block(x, y + 1, mix([20, 30, 24], LAMP, pulse(t, p.x)), appear);
+    emit(x + 0.5, y + 1.5, 4, LAMP, 0.4 * appear);
+    block(x, y - 1, c.cargo, appear);
+  }
+  for (const r of S.rings) { ring(r.x, r.y, 1 + r.t * 8, LAMP, 0.7 * (1 - r.t / 0.45)); emit(r.x, r.y, 5, LAMP, 0.4 * (1 - r.t / 0.45)); }
+}
+// A label: a name, and under it a list wrapped to `maxW` metres so it never
+// runs into the next cell.
+function label(x, y, text, sub, maxW = 1e9) {
+  const [sx, sy] = ws(x, y);
+  const css2 = getComputedStyle(document.documentElement);
+  ctx.textAlign = "center";
+  ctx.font = `${Math.round(11 * DPR)}px ${css2.getPropertyValue("--mono")}`;
+  const limit = maxW * cam.z, items = sub.split(" · "), lines = [];
+  let cur = "";
+  for (const it of items) { const next = cur ? cur + " · " + it : it; if (cur && ctx.measureText(next).width > limit) { lines.push(cur); cur = it; } else cur = next; }
+  if (cur) lines.push(cur);
+  const lh = 13 * DPR, top = sy - (lines.length - 1) * lh;
+  ctx.fillStyle = "rgba(125,138,135,0.95)";
+  lines.forEach((l, i) => ctx.fillText(l, sx, top - 4 * DPR + i * lh));
+  ctx.font = `600 ${Math.round(13 * DPR)}px ${css2.getPropertyValue("--display")}`;
+  ctx.fillStyle = "rgba(201,212,208,0.92)"; ctx.fillText(text.toUpperCase(), sx, top - 18 * DPR);
+}
+function frame() {
+  const t = T.t;
+  drawSky();
+  drawSwarm(t);
+  for (const Sh of ships) drawShip(Sh, t);
+  drawSmoke();
+  for (const R of refineries) drawRefinery(R, t);
+  drawCouriers(t);
+  drawSparks();
+  lightPass();
+  if (S.labels) {
+    const gn = (o) => o.grafts.map(g => g.kind).filter((v, i, a) => a.indexOf(v) === i);
+    const uniq = (l) => l.filter((v, i, a) => a.indexOf(v) === i);
+    // (Repeats counted: "bar rack ×3".)
+    const tally = (l) => { const m = new Map(); for (const v of l) m.set(v, (m.get(v) || 0) + 1); return [...m].map(([v, n]) => n > 1 ? `${v} ×${n}` : v); };
+    const [cw, ch] = CELL_SIZE[SIZE];
+    ships.forEach(Sh => label(Sh.cell.x, Sh.cell.y + ch * 0.4, PLANETS[Sh.planet].name, [Sh.profile + " hull", ...tally(Sh.holds), ...tally([...Sh.pieces, ...Sh.grafts.map(g => g.kind)])].join(" · "), cw * 0.92));
+    refineries.forEach(R => label(R.cell.x, R.cell.y + ch * 0.45, PLANETS[R.planet].name, [`${R.count.modules} modules`, ...(R.count.hammers ? [R.count.hammers === 1 ? "1 hammer" : `${R.count.hammers} hammers`] : []), ...tally(R.count.works), ...tally(R.grafts.map(g => g.kind))].join(" · "), cw * 0.92));
+  }
+}
+
+// ---------- loop, input ----------
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!T.paused) step(dt);
+  frame();
+  document.getElementById("sSeed").textContent = SEED;
+  document.getElementById("sShip").textContent = S.shipped;
+  requestAnimationFrame(loop);
+}
+// Drawn in the screen's own pixels (W and H are device pixels), so with
+// Windows display scaling a block's edges still land on whole pixels.
+function resize() {
+  const old = DPR;
+  DPR = window.devicePixelRatio || 1;
+  W = Math.round(canvas.clientWidth * DPR); H = Math.round(canvas.clientHeight * DPR);
+  canvas.width = W; canvas.height = H;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  if (old && old !== DPR) cam.z *= DPR / old;
+}
+function focus(x, y, span) { cam.x = x; cam.y = y; cam.z = Math.max(0.8 * DPR, Math.min(14 * DPR, Math.min(W / span, (H - 120 * DPR) / (span * 0.6)))); }
+function overview() { const [cw, ch] = CELL_SIZE[SIZE]; focus(0, 128, cw * 3.35); }
+function focusOn(k) { const c = CELLS[k], [cw] = CELL_SIZE[SIZE]; if (c) focus(c.x, c.y - 4, cw * 1.05); }
+window.addEventListener("resize", () => { resize(); });
+let drag = null;
+canvas.addEventListener("pointerdown", e => { drag = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y }; canvas.setPointerCapture(e.pointerId); canvas.classList.add("drag"); });
+canvas.addEventListener("pointermove", e => { if (!drag) return; cam.x = drag.cx - (e.clientX - drag.x) * DPR / cam.z; cam.y = drag.cy + (e.clientY - drag.y) * DPR / cam.z; });
+canvas.addEventListener("pointerup", () => { drag = null; canvas.classList.remove("drag"); });
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect(), mx = (e.clientX - r.left) * DPR, my = (e.clientY - r.top) * DPR;
+  const wx = (mx - W / 2) / cam.z + cam.x, wy = (H / 2 - my) / cam.z + cam.y;
+  cam.z = Math.max(0.8 * DPR, Math.min(16 * DPR, cam.z * Math.exp(-e.deltaY * 0.0015)));
+  cam.x = wx - (mx - W / 2) / cam.z; cam.y = wy - (H / 2 - my) / cam.z;
+}, { passive: false });
+const $ = id => document.getElementById(id);
+$("fAll").onclick = overview;
+for (let k = 0; k < 9; k++) $("f" + (k + 1)).onclick = () => focusOn(k);
+const setPage = (pg) => { PAGE = pg; $("pgR").setAttribute("aria-pressed", String(pg === "refineries")); $("pgS").setAttribute("aria-pressed", String(pg === "ships")); $("sPage").textContent = pg === "refineries" ? "refineries" : "storage ships"; S.couriers = []; build(); };
+$("pgR").onclick = () => setPage("refineries");
+const sizes = { szS: "small", szM: "medium", szL: "large", szX: "super" };
+for (const [id, sz] of Object.entries(sizes)) $(id).onclick = () => {
+  SIZE = sz; for (const k of Object.keys(sizes)) $(k).setAttribute("aria-pressed", String(k === id));
+  $("sSize").textContent = sz; S.couriers = []; S.smoke = []; S.sparks = [];
+  layoutCells(); build(); overview();
+};
+$("pgS").onclick = () => setPage("ships");
+// The switches: one per graft, and whether the planet has life.
+{
+  const body = $("graftsBody"), anchor = body.querySelector(".row");
+  const hr = document.createElement("hr"); body.insertBefore(hr, anchor);
+  for (const g of GRAFTS) {
+    const l = document.createElement("label"); l.className = "sw"; l.title = g.desc;
+    const c = document.createElement("input"); c.type = "checkbox"; c.id = "g-" + g.id; c.checked = graftOn[g.id];
+    c.onchange = () => { graftOn[g.id] = c.checked; build(); };
+    l.appendChild(c); l.appendChild(document.createTextNode(" " + g.name));
+    body.insertBefore(l, anchor);
+  }
+  const all = (on) => { for (const g of GRAFTS) { graftOn[g.id] = on; const c = $("g-" + g.id); if (c) c.checked = on; } build(); };
+  $("gAll").onclick = () => all(true);
+  $("gNone").onclick = () => all(false);
+}
+$("lab").onclick = () => { S.labels = !S.labels; $("lab").setAttribute("aria-pressed", String(S.labels)); };
+$("seed").onclick = () => { SEED = 1 + Math.floor(Math.random() * 99999); build(); };
+$("pause").onclick = () => { T.paused = !T.paused; $("pause").setAttribute("aria-pressed", String(T.paused)); };
+
+resize();
+build();
+// A view to open on: #r1 to #r6 for one refinery, else the whole gallery.
+function fromHash() { const m = /^#r([1-9])$/.exec(location.hash || ""); if (m) focusOn(+m[1] - 1); else overview(); }
+window.addEventListener("hashchange", fromHash);
+fromHash();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
