@@ -22,6 +22,10 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
+#[path = "specialists.rs"]
+mod specialists;
+pub use specialists::{Skills, UnitView};
+
 /// A small, fast, deterministic hash for cell coordinates. The standard one is
 /// built to resist attacks, which costs time we don't need to spend here.
 #[derive(Default)]
@@ -656,6 +660,10 @@ pub struct Sim {
     pub tunnel_m: u64,
     pub tunnels_done: u64,
     pub tunnel_kg: f64,
+    /// What this body offers the specialists, and the specialists out (see
+    /// specialists.rs).
+    pub skills: Skills,
+    units: specialists::Units,
     /// Profiling (native builds): seconds spent in each part of a step, named
     /// in PROF_NAMES. The first four add up to the whole step; the rest are
     /// parts of those.
@@ -713,6 +721,10 @@ struct Bore {
     /// Boring now, or pulling out and moving until `resume_at`.
     active: bool,
     resume_at: u64,
+    /// Where its head was a second ago, and when it moved on (for the
+    /// screen; not saved).
+    prev: (f64, f64),
+    moved_at: u64,
 }
 
 /// cos and sin of an angle in degrees, from their power series (plain
@@ -834,7 +846,13 @@ impl Sim {
         let stock = crate::recipes::Stock::new(&world.planet.mats.elements);
         let transit = crate::recipes::Transit::new(&world.planet.mats.elements);
         let parts = crate::recipes::Parts::new(&eco.recipe);
-        let prod = if eco.recipe.part.is_empty() { crate::production::Production::default() } else { crate::production::Production::new(&eco.production) };
+        // The Universal Drone Replicator's bays: only for the specialists
+        // this body has a use for.
+        let skills = Skills::of(&world, eco.units.heatsink.min_freeze_k);
+        let mut units = specialists::Units::default();
+        units.prepare(&world, eco.units.heatsink.min_freeze_k);
+        let extra: Vec<crate::production::BaySpec> = if eco.units.universal_replicator { eco.units.bay.iter().filter(|b| skills.useful(b.unit)).cloned().collect() } else { Vec::new() };
+        let prod = if eco.recipe.part.is_empty() { crate::production::Production::default() } else { crate::production::Production::new(&eco.production, &extra) };
         let sim = Sim {
             stock,
             transit,
@@ -962,6 +980,8 @@ impl Sim {
             tunnel_m: 0,
             tunnels_done: 0,
             tunnel_kg: 0.0,
+            skills,
+            units,
             prof: [0.0; 8],
             counts: [0; 6],
             free_drones: None,
@@ -1325,6 +1345,8 @@ impl Sim {
         // reaches the ground.
         self.crater(at, size_m as f64 * 0.45);
         self.explosions += 1;
+        // Sappers caught in it are destroyed, and go off.
+        self.sappers_caught(at, size_m as f64 * 0.5);
         // The blast heats the ground it reaches (what burns may catch).
         let r = (size_m as f64 / 2.0).ceil() as i64;
         let c0 = (at.0.floor() as i64, at.1.floor() as i64);
@@ -1417,8 +1439,7 @@ impl Sim {
     /// Where a shaft starting at (x, y) heading (hx, hy) should aim: the
     /// richest-smelling point aim_depth_m ahead, within the allowed lean. A
     /// swarm that can't judge value just goes straight down.
-    fn choose_aim(&self, x: f64, y: f64, hx: f64, hy: f64) -> (f64, f64) {
-        let t = &self.eco.tunneler;
+    fn choose_aim(&self, t: &crate::economy::Tunneler, x: f64, y: f64, hx: f64, hy: f64) -> (f64, f64) {
         let d = t.aim_depth_m;
         let (c, s) = cos_sin_deg(t.max_deviation_deg);
         let half_w = d * s / c;
@@ -1436,20 +1457,37 @@ impl Sim {
         best.0
     }
 
-    /// Put Tunneler i on a fresh spot on the surface, spread around the body.
-    fn start_bore(&mut self, i: usize) {
-        let n = self.ring_dir.len();
-        let mut stride = ((n as f64 * 0.38) as usize).max(1);
-        while gcd(stride, n) != 1 {
-            stride += 1;
-        }
-        let k = self.next_tunnel_k;
-        self.next_tunnel_k = (k + stride) % n;
-        let (ux, uy) = self.ring_dir[k];
+    /// Put Tunneler i on a fresh spot on the surface, spread around the body
+    /// (a tunneler built as a unit: under a working flock).
+    fn start_bore(&mut self, i: usize, unit: bool, t: &crate::economy::Tunneler) {
+        let dir = if unit { self.unit_bore_start() } else { None };
+        let (ux, uy) = match dir {
+            Some(d) => d,
+            None => {
+                let n = self.ring_dir.len();
+                let mut stride = ((n as f64 * 0.38) as usize).max(1);
+                while gcd(stride, n) != 1 {
+                    stride += 1;
+                }
+                let k = self.next_tunnel_k;
+                self.next_tunnel_k = (k + stride) % n;
+                self.ring_dir[k]
+            }
+        };
         let r = self.ground_radius(ux, uy, self.world.planet.max_radius + 1.0);
         let (x, y, hx, hy) = (ux * r, uy * r, -ux, -uy);
-        let aim = self.choose_aim(x, y, hx, hy);
-        self.tunnelers[i] = Bore { x, y, hx, hy, aim, length: 0.0, progress_s: 0.0, active: true, resume_at: 0 };
+        let aim = self.choose_aim(t, x, y, hx, hy);
+        let tick = self.tick;
+        self.bores(unit)[i] = Bore { x, y, hx, hy, aim, length: 0.0, progress_s: 0.0, active: true, resume_at: 0, prev: (x, y), moved_at: tick };
+    }
+
+    /// The old Tunnelers, or the tunnelers built as units.
+    fn bores(&mut self, unit: bool) -> &mut Vec<Bore> {
+        if unit {
+            &mut self.units.bores
+        } else {
+            &mut self.tunnelers
+        }
     }
 
     /// Solid cells within the bore around (x, y), and whether lava is there.
@@ -1477,30 +1515,44 @@ impl Sim {
         (out, lava)
     }
 
-    /// One second of boring for every Tunneler.
+    /// One second of boring for every Tunneler: the old ones, and the
+    /// tunnelers built as units (their own, wider numbers).
     fn tunnel_work(&mut self) {
-        if self.tunnelers.is_empty() {
-            return;
+        if !self.tunnelers.is_empty() {
+            let t = self.eco.tunneler.clone();
+            self.bore_list(false, &t);
         }
-        let t = self.eco.tunneler.clone();
+        if !self.units.bores.is_empty() {
+            let t = self.unit_tunneler();
+            self.bore_list(true, &t);
+        }
+    }
+
+    fn bore_list(&mut self, as_unit: bool, t: &crate::economy::Tunneler) {
         let (cos_max, _) = cos_sin_deg(t.max_deviation_deg);
         let (_, turn) = cos_sin_deg(t.turn_deg_per_m);
         let cargo = self.eco.harvester.cargo_kg * self.up_cached_cargo;
         let power = t.drill_power * self.up("dig speed") * self.perk_dig;
-        for i in 0..self.tunnelers.len() {
-            if !self.tunnelers[i].active {
-                if self.tick >= self.tunnelers[i].resume_at {
-                    self.start_bore(i);
+        for i in 0..self.bores(as_unit).len() {
+            let tick = self.tick;
+            {
+                let b = &mut self.bores(as_unit)[i];
+                b.prev = (b.x, b.y);
+                b.moved_at = tick;
+            }
+            if !self.bores(as_unit)[i].active {
+                if self.tick >= self.bores(as_unit)[i].resume_at {
+                    self.start_bore(i, as_unit, t);
                 }
                 continue;
             }
             if self.brownout() {
                 continue;
             }
-            self.tunnelers[i].progress_s += 1.0;
+            self.bores(as_unit)[i].progress_s += 1.0;
             // Up to four metres a second in soft ground.
             for _ in 0..4 {
-                let b = self.tunnelers[i].clone();
+                let b = self.bores(as_unit)[i].clone();
                 // Steer a little toward the aim, but never lean too far from
                 // straight down.
                 let (dx, dy) = unit(b.aim.0 - b.x, b.aim.1 - b.y);
@@ -1518,7 +1570,7 @@ impl Sim {
                 if lava || too_deep || b.length >= t.max_length_m {
                     // Done: pull out and move on (it won't bore into lava).
                     let resume = self.tick + self.ticks(t.relocate_s);
-                    let tb = &mut self.tunnelers[i];
+                    let tb = &mut self.bores(as_unit)[i];
                     tb.active = false;
                     tb.resume_at = resume;
                     self.tunnels_done += 1;
@@ -1561,7 +1613,7 @@ impl Sim {
                         }
                     }
                 }
-                let tb = &mut self.tunnelers[i];
+                let tb = &mut self.bores(as_unit)[i];
                 tb.progress_s -= need_s;
                 tb.x = nx;
                 tb.y = ny;
@@ -1582,7 +1634,7 @@ impl Sim {
                 }
             }
             // Unspent drilling time doesn't pile up while waiting on energy.
-            let tb = &mut self.tunnelers[i];
+            let tb = &mut self.bores(as_unit)[i];
             tb.progress_s = tb.progress_s.min(60.0);
         }
     }
@@ -4095,7 +4147,7 @@ impl Sim {
                 self.energy -= t.energy_cost;
                 self.mass -= t.mass_cost;
                 self.spent_mass += t.mass_cost;
-                self.tunnelers.push(Bore { x: 0.0, y: 0.0, hx: 0.0, hy: 0.0, aim: (0.0, 0.0), length: 0.0, progress_s: 0.0, active: false, resume_at: self.tick });
+                self.tunnelers.push(Bore { x: 0.0, y: 0.0, hx: 0.0, hy: 0.0, aim: (0.0, 0.0), length: 0.0, progress_s: 0.0, active: false, resume_at: self.tick, prev: (0.0, 0.0), moved_at: self.tick });
             }
         }
         // Scouts, to keep the ratio.
@@ -4130,6 +4182,8 @@ impl Sim {
                 self.spawn_harvester();
                 self.next_free_build = self.tick + self.ticks(self.eco.seed_swarm.free_build_every_s);
             }
+            // Specialists, from the Universal Drone Replicator's bays.
+            self.order_specialists();
             return;
         }
         let mut want = self.last_room.saturating_sub(resting);
@@ -4221,23 +4275,52 @@ impl Sim {
         let (hc, uc) = (r.counts(&r.harvester), r.counts(&r.hauler));
         let (qc, qh) = (self.prod.queued(Unit::Cutter) as u64, self.prod.queued(Unit::Hauler) as u64);
         let have = &self.parts.n;
-        let tier = |c: u64, h: u64| -> Vec<u64> { (0..n).map(|i| (c * hc[i] + h * uc[i]).saturating_sub(have[i])).collect() };
         let free = |u: Unit| (self.prod.building(u) < self.prod.bays_of(u)) as u64;
+        // The specialists' parts: for one waiting per free bay, and for all waiting.
+        let (mut sp_free, mut sp_all) = (vec![0u64; n], vec![0u64; n]);
+        for u in Unit::SPECIALISTS {
+            let q = self.prod.queued(u) as u64;
+            if q == 0 {
+                continue;
+            }
+            let c = r.counts(r.of(u));
+            for i in 0..n {
+                sp_free[i] += q.min(free(u)) * c[i];
+                sp_all[i] += q * c[i];
+            }
+        }
+        let tier = |c: u64, h: u64, s: &Vec<u64>| -> Vec<u64> { (0..n).map(|i| (c * hc[i] + h * uc[i] + s[i]).saturating_sub(have[i])).collect() };
+        let none = vec![0u64; n];
         let (nh, nc) = (qh.min(free(Unit::Hauler)), qc.min(free(Unit::Cutter)));
-        let tiers = [tier(0, nh), tier(nc, nh), tier(r.ahead.harvester as u64 + qc, r.ahead.hauler as u64 + qh)];
-        // The most urgent need, and the whole run.
-        let urgent = tiers.iter().find(|t| t.iter().any(|&k| k > 0)).cloned().unwrap_or_else(|| vec![0; n]);
-        let short = tiers[2].clone();
+        let tiers = [tier(0, nh, &none), tier(nc, nh, &none), tier(nc, nh, &sp_free), tier(r.ahead.harvester as u64 + qc, r.ahead.hauler as u64 + qh, &sp_all)];
+        let short = tiers[3].clone();
         let kg: Vec<f64> = r.part.iter().map(|p| p.kg()).collect();
-        let spec = &self.eco.production;
-        let fab = &mut self.prod.fab;
+        let fab = &self.prod.fab;
         if fab.part.is_none_or(|p| short[p] == 0) {
-            let best = (0..n).filter(|&i| urgent[i] > 0).max_by(|&a, &b| (urgent[a] as f64 * kg[a]).total_cmp(&(urgent[b] as f64 * kg[b])).then(b.cmp(&a)));
+            // The most urgent need the stockpile can make (a part it can't,
+            // such as a sapper's charge with no uranium left, waits).
+            let els = &self.world.planet.mats.elements;
+            let makeable = |i: usize| self.stock.plan_refined(els, &r.part[i].make.iter().map(|c| (c, c.kg)).collect::<Vec<_>>()).is_some();
+            let mut wanted = false;
+            let mut best = None;
+            for t in &tiers {
+                if !t.iter().any(|&k| k > 0) {
+                    continue;
+                }
+                wanted = true;
+                best = (0..n).filter(|&i| t[i] > 0 && makeable(i)).max_by(|&a, &b| (t[a] as f64 * kg[a]).total_cmp(&(t[b] as f64 * kg[b])).then(b.cmp(&a)));
+                if best.is_some() {
+                    break;
+                }
+            }
+            let spec = &self.eco.production;
+            let fab = &mut self.prod.fab;
             match best {
                 None => {
+                    fab.part = None;
                     fab.progress_kg = 0.0;
-                    fab.stalled = false;
-                    fab.idle = true;
+                    fab.stalled = wanted;
+                    fab.idle = !wanted;
                     return 0.0;
                 }
                 Some(p) => {
@@ -4249,6 +4332,8 @@ impl Sim {
                 }
             }
         }
+        let spec = &self.eco.production;
+        let fab = &mut self.prod.fab;
         fab.idle = false;
         if fab.switch_left_s > 0.0 {
             let used = fab.switch_left_s.min(budget);
@@ -4282,8 +4367,10 @@ impl Sim {
                 return budget;
             }
             if k == 1 {
+                // It can't be made now: next time, another part.
                 fab.stalled = true;
-                fab.progress_kg = fab.progress_kg.min(kg[p]);
+                fab.part = None;
+                fab.progress_kg = 0.0;
                 return budget;
             }
             k /= 2;
@@ -4296,10 +4383,22 @@ impl Sim {
         use crate::production::{Job, Unit};
         let unit = self.prod.bays[b].unit;
         let Some(k) = self.prod.orders.iter().position(|o| o.unit() == unit) else { return false };
+        let us = &self.eco.units;
         let energy = match unit {
             Unit::Cutter => self.eco.harvester.energy_cost * self.perk_energy / self.up("fabrication") * crate::noise::powi(self.eco.harvester.energy_cost_growth, self.harvesters_alive().min(i32::MAX as u64) as i32),
             Unit::Hauler => self.eco.hauler.energy_cost,
+            Unit::Sapper => us.sapper.energy_cost,
+            Unit::Tunneler => us.tunneler.energy_cost,
+            Unit::HeatSink => us.heatsink.energy_cost,
+            Unit::Forester => us.forester.energy_cost,
+            Unit::Abductor => us.abductor.energy_cost,
         };
+        // (Specialists wait while a hauler waits on a free bay: a flock
+        // without one can't work at all.)
+        let swarm_waiting = !matches!(unit, Unit::Cutter | Unit::Hauler) && self.prod.queued(Unit::Hauler) > 0 && self.prod.building(Unit::Hauler) < self.prod.bays_of(Unit::Hauler);
+        if swarm_waiting {
+            return false;
+        }
         // (A hauler waiting on energy goes first: cutters are no use until
         // there is a hauler to fill.)
         let held = if unit == Unit::Cutter && self.prod.queued(Unit::Hauler) > 0 && self.prod.building(Unit::Hauler) < self.prod.bays_of(Unit::Hauler) { self.eco.hauler.energy_cost } else { 0.0 };
@@ -4307,11 +4406,7 @@ impl Sim {
             return false;
         }
         let r = &self.eco.recipe;
-        let recipe = match unit {
-            Unit::Cutter => &r.harvester,
-            Unit::Hauler => &r.hauler,
-        };
-        if !self.parts.claim(r, recipe) {
+        if !self.parts.claim(r, r.of(unit)) {
             return false;
         }
         self.energy -= energy;
@@ -4341,6 +4436,10 @@ impl Sim {
                 self.haulers_built += 1;
                 self.prod.built[1] += 1;
             }
+            Order::Special(u) => {
+                self.launch_special(u);
+                self.prod.built[u.index()] += 1;
+            }
         }
     }
 
@@ -4355,24 +4454,29 @@ impl Sim {
         let f = &self.prod.fab;
         v.push(match f.part {
             _ if f.idle => "fabricator idle: every part wanted is in stock".into(),
+            None if f.stalled => "fabricator waiting: nothing wanted can be made from the stockpile".into(),
             None => "fabricator idle".into(),
             Some(p) if f.switch_left_s > 0.0 => format!("fabricator switching to {} ({:.0} s)", r.part[p].name.to_lowercase(), f.switch_left_s),
             Some(p) if f.stalled => format!("fabricator stalled on {}: the stockpile can't make it", r.part[p].name.to_lowercase()),
             Some(p) => format!("fabricator making {} ({} in stock)", r.part[p].name.to_lowercase(), self.parts.n[p]),
         });
-        for u in [Unit::Cutter, Unit::Hauler] {
-            v.push(format!("{} bays  {} of {} busy · {} waiting", u.name(), self.prod.building(u), self.prod.bays_of(u), self.prod.queued(u)));
+        for u in Unit::ALL {
+            if self.prod.bays_of(u) > 0 {
+                v.push(format!("{} bays  {} of {} busy · {} waiting", u.name(), self.prod.building(u), self.prod.bays_of(u), self.prod.queued(u)));
+            }
         }
         for (i, b) in self.prod.bays.iter().enumerate() {
             if let Some(j) = b.job {
                 let what = match j.order {
                     Order::Cutter => "a cutter".to_string(),
                     Order::Hauler(s) => format!("a hauler for flock {s}"),
+                    Order::Special(u) => format!("a {}", u.name()),
                 };
                 v.push(format!("  bay {}: {what}, {:.0} s left", i + 1, j.left_s.max(0.0)));
             }
         }
         v.push(format!("built   {} cutters, {} haulers", self.prod.built[0], self.prod.built[1]));
+        v.extend(self.specialist_lines());
         v
     }
 
@@ -4476,6 +4580,7 @@ impl Sim {
             + self.scouts as f64 * self.eco.scout.upkeep
             + self.hubs.iter().filter(|h| h.kind == HubKind::Refiner).count() as f64 * self.eco.refiner.upkeep
             + self.tunnelers.iter().filter(|b| b.active).count() as f64 * self.eco.tunneler.upkeep
+            + self.units.bores.iter().filter(|b| b.active).count() as f64 * self.eco.units.tunneler.upkeep
     }
 
     /// The scripted idle player: at each check-in, buy the cheapest affordable
@@ -4628,6 +4733,7 @@ impl Sim {
             let t4 = clock();
             self.packet_work();
             self.tunnel_work();
+            self.specialists_work();
             self.hauler_work();
             self.site_safety();
             self.waiting_heat();
@@ -4747,6 +4853,7 @@ impl Sim {
             mix(b.x.to_bits());
             mix(b.y.to_bits());
         }
+        self.units_hash(&mut mix);
         for l in &self.levels {
             mix(*l as u64);
         }
@@ -5016,7 +5123,7 @@ pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches f
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 10; // 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production
+const SIM_VERSION: u32 = 11; // 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -5242,6 +5349,7 @@ impl Sim {
         for (_, m) in air {
             o.u16(m);
         }
+        self.write_units(o);
     }
 
     /// Rebuild a game from what `write_save` wrote, on the same body, with
@@ -5285,7 +5393,7 @@ impl Sim {
             }
         }
         if version >= 10 {
-            let p = crate::production::Production::read(r)?;
+            let p = crate::production::Production::read(r, version >= 11)?;
             // (Only if it is the same factory as the economy's.)
             if p.bays.len() == s.prod.bays.len() {
                 s.prod = p;
@@ -5401,7 +5509,7 @@ impl Sim {
             let v: Vec<f64> = (0..8).map(|_| r.f64()).collect::<Result<_, _>>()?;
             let active = r.u8()? != 0;
             let resume_at = r.u64()?;
-            s.tunnelers.push(Bore { x: v[0], y: v[1], hx: v[2], hy: v[3], aim: (v[4], v[5]), length: v[6], progress_s: v[7], active, resume_at });
+            s.tunnelers.push(Bore { x: v[0], y: v[1], hx: v[2], hy: v[3], aim: (v[4], v[5]), length: v[6], progress_s: v[7], active, resume_at, prev: (v[0], v[1]), moved_at: 0 });
         }
         s.next_tunnel_k = r.u64()? as usize;
         s.tunnel_m = r.u64()?;
@@ -5460,6 +5568,9 @@ impl Sim {
             if (m as usize) < s.world.planet.mats.len() {
                 s.world.lose_aloft(m);
             }
+        }
+        if version >= 11 {
+            s.read_units(r)?;
         }
         s.sandbox.time_s = s.time();
         s.legs_all_changed();

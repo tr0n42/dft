@@ -9,9 +9,16 @@ distance-based delays, and the swarm building its own machines (storage
 ships, refiners, fabricators, factories and factory bays) block by block
 from refined elements. Then the drawing (fleet arriving, the modular
 factory with lasers, couriers drawn along the flows), then each hauler's
-own landing spot. Energy (ground units beam it up), heat-sink bots and
-tunnelers after. Premium units (magma diver, seer, beam relay, deep hauler,
-core lance) come later through the per-run tech tree.
+own landing spot. Energy (ground units beam it up) after. Heat-sink bots,
+tunnelers, sappers and foresters are in the game for testing through the
+Universal Drone Replicator (below); they still need the meta tree to earn
+them, Benjamin's look and tuning. Abductors wait for animals. Premium units
+(magma diver, seer, beam relay, deep hauler, core lance) come later through
+the per-run tech tree.
+
+**Open from 11 Nov:** uranium runs out after 25 sapper charges (fleet's
+200 kg; mined traces rarely make another 8 kg): a bigger allowance, or
+plutonium bred in a reactor? Fauna (a life layer for abductors).
 
 ## M6, the native game (in progress)
 
@@ -33,6 +40,19 @@ core lance) come later through the per-run tech tree.
   benchmark suite saves and loads at every size. Kept only roughly: drones
   mid-trip come home empty, rock in the air is lost.
 
+- **Universal Drone Replicator and the specialists: built, tests pass,
+  waiting on a PC look (test-replicator.bat).** See HANDOFF.md. Extra
+  factory bays (`[units]` in data/economy.toml) build sappers, tunnelers,
+  heat-sink bots and foresters, each only on bodies where its skill has work
+  (`cargo run --release --bin unitcheck` prints every body) and only while
+  there is work. Behaviours in src/specialists.rs, drawing in
+  game/src/units.rs, tests in tests/specialists.rs. New parts (nuclear
+  charge, lattice core, tripod leg, cutting laser...) priced by
+  tools/recipes.py; the charge takes uranium only. Sappers that are
+  destroyed go off (chains). Drawn from the mockup's designs but not yet
+  seen on screen.
+- **Hovering haulers: built, waiting on a PC look.** They never land; six
+  squid tentacles hang from the belly (game/src/drones.rs).
 - **Production skeleton, step 1: built, waiting on a PC test
   (test-barren.bat).** The swarm arrives as a fleet: the factory releases
   1,000 cutters, the storage ship brings ~97 t of refined elements and 6,000

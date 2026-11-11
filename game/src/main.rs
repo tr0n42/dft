@@ -61,6 +61,7 @@ mod lights;
 mod cargo;
 mod rnd;
 mod tiles;
+mod units;
 mod view;
 
 use bevy::prelude::*;

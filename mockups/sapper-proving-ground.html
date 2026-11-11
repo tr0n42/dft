@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sapper Proving Ground</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the planet slice fills the screen; a thin readout on top, the test controls in a strip along the bottom. One dark look, like the swarm mockup. */
+:root {
+  color-scheme: dark;
+  --void: #05070c;
+  --panel: rgba(10, 14, 20, 0.88);
+  --line: rgba(120, 150, 140, 0.22);
+  --ink: #c9d4d0;
+  --dim: #7d8a87;
+  --lamp: #2ed66e;
+  --heat: #ff9a48;
+  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--void); color: var(--ink); font-family: var(--mono); font-size: 12px; overflow: hidden; }
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; cursor: crosshair; }
+.hud { position: fixed; top: env(safe-area-inset-top, 0px); left: 0; right: 0; display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline;
+  padding-block: 12px 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); pointer-events: none; }
+.hud h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; }
+.hud h1 span { color: var(--lamp); }
+.stat { color: var(--dim); font-variant-numeric: tabular-nums; }
+.stat strong { color: var(--ink); font-weight: 500; }
+.bar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; background: var(--panel); border-top: 1px solid var(--line);
+  padding-block: 10px calc(10px + env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.label { text-transform: uppercase; letter-spacing: 0.12em; font-size: 10px; color: var(--dim); }
+.energy { display: grid; grid-template-columns: auto minmax(160px, 320px) auto; gap: 4px 10px; align-items: center; }
+.energy .ticks { grid-column: 2; display: flex; justify-content: space-between; font-size: 9px; color: var(--dim); }
+.readout { font-family: var(--display); font-size: 16px; font-weight: 600; color: var(--heat); min-width: 76px; font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--heat); }
+#rate { width: 110px; accent-color: var(--lamp); }
+button { font-family: var(--mono); font-size: 12px; color: var(--ink); background: rgba(30, 40, 46, 0.9); border: 1px solid var(--line); border-radius: 3px; padding: 6px 10px; cursor: pointer; }
+button:hover { border-color: var(--lamp); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--lamp); outline-offset: 2px; }
+button[aria-pressed=true] { color: var(--lamp); border-color: var(--lamp); }
+.legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 10px; color: var(--dim); }
+.legend i { display: inline-block; width: 10px; height: 10px; vertical-align: -1px; margin-right: 4px; }
+.hint { font-size: 10px; color: var(--dim); }
+</style>
+</head>
+<body>
+<canvas id="view" aria-label="A slice of a fissured moon with sappers at work"></canvas>
+<div class="hud">
+  <h1>Sapper <span>Proving Ground</span></h1>
+  <div class="stat">planet <strong>Karst moon K-17</strong></div>
+  <div class="stat">sappers out <strong id="sOut">0</strong></div>
+  <div class="stat">detonations <strong id="sDet">0</strong></div>
+  <div class="stat">rock loosened <strong id="sLoose">0 m³</strong> (<strong id="sTons">0 t</strong>)</div>
+  <div class="stat">biggest blast <strong id="sBig">–</strong></div>
+</div>
+<div class="bar">
+  <div class="energy">
+    <label class="label" for="energy">Detonation energy</label>
+    <input id="energy" type="range" min="0" max="600" value="200">
+    <span class="readout" id="eOut">1.0 kt</span>
+    <div class="ticks"><span>10 t</span><span>1 kt</span><span>100 kt</span><span>10 Mt</span></div>
+  </div>
+  <div class="group">
+    <label class="label" for="rate">Launches</label>
+    <input id="rate" type="range" min="0" max="30" value="8">
+    <span class="stat"><strong id="rOut">8</strong>/min</span>
+  </div>
+  <div class="group">
+    <button id="drop" type="button">Drop a sapper</button>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <button id="reset" type="button">Restore ground</button>
+    <button id="fresh" type="button">New planet</button>
+  </div>
+  <div class="legend" id="legend"></div>
+  <div class="hint">Click the ground to drop a sapper there; Shift-click to set one off on the spot. A sapper with no way deep enough within about 200 m goes to the lowest point it can reach and drills about 50 m down from there.</div>
+</div>
+<script>
+(() => {
+"use strict";
+// ---------- the world: a slice of crust, 1 m cells ----------
+const W = 640, H = 300;
+const AIR = 0, SOIL = 1, SAND = 2, LIME = 3, SHALE = 4, GRAN = 5, BAS = 6, RUB = 7, MELT = 8, GLASS = 9;
+// Each material: name, colour, hardness (how much of a blast it soaks up per
+// metre, and how far cracks run through it), density (t per m³).
+const MAT = [
+  null,
+  { name: "soil", c: [92, 72, 52], h: 0.1, rho: 1.5 },
+  { name: "sandstone", c: [176, 150, 104], h: 0.25, rho: 2.3 },
+  { name: "limestone", c: [168, 162, 142], h: 0.45, rho: 2.5 },
+  { name: "shale", c: [98, 92, 104], h: 0.55, rho: 2.6 },
+  { name: "granite", c: [138, 126, 128], h: 0.82, rho: 2.7 },
+  { name: "basalt", c: [62, 60, 68], h: 0.95, rho: 3.0 },
+  null, null,
+  { name: "glass", c: [34, 32, 40], h: 0.7, rho: 2.4 },
+];
+// What the heat leaves of each rock: melt cools to these; rock baked short
+// of melting turns to these (limestone burns to quicklime, giving off gas).
+const GLASS_OF = { [SOIL]: [40, 34, 30], [SAND]: [96, 140, 116], [LIME]: [200, 196, 184], [SHALE]: [44, 40, 50], [GRAN]: [30, 28, 36], [BAS]: [22, 22, 28] };
+const BAKED_OF = { [SOIL]: [36, 30, 26], [SAND]: [150, 176, 150], [LIME]: [228, 224, 214], [SHALE]: [70, 66, 76], [GRAN]: [118, 92, 90], [BAS]: [70, 52, 52] };
+const LAMP = [46, 214, 110];
+const orig = new Uint8Array(W * H), dust = [], plumes = [];
+const mat = new Uint8Array(W * H), src = new Uint8Array(W * H), col = new Uint8Array(W * H * 3), heat = new Float32Array(W * H), crack = new Uint8Array(W * H);
+const surf0 = new Int16Array(W);
+const I = (x, y) => y * W + x;
+const inb = (x, y) => x >= 0 && y >= 0 && x < W && y < H;
+let seed = 17, rnd;
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const hash = (x, y, s) => { let h = (x * 374761393 + y * 668265263 + s * 2246822519) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
+// Karst moon K-17: hills over bands of soil, sandstone, limestone, shale,
+// granite and basalt; riddled with fissures, sinkholes, worm-cave tunnels
+// and chambers.
+function generate() {
+  rnd = mulberry32(seed * 7919 + 3);
+  const ph = Array.from({ length: 8 }, () => rnd() * 6.28);
+  for (let x = 0; x < W; x++) surf0[x] = Math.round(212 + 14 * Math.sin(x * 0.011 + ph[0]) + 6 * Math.sin(x * 0.037 + ph[1]) + 2 * Math.sin(x * 0.13 + ph[2]));
+  const bands = [[SOIL, 4]];
+  const pool = [SAND, LIME, SHALE, LIME, GRAN, SHALE, GRAN, BAS, GRAN, BAS];
+  for (let k = 0; bands.reduce((a, b) => a + b[1], 0) < 320; k++) bands.push([pool[Math.min(pool.length - 1, k)], 14 + Math.floor(rnd() * 22)]);
+  const layerAt = (x, d) => { const dd = d + 7 * Math.sin(x * 0.021 + ph[3]) + 4 * Math.sin(x * 0.067 + ph[4]); let acc = 0; for (const [m, th] of bands) { acc += th; if (dd < acc) return m; } return BAS; };
+  for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) {
+    const i = I(x, y), d = surf0[x] - y;
+    if (d < 0) { mat[i] = AIR; continue; }
+    const m = y < 4 ? BAS : layerAt(x, d);
+    mat[i] = m;
+    const k = hash(x, y, seed);
+    let c = MAT[m].c.map(v => v * (0.84 + 0.28 * k));
+    if (m === GRAN && hash(x, y, seed + 9) > 0.93) c = hash(y, x, 3) > 0.5 ? [196, 150, 150] : [210, 206, 200];
+    if (m === SHALE && y % 3 === 0) c = c.map(v => v * 0.85);
+    if (m === SOIL && d === 0) c = [56, 86, 44];
+    col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
+  }
+  const carve = (cx, cy, r) => { for (let y = Math.floor(cy - r); y <= cy + r; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) if (inb(x, y) && y > 3 && (x - cx) ** 2 + (y - cy) ** 2 <= r * r) mat[I(x, y)] = AIR; };
+  // Worm caves; a few start at the surface as sinkholes.
+  for (let k = 0; k < 34; k++) {
+    let x = rnd() * W, y = k < 8 ? surf0[Math.floor(x)] : 30 + rnd() * 170, a = k < 8 ? -Math.PI / 2 + (rnd() - 0.5) : rnd() * 6.28, r = 1.5 + rnd() * 2.5;
+    for (let s = 0, n = 60 + rnd() * 160; s < n; s++) { carve(x, y, r); a += (rnd() - 0.5) * 0.5; if (k < 8) a = a * 0.9 + (-Math.PI / 2) * 0.1; x += Math.cos(a); y += Math.sin(a) * 0.7; r = Math.max(1.2, Math.min(4.5, r + (rnd() - 0.5) * 0.4)); if (y < 8 || x < 2 || x > W - 3) break; }
+  }
+  // Chambers.
+  for (let k = 0; k < 16; k++) { const cx = rnd() * W, cy = 24 + rnd() * 170, rx = 6 + rnd() * 14, ry = 3 + rnd() * 7; for (let y = Math.floor(cy - ry); y <= cy + ry; y++) for (let x = Math.floor(cx - rx); x <= cx + rx; x++) if (inb(x, y) && y > 3 && ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1 && y < surf0[Math.max(0, Math.min(W - 1, x))] - 4) mat[I(x, y)] = AIR; }
+  // Fissures: thin, jagged, mostly downward, branching.
+  const fissure = (x, y, a, n, depth) => {
+    for (let s = 0; s < n; s++) {
+      const xi = Math.round(x), yi = Math.round(y);
+      if (!inb(xi, yi) || yi < 5) return;
+      mat[I(xi, yi)] = AIR; if (rnd() < 0.3 && inb(xi + 1, yi)) mat[I(xi + 1, yi)] = AIR;
+      a += (rnd() - 0.5) * 0.9; a = a * 0.85 + (-Math.PI / 2) * 0.15;
+      x += Math.cos(a); y += Math.sin(a);
+      if (depth < 2 && rnd() < 0.035) fissure(x, y, a + (rnd() < 0.5 ? -0.9 : 0.9), n * 0.5, depth + 1);
+    }
+  };
+  for (let k = 0; k < 70; k++) { const x = rnd() * W; const fromTop = rnd() < 0.55; fissure(x, fromTop ? surf0[Math.floor(x)] : 20 + rnd() * 170, -Math.PI / 2 + (rnd() - 0.5) * 0.6, 25 + rnd() * 110, 0); }
+  src.set(mat);
+  heat.fill(0); crack.fill(0);
+  saved = { mat: mat.slice(), col: col.slice() };
+}
+let saved = null;
+function restore() { mat.set(saved.mat); col.set(saved.col); heat.fill(0); crack.fill(0); parts.length = 0; dust.length = 0; plumes.length = 0; sappers.length = 0; pending.length = 0; stats.loose = 0; stats.tons = 0; stats.det = 0; stats.big = 0; }
+
+// ---------- sappers ----------
+const sappers = [], parts = [], pending = [], rings = [];
+const stats = { det: 0, loose: 0, tons: 0, big: 0 };
+let flash = 0, shake = 0;
+const solidAt = (x, y) => !inb(x, y) || mat[I(x, y)] !== AIR;
+// Where a sapper can crawl: open cells touching something solid (floor,
+// wall or roof).
+const crawlable = (x, y) => inb(x, y) && mat[I(x, y)] === AIR && (solidAt(x - 1, y) || solidAt(x + 1, y) || solidAt(x, y - 1) || solidAt(x, y + 1) || solidAt(x - 1, y - 1) || solidAt(x + 1, y - 1));
+const visit = new Int32Array(W * H), parent = new Int32Array(W * H);
+let gen = 0;
+// The ground surface above a column, as it is now.
+const groundTop = (x) => { for (let y = H - 1; y > 0; y--) if (mat[I(x, y)] !== AIR) return y; return 0; };
+// How deep it needs to be: deep enough that the top of its blast stays
+// 50 m under the ground above it, and no deeper.
+const wantDepth = () => blastRadius() + 50;
+// From where it stands, the nearest spot it can crawl to that is deep
+// enough (and that no other sapper is going for), within a couple of
+// hundred metres of crawling. If there is none, it drills down where it is.
+const dist = new Int32Array(W * H), CRAWL_LIMIT = 220;
+function plan(sp) {
+  gen++;
+  const start = I(Math.round(sp.x), Math.round(sp.y));
+  const q = new Int32Array(24000); let qh = 0, qt = 0;
+  q[qt++] = start; visit[start] = gen; parent[start] = -1; dist[start] = 0;
+  let best = start, bestScore = -1e9, found = false, low = start, lowDepth = -1e9;
+  const R = blastRadius() * 0.7;
+  while (qh < qt && qt < 24000) {
+    const i = q[qh++], x = i % W, y = (i / W) | 0;
+    const depth = groundTop(x) - y;
+    let claimed = false;
+    for (const o of sappers) if (o !== sp && o.target != null) { const tx = o.target % W, ty = (o.target / W) | 0; if (Math.hypot(tx - x, ty - y) < R) claimed = true; }
+    if (depth >= wantDepth() && !claimed) { best = i; found = true; break; }
+    if (depth > lowDepth && !claimed) { lowDepth = depth; low = i; }
+    if (dist[i] >= CRAWL_LIMIT) continue;
+    let enc = 0, hard = 0;
+    for (let k = 0; k < 12; k++) { const a = k / 12 * 6.283, xx = Math.round(x + Math.cos(a) * 4), yy = Math.round(y + Math.sin(a) * 4); if (solidAt(xx, yy)) { enc++; const m = inb(xx, yy) ? mat[I(xx, yy)] : BAS; hard += m === RUB ? 0 : MAT[m] ? MAT[m].h : 0.95; } }
+    let sc = depth + enc * 3 + hard * 4 + hash(x, y, gen) * 4;
+    for (const o of sappers) if (o !== sp && o.target != null) { const tx = o.target % W, ty = (o.target / W) | 0; if (Math.hypot(tx - x, ty - y) < R) sc -= 1000; }
+    if (sc > bestScore) { bestScore = sc; best = i; }
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      const nx = x + dx, ny = y + dy; if (!inb(nx, ny)) continue;
+      const j = I(nx, ny); if (visit[j] === gen || !crawlable(nx, ny)) continue;
+      visit[j] = gen; parent[j] = i; dist[j] = dist[i] + 1; q[qt++] = j;
+    }
+  }
+  // No way deep enough: it goes to the lowest point it can reach and drills
+  // from there.
+  if (!found) best = low;
+  sp.drillAfter = !found;
+  const path = []; for (let i = best; i !== -1; i = parent[i]) path.push(i);
+  sp.path = path.reverse(); sp.pi = 0; sp.target = best;
+}
+function launch(x) {
+  x = Math.max(8, Math.min(W - 9, Math.round(x ?? (W * 0.08 + Math.random() * W * 0.84))));
+  sappers.push({ state: "fly", x, y: H - 14, t: 0, path: null, pi: 0, target: null, id: Math.random() * 9999 });
+}
+// ---------- the blast ----------
+const yieldKt = () => Math.pow(10, -2 + 6 * (+document.getElementById("energy").value) / 600);
+// Blast size grows with the cube root of the yield.
+const blastRadius = (Y = yieldKt()) => 14 * Math.cbrt(Y);
+const fmtY = (Y) => Y < 1 ? `${Math.round(Y * 1000)} t` : Y < 1000 ? `${Y < 10 ? Y.toFixed(1) : Math.round(Y)} kt` : `${(Y / 1000).toFixed(Y < 10000 ? 2 : 1)} Mt`;
+const stamp = new Int32Array(W * H); let blastN = 0;
+// Pieces: the nearest of a scatter of jittered points, further apart in
+// harder rock.
+const pieceAt = (x, y, sz) => {
+  const i0 = Math.floor(x / sz), j0 = Math.floor(y / sz); let best = 1e9, id = 0;
+  for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const px = (i + hash(i, j, 41)) * sz, py = (j + hash(j, i, 43)) * sz, d = (px - x) ** 2 + (py - y) ** 2; if (d < best) { best = d; id = i * 7919 + j; } }
+  return id;
+};
+function detonate(cx, cy, Y) {
+  blastN++; stats.det++;
+  const R = blastRadius(Y); if (Y > stats.big) stats.big = Y;
+  const rays = Math.max(360, Math.min(5000, Math.round(R * 10))), reach = Math.min(1500, R * 2.4);
+  const broken = [];
+  // Rays out from the charge: each spends its energy on what it passes
+  // through, little in open passages, far more in hard rock. What it breaks
+  // comes loose; where it gives out in rock, a crack may run on, further in
+  // harder rock.
+  for (let r = 0; r < rays; r++) {
+    const a = r / rays * Math.PI * 2 + (hash(r, blastN, 5) - 0.5) * 0.01, ca = Math.cos(a), sa = Math.sin(a);
+    let E = 1;
+    for (let s = 0; s < reach; s++) {
+      const x = Math.round(cx + ca * s), y = Math.round(cy + sa * s);
+      if (!inb(x, y)) break;
+      const i = I(x, y), m = mat[i];
+      if (m === AIR) { E -= 0.12 / R; continue; }
+      if (m === RUB || m === MELT) { E -= 0.3 / R; continue; }
+      const h = MAT[m].h;
+      E -= (0.45 + 1.7 * h) / R;
+      if (E <= 0) {
+        if (r % 9 === 0) { let ax = x, ay = y, aa = a; for (let k = 0, L = R * (0.2 + 0.7 * h); k < L; k++) { aa += (Math.random() - 0.5) * (1.2 - h); ax += Math.cos(aa); ay += Math.sin(aa); const xi = Math.round(ax), yi = Math.round(ay); if (!inb(xi, yi)) break; const j = I(xi, yi); if (mat[j] === AIR) break; if (mat[j] !== RUB) crack[j] = 1; } }
+        break;
+      }
+      if (stamp[i] !== blastN) { stamp[i] = blastN; broken.push(i, E, s); }
+    }
+  }
+  // Everything broken is kept: thrown clear (softer rock harder) and landing
+  // as rubble, or left loose where it was.
+  let flying = 0; const cap = 9000 - parts.length;
+  let tons = 0;
+  const loose = [];
+  for (let k = 0; k < broken.length; k += 3) {
+    const i = broken[k], E = broken[k + 1], d = broken[k + 2], m = mat[i], h = MAT[m].h, x = i % W, y = (i / W) | 0;
+    // Hard rock does not always go to rubble: some of it holds together in
+    // big chunks, split off from the rest along seams, left hanging like
+    // pieces of an asteroid.
+    if (h > 0.6 && E < 0.85 && d > R * 0.3) {
+      const sz = 5 + 9 * h, id = pieceAt(x, y, sz);
+      if (hash(id, blastN, 61) < (h - 0.5) * 1.3) {
+        const edge = pieceAt(x + 1, y, sz) !== id || pieceAt(x - 1, y, sz) !== id || pieceAt(x, y + 1, sz) !== id || pieceAt(x, y - 1, sz) !== id;
+        if (!edge) { const k2 = 0.82; col[i * 3] *= k2; col[i * 3 + 1] *= k2; col[i * 3 + 2] *= k2; heat[i] = Math.max(heat[i], E * 0.5); crack[i] = 0; continue; }
+      }
+    }
+    tons += MAT[m].rho; stats.loose++;
+    heat[i] = Math.max(heat[i], Math.min(1, E * 1.4));
+    crack[i] = 0;
+    // The heart of it melts; the rock round that is baked and changed.
+    if (d < R * 0.3 * (1.15 - 0.4 * h)) { mat[i] = MELT; orig[i] = m === GLASS ? GRAN : m; heat[i] = 1; continue; }
+    if (d < R * 0.6 && BAKED_OF[m]) {
+      const c = BAKED_OF[m]; col[i * 3] = c[0] * (0.9 + 0.2 * Math.random()); col[i * 3 + 1] = c[1] * (0.9 + 0.2 * Math.random()); col[i * 3 + 2] = c[2] * (0.9 + 0.2 * Math.random());
+      if (m === LIME && Math.random() < 0.08) dust.push({ x, y, vx: (Math.random() - 0.5) * 4, vy: 6 + Math.random() * 8, life: 3 + Math.random() * 3, age: 0, s: 1, c: [220, 222, 226] });
+    }
+    if (E > 0.35 + 0.35 * h && flying < cap) {
+      const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy) || 1, sp = (18 + 70 * E * (1 - 0.6 * h)) * (0.7 + 0.6 * Math.random()) * Math.min(3, 0.6 + Math.cbrt(Y) * 0.4);
+      parts.push({ x, y, px: x, py: y, vx: dx / d * sp, vy: dy / d * sp + 6, r: col[i * 3], g: col[i * 3 + 1], b: col[i * 3 + 2], hot: Math.min(1, E) });
+      mat[i] = AIR; flying++;
+    } else {
+      mat[i] = RUB; loose.push(i);
+      const j = Math.random() * 0.25 + 0.75; col[i * 3] *= j; col[i * 3 + 1] *= j; col[i * 3 + 2] *= j;
+    }
+  }
+  // A plume: if there is an open way from the blast up to the surface (along
+  // cracks, caves, through loose rubble), the pressure drives a share of the
+  // broken rock up it and out of the top, glowing, under a column of dust.
+  // Most blasts find one.
+  if (Math.random() < 0.9) {
+    gen++;
+    const start = I(Math.round(cx), Math.round(cy)), q = new Int32Array(40000); let qh = 0, qt = 0, mouth = -1;
+    q[qt++] = start; visit[start] = gen;
+    while (qh < qt && qt < 39990) {
+      const i = q[qh++], x = i % W, y = (i / W) | 0;
+      if (y >= groundTop(x)) { mouth = i; break; }
+      for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1]]) {
+        const nx = x + dx, ny = y + dy; if (!inb(nx, ny)) continue;
+        const j = I(nx, ny), m = mat[j]; if (visit[j] === gen || (m !== AIR && m !== RUB)) continue;
+        if (Math.hypot(nx - cx, ny - cy) > R * 3 + 90) continue;
+        visit[j] = gen; q[qt++] = j;
+      }
+    }
+    if (mouth >= 0) {
+      const take = Math.min(loose.length, Math.round(loose.length * (0.35 + 0.25 * Math.random())), 9000 - parts.length - flying);
+      const cols = [];
+      for (let k = 0; k < take; k++) { const n = Math.floor(Math.random() * loose.length), i = loose[n]; loose[n] = loose[loose.length - 1]; loose.pop(); if (mat[i] !== RUB) continue; cols.push([col[i * 3], col[i * 3 + 1], col[i * 3 + 2]]); mat[i] = AIR; }
+      const x = mouth % W, y = (mouth / W) | 0, pw = Math.min(4, 0.8 + Math.cbrt(Y) * 0.35);
+      plumes.push({ x, y, cols, t: 0, dur: 0.6 + 0.35 * Math.log10(Y * 10 + 1), pw });
+    }
+  }
+  stats.tons += tons;
+  rings.push({ x: cx, y: cy, r: 0, max: R * 2.2, t: 0 });
+  flash = Math.min(1, 0.35 + Math.log10(Y + 1) * 0.22);
+  shake = Math.min(22, 3 + 5 * Math.log10(Y * 10 + 1));
+  // Sappers caught in it go off too, a moment later.
+  for (const o of sappers) if (o.state !== "dead" && Math.hypot(o.x - cx, o.y - cy) < R * 0.9) { o.state = "dead"; pending.push({ x: o.x, y: o.y, t: 0.12 + Math.random() * 0.1 }); }
+}
+// Drill sparks: a few hot flecks at the bit.
+const sparks = [];
+function spark2(x, y) { if (sparks.length < 400) sparks.push({ x, y, vx: (Math.random() - 0.5) * 20, vy: Math.random() * 10, life: 0.3 + Math.random() * 0.3, age: 0 }); }
+// ---------- stepping ----------
+let paused = false, nextLaunch = 1;
+function step(dt) {
+  // Launches.
+  const rate = +document.getElementById("rate").value;
+  if (rate > 0) { nextLaunch -= dt; if (nextLaunch <= 0) { launch(); nextLaunch = 60 / rate; } }
+  for (const p of pending) { p.t -= dt; if (p.t <= 0) { p.done = true; detonate(p.x, p.y, yieldKt()); } }
+  for (let k = pending.length - 1; k >= 0; k--) if (pending[k].done) pending.splice(k, 1);
+  for (const sp of sappers) {
+    sp.t += dt;
+    if (sp.state === "fly") {
+      // Down from the swarm on its thruster to the ground below.
+      sp.y -= 30 * dt;
+      if (solidAt(Math.round(sp.x), Math.round(sp.y) - 1)) { sp.y = Math.round(sp.y); sp.state = "crawl"; plan(sp); }
+    } else if (sp.state === "crawl") {
+      // Along its path, down into the cracks; it arms as soon as it is deep
+      // enough, or at the end of the way.
+      const here = Math.round(sp.x);
+      if (groundTop(here) - sp.y >= wantDepth()) { sp.state = "arm"; sp.t = 0; continue; }
+      if (!sp.path || sp.pi >= sp.path.length - 1) { if (sp.drillAfter) { sp.state = "drill"; sp.drillFrom = sp.y; } else { sp.state = "arm"; sp.t = 0; } continue; }
+      const next = sp.path[sp.pi + 1];
+      if (mat[next] !== AIR) { plan(sp); continue; }
+      const tx = next % W, ty = (next / W) | 0, d = Math.hypot(tx - sp.x, ty - sp.y), v = 9 * dt;
+      if (d <= v) { sp.x = tx; sp.y = ty; sp.pi++; } else { sp.x += (tx - sp.x) / d * v; sp.y += (ty - sp.y) / d * v; }
+    } else if (sp.state === "drill") {
+      // Nowhere to crawl to: it bores straight down where it is, a shaft
+      // three wide, and what it bores through spouts up out of the hole.
+      sp.y -= 3.5 * dt;
+      const x = Math.round(sp.x), y = Math.round(sp.y) - 1;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!inb(x + dx, y) || y < 2) continue;
+        const i = I(x + dx, y), m = mat[i];
+        if (m === AIR) continue;
+        if (m !== MELT && MAT[m]) { stats.loose++; stats.tons += MAT[m].rho; }
+        mat[i] = AIR;
+        if (parts.length < 9000) parts.push({ x: x + dx, y: y + 2, px: x, py: y, vx: (Math.random() - 0.5) * 3, vy: 45 + Math.random() * 35, r: col[i * 3], g: col[i * 3 + 1], b: col[i * 3 + 2], hot: 0.2 });
+        if (Math.random() < 0.5) spark2(x + dx, y);
+      }
+      if (Math.random() < dt * 8) { const top = groundTop(x); dust.push({ x: x + (Math.random() - 0.5) * 3, y: top + 2, vx: (Math.random() - 0.5) * 4, vy: 8 + Math.random() * 8, life: 3 + Math.random() * 2, age: 0, s: 1, c: [110, 100, 88] }); }
+      if (groundTop(x) - sp.y >= wantDepth() || sp.drillFrom - sp.y >= 50 || sp.y < 6) { sp.state = "arm"; sp.t = 0; }
+    } else if (sp.state === "arm") {
+      if (sp.t > 2.5) { sp.state = "dead"; detonate(sp.x, sp.y, yieldKt()); }
+    }
+  }
+  for (let k = sappers.length - 1; k >= 0; k--) if (sappers[k].state === "dead") sappers.splice(k, 1);
+  // Plumes: the broken rock blasting up out of the vent, and the dust.
+  for (const pl of plumes) {
+    pl.t += dt;
+    const n = Math.ceil(pl.cols.length * Math.min(1, dt / Math.max(0.05, pl.dur - pl.t + dt)));
+    for (let k = 0; k < n && pl.cols.length; k++) {
+      const c = pl.cols.pop();
+      parts.push({ x: pl.x + (Math.random() - 0.5) * 2, y: pl.y + 1, px: pl.x, py: pl.y, vx: (Math.random() - 0.5) * 16 * pl.pw, vy: (50 + 60 * Math.random()) * pl.pw, r: c[0], g: c[1], b: c[2], hot: 0.4 + 0.5 * Math.random() });
+    }
+    if (Math.random() < 0.9) dust.push({ x: pl.x + (Math.random() - 0.5) * 3, y: pl.y + 2, vx: (Math.random() - 0.5) * 6, vy: (14 + Math.random() * 14) * Math.sqrt(pl.pw), life: 4 + Math.random() * 4, age: 0, s: 1, c: [110, 100, 88] });
+    if (!pl.cols.length) pl.done = true;
+  }
+  for (let k = plumes.length - 1; k >= 0; k--) if (plumes[k].done) plumes.splice(k, 1);
+  for (const k of sparks) { k.age += dt; k.vy -= 30 * dt; k.x += k.vx * dt; k.y += k.vy * dt; }
+  for (let k = sparks.length - 1; k >= 0; k--) if (sparks[k].age > sparks[k].life) { sparks[k] = sparks[sparks.length - 1]; sparks.pop(); }
+  for (const d of dust) { d.age += dt; d.x += d.vx * dt; d.y += d.vy * dt; d.vy *= 1 - 0.35 * dt; d.s = Math.min(5, d.s + dt * 1.2); }
+  for (let k = dust.length - 1; k >= 0; k--) if (dust[k].age > dust[k].life) { dust[k] = dust[dust.length - 1]; dust.pop(); }
+  // Thrown rubble: ballistic, landing where it hits and staying as rubble.
+  for (const p of parts) {
+    p.px = p.x; p.py = p.y; p.vy -= 40 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.hot *= 1 - dt * 0.8;
+    if (p.x < 0) { p.x = 0; p.vx = -p.vx * 0.3; } if (p.x > W - 1) { p.x = W - 1; p.vx = -p.vx * 0.3; }
+    const xi = Math.round(p.x), yi = Math.round(p.y);
+    if (yi >= H) continue;
+    if (yi < 1 || mat[I(xi, yi)] !== AIR) {
+      let lx = Math.round(p.px), ly = Math.max(1, Math.min(H - 1, Math.round(p.py)));
+      for (let k = 0; k < 40 && mat[I(lx, ly)] !== AIR; k++) ly++;
+      if (ly < H) { const j = I(lx, ly); mat[j] = RUB; col[j * 3] = p.r; col[j * 3 + 1] = p.g; col[j * 3 + 2] = p.b; heat[j] = Math.max(heat[j], p.hot * 0.6); }
+      p.landed = true;
+    }
+  }
+  for (let k = parts.length - 1; k >= 0; k--) if (parts[k].landed) { parts[k] = parts[parts.length - 1]; parts.pop(); }
+  // Loose rubble settles: down, or down a slope.
+  for (let y = 1; y < H; y++) {
+    const dir = (y & 1) ? 1 : -1;
+    for (let n = 0; n < W; n++) {
+      const x = dir > 0 ? n : W - 1 - n, i = I(x, y), m = mat[i];
+      if (m !== RUB && m !== MELT) continue;
+      // Melt cools as it goes, into glass where it stops.
+      if (m === MELT && heat[i] < 0.22) { mat[i] = GLASS; const c = GLASS_OF[orig[i]] || [30, 28, 36], k = 0.85 + 0.3 * Math.random(); col[i * 3] = c[0] * k; col[i * 3 + 1] = c[1] * k; col[i * 3 + 2] = c[2] * k; continue; }
+      let j = i - W;
+      if (mat[j] !== AIR) {
+        const s = Math.random() < 0.5 ? 1 : -1;
+        if (inb(x + s, y - 1) && mat[j + s] === AIR && mat[i + s] === AIR) j = j + s;
+        else if (inb(x - s, y - 1) && mat[j - s] === AIR && mat[i - s] === AIR) j = j - s;
+        // Melt runs sideways too, into the cracks.
+        else if (m === MELT && inb(x + s, y) && mat[i + s] === AIR && Math.random() < 0.6) j = i + s;
+        else continue;
+      }
+      mat[j] = m; mat[i] = AIR; orig[j] = orig[i];
+      col[j * 3] = col[i * 3]; col[j * 3 + 1] = col[i * 3 + 1]; col[j * 3 + 2] = col[i * 3 + 2];
+      heat[j] = heat[i]; heat[i] = 0;
+    }
+  }
+  // Melt keeps its heat longer than rock does.
+  for (let i = 0; i < W * H; i++) if (mat[i] === MELT) heat[i] = Math.min(1, heat[i] * 1.0125);
+  for (const r of rings) { r.t += dt; r.r = r.t * 260; }
+  for (let k = rings.length - 1; k >= 0; k--) if (rings[k].r > rings[k].max) rings.splice(k, 1);
+  flash = Math.max(0, flash - dt * 3); shake = Math.max(0, shake - dt * 18);
+}
+// ---------- drawing ----------
+const canvas = document.getElementById("view"), ctx = canvas.getContext("2d");
+const world = document.createElement("canvas"); world.width = W; world.height = H;
+const wctx = world.getContext("2d"), img = wctx.createImageData(W, H), px = img.data;
+let scale = 1, ox = 0, oy = 0, DPR = 1;
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  canvas.width = Math.round(innerWidth * DPR); canvas.height = Math.round(innerHeight * DPR);
+  const top = 46 * DPR, bot = (document.querySelector(".bar").offsetHeight + 8) * DPR;
+  scale = Math.min(canvas.width / W, (canvas.height - top - bot) / H);
+  ox = Math.round((canvas.width - W * scale) / 2); oy = Math.round(top + (canvas.height - top - bot - H * scale) / 2);
+}
+const scr = (x, y) => [ox + x * scale, oy + (H - 1 - y) * scale];
+const cell = (x, y, c, a = 1) => { const [sx, sy] = scr(x, y); ctx.fillStyle = `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`; ctx.fillRect(Math.floor(sx), Math.floor(sy), Math.ceil(scale), Math.ceil(scale)); };
+const swarm = Array.from({ length: 260 }, (_, k) => ({ x: Math.random() * W, y: H - 6 - Math.random() * 10, ph: Math.random() * 9, lit: Math.random() < 0.12 }));
+function draw(t) {
+  // The ground, from the cell arrays: rubble a little darker, cracks dark,
+  // heat glowing through.
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = I(x, y), o = ((H - 1 - y) * W + x) * 4, m = mat[i];
+    let r, g, b;
+    if (m === AIR) { if (y < surf0[x]) { const k = 10 + 5 * hash(x >> 1, y >> 1, 3); r = k; g = k; b = k + 4; } else { r = 5; g = 7; b = 12; } }
+    else if (m === MELT) { const h = heat[i], f = 0.85 + 0.15 * hash(x, y + ((t * 6) | 0), 4); [r, g, b] = (h > 0.7 ? [255, 236, 160] : h > 0.45 ? [255, 160, 60] : [210, 70, 24]).map(v => v * f); }
+    else { r = col[i * 3]; g = col[i * 3 + 1]; b = col[i * 3 + 2]; if (crack[i]) { r *= 0.45; g *= 0.45; b *= 0.45; } }
+    const h = m === MELT ? 0 : heat[i];
+    if (m === MELT) heat[i] *= 0.985;
+    if (h > 0.01) { const f = Math.min(1, h); r = r + (255 - r) * f; g = g + (150 * f + g * (1 - f) - g) * 1; b = b * (1 - f) + 50 * f; heat[i] = h * 0.985; }
+    px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = 255;
+  }
+  wctx.putImageData(img, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#05070c"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const sx = shake ? (Math.random() - 0.5) * shake * DPR : 0, sy = shake ? (Math.random() - 0.5) * shake * DPR : 0;
+  ctx.save(); ctx.translate(sx, sy);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(world, ox, oy, W * scale, H * scale);
+  // The swarm overhead.
+  for (const d of swarm) { const x = d.x + Math.sin(t * 0.3 + d.ph) * 3, y = d.y + Math.sin(t * 0.5 + d.ph * 2); cell(Math.round(x), Math.round(y), d.lit ? mix([30, 50, 40], LAMP, 0.6 + 0.4 * Math.sin(t * 2 + d.ph)) : [130, 142, 140], d.lit ? 0.9 : 0.35); }
+  // Thrown rubble.
+  for (const p of parts) cell(Math.round(p.x), Math.round(p.y), p.hot > 0.1 ? mix([p.r, p.g, p.b], [255, 170, 80], p.hot) : [p.r, p.g, p.b]);
+  // Sappers.
+  for (const sp of sappers) {
+    const x = Math.round(sp.x) - 2, y = Math.round(sp.y), armed = sp.state === "arm";
+    const blink = armed ? Math.sin(t * (8 + sp.t * 14)) > 0 : Math.sin(t * 3 + sp.id) > 0.5;
+    const rows = [" AAA ", "AnnLA", "A A A"];
+    rows.forEach((row, ri) => { for (let j = 0; j < 5; j++) { const ch = row[j]; if (ch === " ") continue; cell(x + j, y + 2 - ri, ch === "A" ? [112, 118, 116] : ch === "L" ? (blink ? LAMP : LAMP.map(v => v * 0.3)) : mix([90, 70, 30], [255, 220, 120], armed ? 0.6 + 0.4 * Math.sin(t * 20) : 0.3)); } });
+    if (sp.state === "fly") for (let k = 1; k <= 2; k++) cell(x + 2, y - k, k === 1 ? [255, 220, 150] : [255, 140, 60], 0.8);
+    if (sp.state === "drill") { const spin = Math.floor(t * 20) % 2; cell(x + 1 + spin, y - 1, [226, 224, 214]); cell(x + 2 - spin, y - 1, [150, 150, 156]); cell(x + 2, y - 2, [255, 220, 150], 0.9); }
+  }
+  for (const k of sparks) cell(Math.round(k.x), Math.round(k.y), [255, 210, 140], 1 - k.age / k.life);
+  // Dust and gas.
+  for (const d of dust) { const sz = Math.max(1, Math.round(d.s)), a = 0.4 * (1 - d.age / d.life); const [sx2, sy2] = scr(Math.floor(d.x / sz) * sz, Math.floor(d.y / sz) * sz + sz - 1); ctx.fillStyle = `rgba(${d.c[0]},${d.c[1]},${d.c[2]},${a})`; ctx.fillRect(Math.floor(sx2), Math.floor(sy2), Math.ceil(scale * sz), Math.ceil(scale * sz)); }
+  for (const pl of plumes) { const [mx, my] = scr(pl.x, pl.y); ctx.fillStyle = "rgba(255,170,80,0.35)"; ctx.fillRect(mx - scale * 3, my - scale * 2, scale * 7, scale * 3); }
+  // Shock waves, and the flash.
+  for (const r of rings) {
+    const n = Math.max(24, Math.round(r.r * 6)), a = Math.max(0, 1 - r.r / r.max);
+    for (let k = 0; k < n; k++) { const ang = k / n * Math.PI * 2; cell(Math.round(r.x + Math.cos(ang) * r.r), Math.round(r.y + Math.sin(ang) * r.r), [255, 240, 210], a * 0.8); }
+  }
+  ctx.restore();
+  if (flash > 0) { ctx.fillStyle = `rgba(255,248,230,${flash * 0.55})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+}
+// ---------- controls ----------
+const $ = (id) => document.getElementById(id);
+const showE = () => { const Y = yieldKt(); $("eOut").textContent = fmtY(Y); };
+$("energy").addEventListener("input", showE);
+$("rate").addEventListener("input", () => { $("rOut").textContent = $("rate").value; nextLaunch = Math.min(nextLaunch, 60 / Math.max(1, +$("rate").value)); });
+$("drop").onclick = () => launch();
+$("pause").onclick = () => { paused = !paused; $("pause").setAttribute("aria-pressed", String(paused)); };
+$("reset").onclick = () => restore();
+$("fresh").onclick = () => { seed = 1 + Math.floor(Math.random() * 99999); generate(); restore(); };
+canvas.addEventListener("click", (e) => {
+  const r = canvas.getBoundingClientRect(), x = ((e.clientX - r.left) * DPR - ox) / scale, y = H - 1 - ((e.clientY - r.top) * DPR - oy) / scale;
+  if (x < 0 || x >= W) return;
+  if (e.shiftKey && y >= 0 && y < H) detonate(Math.round(x), Math.round(y), yieldKt()); else launch(x);
+});
+$("legend").innerHTML = MAT.slice(1, 7).map(m => `<span><i style="background:rgb(${m.c})"></i>${m.name} ${Math.round(m.h * 100)}</span>`).join("") + `<span>(hardness)</span><span><i style="background:rgb(255,160,60)"></i>melt</span><span><i style="background:rgb(96,140,116)"></i>glass</span><span><i style="background:rgb(228,224,214)"></i>quicklime</span>`;
+window.addEventListener("resize", resize);
+generate(); restore(); resize(); showE();
+// A few to start with.
+for (let k = 0; k < 4; k++) launch(W * (0.15 + 0.22 * k));
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!paused) step(dt);
+  draw(now / 1000);
+  $("sOut").textContent = sappers.length;
+  $("sDet").textContent = stats.det;
+  $("sLoose").textContent = `${Math.round(stats.loose).toLocaleString()} m³`;
+  $("sTons").textContent = `${Math.round(stats.tons).toLocaleString()} t`;
+  $("sBig").textContent = stats.big ? fmtY(stats.big) : "–";
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
+
+

@@ -402,6 +402,128 @@ pub struct Economy {
     /// The fleet's starting allowance, the fabricator and the factory.
     #[serde(default)]
     pub production: crate::production::ProductionSpec,
+    /// The Universal Drone Replicator and the specialists it builds.
+    #[serde(default)]
+    pub units: UnitsSpec,
+}
+
+/// `[units]`: the Universal Drone Replicator, a testing stand-in for the
+/// meta tree: bays that build every specialist this body has a use for
+/// (sappers and tunnelers anywhere, heat-sink bots where there is magma,
+/// foresters where there are plants, abductors where there are animals).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct UnitsSpec {
+    pub universal_replicator: bool,
+    /// Its bays, one kind of specialist each (bays for a kind the body has
+    /// no use for are left out).
+    pub bay: Vec<crate::production::BaySpec>,
+    pub sapper: SapperSpec,
+    pub tunneler: TunnelerUnitSpec,
+    pub heatsink: HeatSinkSpec,
+    pub forester: ForesterSpec,
+    pub abductor: AbductorSpec,
+}
+
+/// A sapper: small and sacrificial, carrying a small nuclear charge. It
+/// drops to where the going is hard, crawls down cracks and caves (or drills
+/// where there are none), arms and goes off deep in the rock.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct SapperSpec {
+    pub energy_cost: f64,
+    /// Sappers out at once.
+    pub keep: u32,
+    /// Its yield (kilotonnes), and the blast's radius for 1 kt (m; it grows
+    /// with the cube root of the yield).
+    pub yield_kt: f64,
+    pub radius_m_per_cbrt_kt: f64,
+    /// It wants to go off this far under the ground beyond its blast radius.
+    pub bury_m: f64,
+    /// Farthest it crawls through cracks and caves (m of path), and drills
+    /// down where there is no way deep enough (m).
+    pub crawl_m: f64,
+    pub drill_m: f64,
+    /// Speeds (m/s): dropping, crawling, drilling.
+    pub fly_speed: f64,
+    pub crawl_speed: f64,
+    pub drill_speed: f64,
+    /// Seconds armed before it goes off.
+    pub arm_s: f64,
+    /// Share of what it drills through that is kept (the rest is spoil).
+    pub spoil_recovery: f64,
+}
+
+/// A tunneler as a ground unit: the arthropod drill, much wider than the
+/// old Tunneler's shaft. Its other numbers are the old Tunneler's.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct TunnelerUnitSpec {
+    pub energy_cost: f64,
+    /// About one per this many cutters, at least one, at most `keep`.
+    pub per_cutters: f64,
+    pub keep: u32,
+    pub upkeep: f64,
+    pub bore_m: f64,
+    pub drill_power: f64,
+    pub energy_per_tonne: f64,
+    pub spoil_recovery: f64,
+    pub max_length_m: f64,
+    pub hub_every_m: f64,
+}
+
+/// A heat-sink bot: hovers over magma, growing cooling tentacles down
+/// through it, freezing it to stone; the heat becomes power for the swarm.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct HeatSinkSpec {
+    pub energy_cost: f64,
+    /// At most this many at once (no more than there are pools of magma).
+    pub keep: u32,
+    pub speed: f64,
+    /// Seconds over magma before it burns out.
+    pub life_s: f64,
+    /// Its tentacles' reach (m): growing this fast, up to this far.
+    pub grow_m_per_s: f64,
+    pub reach_m: f64,
+    /// Cells it freezes a second.
+    pub freeze_per_s: u32,
+    /// Power it beams up per tonne frozen (E).
+    pub power_per_tonne: f64,
+    /// Only liquids that freeze at or above this are worth it (magma, molten
+    /// metal and sulfur; not water or methane).
+    pub min_freeze_k: f64,
+}
+
+/// A forester: a crab on three legs. It strides to the thickest plant life,
+/// shears trees into its clippings bag and burns the ground cover with its
+/// laser for the cutters to collect.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct ForesterSpec {
+    pub energy_cost: f64,
+    pub keep: u32,
+    pub life_s: f64,
+    /// Speeds (m/s): striding to the next stand of plants, creeping while it works.
+    pub stride_speed: f64,
+    pub work_speed: f64,
+    /// Its claws' reach (m), and seconds per cell cut.
+    pub reach_m: f64,
+    pub cut_s: f64,
+    /// It sets the ground cover alight this often (s), this far out (m).
+    pub burn_every_s: f64,
+    pub laser_m: f64,
+    /// Its bag holds this much (kg) before couriers carry it up.
+    pub bag_kg: f64,
+}
+
+/// An abductor: a spider on three legs that snatches live animals. No body
+/// has animals yet, so none is ever built.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct AbductorSpec {
+    pub energy_cost: f64,
+    pub keep: u32,
 }
 
 impl Economy {

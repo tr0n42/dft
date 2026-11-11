@@ -34,3 +34,8 @@ cloud-workspace routine (stage files, copy them over, check md5) is gone.
 
 GitHub remote `origin` = https://github.com/tr0n42/dft, branch `main`. Commit and push only when
 he asks. Build output, logs, saves, `out/` and run reports are ignored (`.gitignore`).
+
+## Handoff digestion
+
+When Benjamin asks for a "handoff digestion", repeat the "Last session's report" section of
+HANDOFF.md to him as it stands.

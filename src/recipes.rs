@@ -95,6 +95,17 @@ pub struct Recipes {
     pub harvester: Recipe,
     #[serde(default)]
     pub hauler: Recipe,
+    /// The specialists (built by the Universal Drone Replicator).
+    #[serde(default)]
+    pub sapper: Recipe,
+    #[serde(default)]
+    pub tunneler: Recipe,
+    #[serde(default)]
+    pub heatsink: Recipe,
+    #[serde(default)]
+    pub forester: Recipe,
+    #[serde(default)]
+    pub abductor: Recipe,
 }
 
 impl Recipes {
@@ -102,12 +113,27 @@ impl Recipes {
         self.part.iter().position(|p| p.id == id)
     }
 
+    /// What one of this kind of unit is made of.
+    pub fn of(&self, u: crate::production::Unit) -> &Recipe {
+        use crate::production::Unit;
+        match u {
+            Unit::Cutter => &self.harvester,
+            Unit::Hauler => &self.hauler,
+            Unit::Sapper => &self.sapper,
+            Unit::Tunneler => &self.tunneler,
+            Unit::HeatSink => &self.heatsink,
+            Unit::Forester => &self.forester,
+            Unit::Abductor => &self.abductor,
+        }
+    }
+
     /// Every unit's parts are in the catalogue.
     pub fn check(&self) -> Result<(), String> {
-        for (u, r) in [("harvester", &self.harvester), ("hauler", &self.hauler)] {
+        for u in crate::production::Unit::ALL {
+            let r = self.of(u);
             for n in &r.parts {
                 if self.index(&n.part).is_none() {
-                    return Err(format!("recipe.{u}: no part \"{}\" in the catalogue", n.part));
+                    return Err(format!("recipe.{}: no part \"{}\" in the catalogue", u.recipe_key(), n.part));
                 }
             }
         }
@@ -274,7 +300,8 @@ impl Stock {
             let mut order: Vec<usize> = (0..have.len())
                 .filter(|&i| {
                     let e = &elements.list[i];
-                    e.class != Class::Noble && e.symbol != "H" && e.symbol != "N" && e.symbol != "F" && e.symbol != "Cl"
+                    // (Never uranium: it is kept for sappers' charges, which nothing else can make.)
+                    e.class != Class::Noble && e.symbol != "H" && e.symbol != "N" && e.symbol != "F" && e.symbol != "Cl" && e.symbol != "U"
                 })
                 .collect();
             order.sort_by(|&a, &b| left(b, take).total_cmp(&left(a, take)).then(a.cmp(&b)));
@@ -433,6 +460,7 @@ mod tests {
             ahead: Ahead { harvester: 3, hauler: 0 },
             harvester: Recipe { parts: vec![Need { part: "chip".into(), n: 1 }, Need { part: "coil".into(), n: 2 }] },
             hauler: Recipe::default(),
+            ..Recipes::default()
         }
     }
 

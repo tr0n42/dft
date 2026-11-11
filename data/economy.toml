@@ -219,6 +219,77 @@ Na = 1500
 Ti = 1500
 Mn = 600
 Li = 300
+U = 200                      # fissile metal for sappers' charges: 25 of them (most bodies hold only traces)
+
+# ---- The Universal Drone Replicator (testing) ----
+# Normally the specialists are earned through the meta tree. For testing,
+# the fleet brings a replicator with a bay for every specialist this body
+# has a use for: sappers and tunnelers anywhere; heat-sink bots only where
+# there is magma (or molten metal or sulfur); foresters only where plants
+# grow; abductors only where animals live (no body has any yet). The
+# director orders each kind while there is work for it.
+[units]
+universal_replicator = true
+bay = [
+  { unit = "sapper", n = 2, build_s = 10 },
+  { unit = "tunneler", n = 1, build_s = 60 },
+  { unit = "heatsink", n = 1, build_s = 30 },
+  { unit = "forester", n = 1, build_s = 45 },
+  { unit = "abductor", n = 1, build_s = 45 },
+]
+
+[units.sapper]
+energy_cost = 400
+keep = 3                     # sappers out at once
+yield_kt = 2.0               # bigger booms are more fun
+radius_m_per_cbrt_kt = 14    # blast radius: 14 m at 1 kt, 18 m at 2 kt, 30 m at 10 kt
+bury_m = 15                  # goes off this far under the ground beyond its blast radius
+crawl_m = 220                # crawls this far through cracks and caves looking for a deep spot...
+drill_m = 50                 # ...and drills this far down where there is none
+fly_speed = 30
+crawl_speed = 9
+drill_speed = 3.5
+arm_s = 2.5
+spoil_recovery = 0.2
+
+[units.tunneler]
+energy_cost = 5000
+per_cutters = 1500           # about one per this many cutters, at least one...
+keep = 2                     # ...at most this many
+upkeep = 1.0                 # E per second while boring
+bore_m = 12                  # its shaft: as wide as it is
+drill_power = 100            # cuts rock this many times faster than a cutter
+energy_per_tonne = 0.5
+spoil_recovery = 0.5
+max_length_m = 600
+hub_every_m = 150            # cutters get a staging point this often down the shaft
+
+[units.heatsink]
+energy_cost = 2000
+keep = 3
+speed = 25
+life_s = 900                 # over magma this long, it burns out
+grow_m_per_s = 0.5           # its tentacles grow down through the magma this fast...
+reach_m = 30                 # ...this far
+freeze_per_s = 4             # cells of magma frozen to stone a second
+power_per_tonne = 8          # E beamed up per tonne frozen
+min_freeze_k = 350           # magma, molten metal and sulfur; not water, brine or methane
+
+[units.forester]
+energy_cost = 3000
+keep = 2
+life_s = 3600
+stride_speed = 12
+work_speed = 1.5
+reach_m = 9                  # its claws' reach
+cut_s = 1.0                  # seconds per cell cut
+burn_every_s = 15            # its laser sets the ground cover alight this often...
+laser_m = 30                 # ...this far out
+bag_kg = 20000               # couriers carry its bag up when this full
+
+[units.abductor]
+energy_cost = 3000
+keep = 2
 
 # ---- What cutters and haulers are made of (economy on) ----
 # Every element delivered to the mother swarm goes into its stockpile.
@@ -237,7 +308,8 @@ Li = 300
 # Parts are made of components; each component's elements run rarest first,
 # x being kg of that element per kg of component, rising by 0.5 for every
 # tenfold more common it is in Earth's crust. "*" is anything solid in the
-# stockpile, most plentiful first. Units are built from parts.
+# stockpile, most plentiful first (never for fissile: nothing
+# else will do). Units are built from parts.
 
 [recipe]
 ahead = { harvester = 100, hauler = 2 }
@@ -335,8 +407,165 @@ make = [
   { name = "frame", kg = 1, of = [{ el = "Be" }, { el = "Ti", x = 2.65 }, { el = "Mg", x = 2.96 }, { el = "Fe", x = 3.15 }, { el = "Al", x = 3.25 }, { el = "*", x = 5.25 }] },
 ]
 
+[[recipe.part]]
+id = "nuclear-charge"
+name = "Nuclear charge"
+lore = "The sapper's payload: a small fission charge; uranium, nothing else"
+make = [
+  { name = "fissile", kg = 8, of = [{ el = "U" }] },
+  { name = "tamper", kg = 10, of = [{ el = "W" }, { el = "Ta", x = 1.1 }, { el = "Pb", x = 1.52 }, { el = "Fe", x = 3.33 }, { el = "*", x = 5.33 }] },
+  { name = "explosive", kg = 6, of = [{ el = "B" }, { el = "C", x = 1.65 }, { el = "Al", x = 2.96 }, { el = "*", x = 4.96 }] },
+  { name = "initiator", kg = 0.2, of = [{ el = "Po" }, { el = "Ra", x = 2.83 }, { el = "Be", x = 6.07 }, { el = "*", x = 8.07 }] },
+  { name = "electronics", kg = 0.8, of = [{ el = "In" }, { el = "Ge", x = 1.39 }, { el = "Ga", x = 1.94 }, { el = "Si", x = 4.03 }, { el = "*", x = 6.03 }] },
+]
+
+[[recipe.part]]
+id = "detonator"
+name = "Detonator"
+lore = "Arms the charge deep in the rock and fires it"
+make = [
+  { name = "electronics", kg = 1, of = [{ el = "In" }, { el = "Ge", x = 1.39 }, { el = "Ga", x = 1.94 }, { el = "Si", x = 4.03 }, { el = "*", x = 6.03 }] },
+  { name = "wiring", kg = 1, of = [{ el = "Au" }, { el = "Ag", x = 1.64 }, { el = "Cu", x = 3.09 }, { el = "Al", x = 4.66 }, { el = "*", x = 6.66 }] },
+  { name = "explosive", kg = 0.5, of = [{ el = "B" }, { el = "C", x = 1.65 }, { el = "Al", x = 2.96 }, { el = "*", x = 4.96 }] },
+]
+
+[[recipe.part]]
+id = "blast-casing"
+name = "Blast casing"
+lore = "Holds the charge together until it is deep enough"
+make = [
+  { name = "refractory", kg = 6, of = [{ el = "Re" }, { el = "Ir", x = 1.1 }, { el = "Os", x = 1.2 }, { el = "Mo", x = 2.62 }, { el = "W", x = 2.72 }, { el = "Ta", x = 2.82 }, { el = "Hf", x = 2.92 }, { el = "Zr", x = 3.69 }, { el = "*", x = 5.69 }] },
+  { name = "armour", kg = 6, of = [{ el = "Ti" }, { el = "Fe", x = 1.5 }, { el = "*", x = 3.5 }] },
+]
+
+[[recipe.part]]
+id = "lattice-core"
+name = "Lattice core"
+lore = "A neural core that runs several behaviour chips at once"
+make = [
+  { name = "lattice", kg = 3, of = [{ el = "In" }, { el = "Ge", x = 1.39 }, { el = "Ga", x = 1.94 }, { el = "*", x = 3.94 }] },
+  { name = "wiring", kg = 1, of = [{ el = "Au" }, { el = "Ag", x = 1.64 }, { el = "Cu", x = 3.09 }, { el = "Al", x = 4.66 }, { el = "*", x = 6.66 }] },
+  { name = "composites", kg = 1, of = [{ el = "C" }, { el = "Al", x = 2.31 }, { el = "Si", x = 2.57 }, { el = "*", x = 4.57 }] },
+]
+
+[[recipe.part]]
+id = "sensor-cluster"
+name = "Sensor cluster"
+lore = "A cluster of eyes: lenses and infrared sensors"
+make = [
+  { name = "optics", kg = 2, of = [{ el = "Te" }, { el = "Se", x = 1.85 }, { el = "In", x = 2.2 }, { el = "Ge", x = 2.59 }, { el = "Ga", x = 3.14 }, { el = "Zn", x = 3.42 }, { el = "Si", x = 5.23 }, { el = "*", x = 7.23 }] },
+  { name = "electronics", kg = 1, of = [{ el = "In" }, { el = "Ge", x = 1.39 }, { el = "Ga", x = 1.94 }, { el = "Si", x = 4.03 }, { el = "*", x = 6.03 }] },
+  { name = "wiring", kg = 0.5, of = [{ el = "Au" }, { el = "Ag", x = 1.64 }, { el = "Cu", x = 3.09 }, { el = "Al", x = 4.66 }, { el = "*", x = 6.66 }] },
+]
+
+[[recipe.part]]
+id = "cutting-laser"
+name = "Cutting laser"
+lore = "Cuts or burns whatever it is aimed at"
+make = [
+  { name = "laser medium", kg = 3, of = [{ el = "Ga" }, { el = "Sc", x = 1.1 }, { el = "Y", x = 1.2 }, { el = "Cr", x = 1.36 }, { el = "Al", x = 2.82 }, { el = "*", x = 4.82 }] },
+  { name = "optics", kg = 2, of = [{ el = "Te" }, { el = "Se", x = 1.85 }, { el = "In", x = 2.2 }, { el = "Ge", x = 2.59 }, { el = "Ga", x = 3.14 }, { el = "Zn", x = 3.42 }, { el = "Si", x = 5.23 }, { el = "*", x = 7.23 }] },
+  { name = "heat conductor", kg = 3, of = [{ el = "Ag" }, { el = "Cu", x = 2.45 }, { el = "Al", x = 4.02 }, { el = "*", x = 6.02 }] },
+  { name = "wiring", kg = 1, of = [{ el = "Au" }, { el = "Ag", x = 1.64 }, { el = "Cu", x = 3.09 }, { el = "Al", x = 4.66 }, { el = "*", x = 6.66 }] },
+]
+
+[[recipe.part]]
+id = "tripod-leg"
+name = "Tripod leg"
+lore = "One long leg of a walker, its knee riding high"
+make = [
+  { name = "superalloy", kg = 15, of = [{ el = "Re" }, { el = "Hf", x = 2.82 }, { el = "Nb", x = 3.23 }, { el = "Co", x = 3.33 }, { el = "Ni", x = 3.54 }, { el = "Cr", x = 3.64 }, { el = "*", x = 5.64 }] },
+  { name = "frame", kg = 10, of = [{ el = "Be" }, { el = "Ti", x = 2.65 }, { el = "Mg", x = 2.96 }, { el = "Fe", x = 3.15 }, { el = "Al", x = 3.25 }, { el = "*", x = 5.25 }] },
+  { name = "motors", kg = 6, of = [{ el = "Co" }, { el = "Ni", x = 1.26 }, { el = "Fe", x = 2.68 }, { el = "*", x = 4.68 }] },
+  { name = "tendon", kg = 4, of = [{ el = "B" }, { el = "C", x = 1.65 }, { el = "Si", x = 3.23 }, { el = "*", x = 5.23 }] },
+]
+
+[[recipe.part]]
+id = "grapple-whip"
+name = "Grapple whip"
+lore = "A barbed whip-arm that snatches live prey"
+make = [
+  { name = "tendon", kg = 6, of = [{ el = "B" }, { el = "C", x = 1.65 }, { el = "Si", x = 3.23 }, { el = "*", x = 5.23 }] },
+  { name = "superalloy", kg = 3, of = [{ el = "Re" }, { el = "Hf", x = 2.82 }, { el = "Nb", x = 3.23 }, { el = "Co", x = 3.33 }, { el = "Ni", x = 3.54 }, { el = "Cr", x = 3.64 }, { el = "*", x = 5.64 }] },
+  { name = "cutting edge", kg = 1, of = [{ el = "Mo" }, { el = "W", x = 1.1 }, { el = "Ta", x = 1.2 }, { el = "Cr", x = 1.96 }, { el = "C", x = 2.11 }, { el = "Ti", x = 2.84 }, { el = "Fe", x = 3.34 }, { el = "*", x = 5.34 }] },
+]
+
+[[recipe.part]]
+id = "stasis-sac"
+name = "Stasis sac"
+lore = "A leathery abdomen in bone hoops that keeps a catch whole"
+make = [
+  { name = "tendon", kg = 20, of = [{ el = "B" }, { el = "C", x = 1.65 }, { el = "Si", x = 3.23 }, { el = "*", x = 5.23 }] },
+  { name = "lining", kg = 6, of = [{ el = "Au" }, { el = "Pt", x = 1.1 }, { el = "Pd", x = 1.29 }, { el = "Ag", x = 1.64 }, { el = "Ti", x = 4.07 }, { el = "*", x = 6.07 }] },
+  { name = "composites", kg = 10, of = [{ el = "C" }, { el = "Al", x = 2.31 }, { el = "Si", x = 2.57 }, { el = "*", x = 4.57 }] },
+]
+
+[[recipe.part]]
+id = "shear-claw"
+name = "Shear claw"
+lore = "A saw-edged claw that cuts trees in sections"
+make = [
+  { name = "cutting edge", kg = 8, of = [{ el = "Mo" }, { el = "W", x = 1.1 }, { el = "Ta", x = 1.2 }, { el = "Cr", x = 1.96 }, { el = "C", x = 2.11 }, { el = "Ti", x = 2.84 }, { el = "Fe", x = 3.34 }, { el = "*", x = 5.34 }] },
+  { name = "superalloy", kg = 8, of = [{ el = "Re" }, { el = "Hf", x = 2.82 }, { el = "Nb", x = 3.23 }, { el = "Co", x = 3.33 }, { el = "Ni", x = 3.54 }, { el = "Cr", x = 3.64 }, { el = "*", x = 5.64 }] },
+  { name = "motors", kg = 4, of = [{ el = "Co" }, { el = "Ni", x = 1.26 }, { el = "Fe", x = 2.68 }, { el = "*", x = 4.68 }] },
+]
+
+[[recipe.part]]
+id = "intake-rotor"
+name = "Intake rotor"
+lore = "A bladed rotor that feeds cut plants in"
+make = [
+  { name = "cutting edge", kg = 4, of = [{ el = "Mo" }, { el = "W", x = 1.1 }, { el = "Ta", x = 1.2 }, { el = "Cr", x = 1.96 }, { el = "C", x = 2.11 }, { el = "Ti", x = 2.84 }, { el = "Fe", x = 3.34 }, { el = "*", x = 5.34 }] },
+  { name = "motors", kg = 4, of = [{ el = "Co" }, { el = "Ni", x = 1.26 }, { el = "Fe", x = 2.68 }, { el = "*", x = 4.68 }] },
+  { name = "frame", kg = 2, of = [{ el = "Be" }, { el = "Ti", x = 2.65 }, { el = "Mg", x = 2.96 }, { el = "Fe", x = 3.15 }, { el = "Al", x = 3.25 }, { el = "*", x = 5.25 }] },
+]
+
+[[recipe.part]]
+id = "clippings-bag"
+name = "Clippings bag"
+lore = "A woven bag for what the claws cut"
+make = [
+  { name = "tendon", kg = 15, of = [{ el = "B" }, { el = "C", x = 1.65 }, { el = "Si", x = 3.23 }, { el = "*", x = 5.23 }] },
+  { name = "composites", kg = 10, of = [{ el = "C" }, { el = "Al", x = 2.31 }, { el = "Si", x = 2.57 }, { el = "*", x = 4.57 }] },
+]
+
+[[recipe.part]]
+id = "coolant-tentacle"
+name = "Coolant tentacle"
+lore = "Grows down through magma, freezing it to stone"
+make = [
+  { name = "refractory", kg = 10, of = [{ el = "Re" }, { el = "Ir", x = 1.1 }, { el = "Os", x = 1.2 }, { el = "Mo", x = 2.62 }, { el = "W", x = 2.72 }, { el = "Ta", x = 2.82 }, { el = "Hf", x = 2.92 }, { el = "Zr", x = 3.69 }, { el = "*", x = 5.69 }] },
+  { name = "heat conductor", kg = 10, of = [{ el = "Ag" }, { el = "Cu", x = 2.45 }, { el = "Al", x = 4.02 }, { el = "*", x = 6.02 }] },
+  { name = "tendon", kg = 4, of = [{ el = "B" }, { el = "C", x = 1.65 }, { el = "Si", x = 3.23 }, { el = "*", x = 5.23 }] },
+]
+
+[[recipe.part]]
+id = "drill-cone"
+name = "Drill cone"
+lore = "The turning drill cone at a tunneler's head"
+make = [
+  { name = "cutting edge", kg = 40, of = [{ el = "Mo" }, { el = "W", x = 1.1 }, { el = "Ta", x = 1.2 }, { el = "Cr", x = 1.96 }, { el = "C", x = 2.11 }, { el = "Ti", x = 2.84 }, { el = "Fe", x = 3.34 }, { el = "*", x = 5.34 }] },
+  { name = "superalloy", kg = 20, of = [{ el = "Re" }, { el = "Hf", x = 2.82 }, { el = "Nb", x = 3.23 }, { el = "Co", x = 3.33 }, { el = "Ni", x = 3.54 }, { el = "Cr", x = 3.64 }, { el = "*", x = 5.64 }] },
+  { name = "motors", kg = 20, of = [{ el = "Co" }, { el = "Ni", x = 1.26 }, { el = "Fe", x = 2.68 }, { el = "*", x = 4.68 }] },
+]
+
 [recipe.harvester]              # a cutter: 100 kg of parts
 parts = [{ part = "neural-core", n = 1 }, { part = "behaviour-chip", n = 1 }, { part = "servo", n = 4 }, { part = "power-cell", n = 1 }, { part = "frame-strut", n = 2 }, { part = "armour-plate", n = 1 }, { part = "cutting-head", n = 3 }, { part = "lift-vane", n = 2 }]
 
 [recipe.hauler]              # a hauler: 2000 kg of parts
 parts = [{ part = "neural-core", n = 1 }, { part = "behaviour-chip", n = 1 }, { part = "servo", n = 6 }, { part = "power-cell", n = 2 }, { part = "frame-strut", n = 12 }, { part = "armour-plate", n = 6 }, { part = "hold-module", n = 8 }, { part = "lift-vane", n = 8 }]
+
+[recipe.sapper]              # a sapper: sacrificial, a small nuclear charge: 157 kg of parts
+parts = [{ part = "neural-core", n = 1 }, { part = "behaviour-chip", n = 1 }, { part = "servo", n = 4 }, { part = "power-cell", n = 1 }, { part = "frame-strut", n = 2 }, { part = "armour-plate", n = 2 }, { part = "cutting-head", n = 2 }, { part = "lift-vane", n = 2 }, { part = "nuclear-charge", n = 1 }, { part = "detonator", n = 1 }, { part = "blast-casing", n = 1 }, { part = "sensor-cluster", n = 1 }]
+
+[recipe.tunneler]              # a tunneler: an arthropod drill: 440 kg of parts
+parts = [{ part = "neural-core", n = 1 }, { part = "behaviour-chip", n = 1 }, { part = "servo", n = 8 }, { part = "power-cell", n = 3 }, { part = "frame-strut", n = 6 }, { part = "armour-plate", n = 10 }, { part = "cutting-head", n = 6 }, { part = "drill-cone", n = 1 }]
+
+[recipe.heatsink]              # a heat-sink bot: 362 kg of parts
+parts = [{ part = "neural-core", n = 1 }, { part = "behaviour-chip", n = 1 }, { part = "servo", n = 2 }, { part = "power-cell", n = 2 }, { part = "frame-strut", n = 4 }, { part = "armour-plate", n = 4 }, { part = "heat-sink", n = 6 }, { part = "lift-vane", n = 2 }, { part = "coolant-tentacle", n = 6 }]
+
+[recipe.forester]              # a forester: a crab on three legs: 471 kg of parts
+parts = [{ part = "lattice-core", n = 1 }, { part = "behaviour-chip", n = 2 }, { part = "servo", n = 6 }, { part = "power-cell", n = 3 }, { part = "frame-strut", n = 6 }, { part = "armour-plate", n = 8 }, { part = "tripod-leg", n = 3 }, { part = "shear-claw", n = 2 }, { part = "cutting-laser", n = 1 }, { part = "intake-rotor", n = 1 }, { part = "clippings-bag", n = 1 }, { part = "sensor-cluster", n = 2 }]
+
+[recipe.abductor]              # an abductor: a spider on three legs: 415.5 kg of parts
+parts = [{ part = "lattice-core", n = 1 }, { part = "behaviour-chip", n = 2 }, { part = "servo", n = 6 }, { part = "power-cell", n = 3 }, { part = "frame-strut", n = 6 }, { part = "armour-plate", n = 6 }, { part = "tripod-leg", n = 3 }, { part = "grapple-whip", n = 2 }, { part = "cutting-laser", n = 1 }, { part = "stasis-sac", n = 1 }, { part = "sensor-cluster", n = 3 }]

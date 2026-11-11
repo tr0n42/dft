@@ -1,7 +1,7 @@
 # The Dark Forest Theory: handoff for a new session
 
 Read this first, then ROADMAP.md (what's built and what's next) and README.md
-(how the code is laid out). Last updated 10 November 2026.
+(how the code is laid out). Last updated 11 November 2026.
 
 ## Working with Benjamin
 
@@ -13,10 +13,12 @@ Read this first, then ROADMAP.md (what's built and what's next) and README.md
   live progress, not popping over his other work.
 - He wants honest numbers, frequent short progress messages during long
   work, and plain words.
-- The project lives on his PC in `Downloads\DarkForestTheory-source`, a git
-  repo pushed to https://github.com/tr0n42/dft. Since 10 November 2026 the
-  work happens in Claude Code, running on his PC in that folder (see
-  CLAUDE.md). Rust stable (MSVC) is installed there.
+- The project is a git repo pushed to https://github.com/tr0n42/dft. Since
+  11 November 2026 it is cloned on his PC (Windows on ARM64) in
+  `Downloads\dft`, and the work happens in Claude Code there (see
+  CLAUDE.md). Rust stable (MSVC, aarch64), the VS 2022 Build Tools and
+  Python 3.12 (for tools/*.py; `%LOCALAPPDATA%\Programs\Python\Python312-arm64`)
+  were installed on 11 Nov.
 
 ## How the work is done
 
@@ -59,6 +61,30 @@ DarkForestTheory project, opened by link:
 ## Where things stand (November 2026)
 
 Most recent work, all built and passing the tests, waiting on a PC look:
+
+- **Universal Drone Replicator** (11 Nov, testing stand-in for the meta
+  tree; `[units]` in data/economy.toml, src/specialists.rs,
+  game/src/units.rs, tests/specialists.rs; test with test-replicator.bat).
+  Extra factory bays build the specialists designed in the foundry mockup's
+  Units page, only where their skill has work (`Skills`; report for every
+  body: `cargo run --release --bin unitcheck`): sappers and tunnelers
+  everywhere, heat-sink bots where there is magma or molten metal/sulfur
+  (and only once an open pool is found near a flock), foresters where plants
+  grow, abductors nowhere (no body has animals yet). Sappers: crawl down
+  cracks/caves or drill, go off deep (2 kt, 18 m radius: a cavity and cracked
+  rock cutters take in half the time); anything that destroys one (another
+  blast, magma, blast heat, falling rock) sets it off, so they chain. Their
+  nuclear charge needs uranium and nothing else (no Pu in the element table;
+  uranium is kept out of "anything solid"); the fleet brings 200 kg, 25
+  charges, and mined traces rarely make more. Tunnelers reuse the old
+  Tunneler's boring with a 12 m shaft. Heat-sink bots freeze magma round
+  their tentacles and beam power. Foresters walk on three legs, shear plants
+  into their bags and set ground cover alight. New parts and recipes in
+  tools/recipes.py (strict components: no "*" stand-in). Save version 11.
+- **Haulers hover** (11 Nov): never land; six squid tentacles of sinew and
+  bone instead of legs (game/src/drones.rs).
+- The mockups in git are now the published versions (the foundry mockup
+  with the Units and Replicators pages, and mockups/sapper-proving-ground.html).
 
 0. **Production skeleton step 1** (10 Nov): the fleet arrival, the
    fabricator, the factory's bays and the orders queue (src/production.rs;
@@ -165,3 +191,69 @@ Not yet redesigned: the fabricator and factory ("later").
   bug (lava not running into hollows), warm ground and decay with
   radioactivity (technetium, polonium, astatine and francium are on no body
   until then).
+
+## Last session's report (11 November 2026)
+
+When Benjamin asks for a "handoff digestion", repeat this section to him
+as it stands (he didn't get to read it at the end of the session).
+
+All the drones are now in the game, built by a Universal Drone Replicator.
+To see them, double-click `test-replicator.bat`. It opens a 5 km living
+world, which gets every specialist type except abductors, and F1 shows what
+each bay is building and what the specialists have done.
+
+**Testing so far:** the full test suite passes: 96 tests, none failing,
+including 4 new ones. In headless 20-minute runs, sappers went off and
+cracked rock, the tunneler bored shafts, heat-sink bots froze 12,600 t of
+magma on a lava world, and foresters took 380 t of plants on a living world.
+Nobody has watched any of it on screen yet, so the drawings and animations
+are untested until Benjamin looks.
+
+**Which planets get which drones:** cutters, haulers, sappers and tunnelers
+are built on every body.
+
+| Specialist | Built on |
+|---|---|
+| Heat-sink bot | Bodies with magma or molten metal or sulfur: active planetoid, barren, dry, hothouse, iron, lava, living and sulfur worlds, plus the 3 km test planetoid and two demo bodies. It's only built once an open pool turns up near the cutters. |
+| Forester | Bodies that grow plants: living, dry, ocean, rogue and ice worlds, and the methane world only at the 5 km test size. |
+| Abductor | Nowhere yet: no body has animals. Its recipe and bay are ready for when they exist. |
+
+**How each one acts:**
+- **Sapper:** drops where the digging is hardest, crawls down cracks and
+  caves (or drills if there are none) and goes off deep. That leaves a
+  cavity and a zone of cracked rock that cutters dig in half the time.
+- **Benjamin's chaos rule:** anything that destroys a sapper sets it off.
+  That includes another blast (so they chain), magma, ground still hot from
+  a blast, or rock falling on it. On the lava world, 20 of the 25 sappers
+  went off this way.
+- **Tunneler:** bores a 12 m shaft and leaves staging points for cutters
+  along it.
+- **Heat-sink bot:** hovers over a magma pool, grows tentacles down through
+  it and freezes it to stone, which powers the swarm.
+- **Forester:** a three-legged crab that walks to the thickest plants,
+  shears them into its bag and sets the ground cover alight with its laser.
+
+**Parts and costs:**
+- **Sapper (157 kg of parts):** needs a nuclear charge, detonator, blast
+  casing and eye cluster. The charge needs 8 kg of uranium with no
+  substitute.
+- **Uranium limits sappers:** plutonium isn't in the element table, and
+  other parts are stopped from using uranium as filler. The fleet brings
+  200 kg (25 charges), and in 20-minute test runs mining never brought back
+  enough for another charge, so sappers stop after 25. Open question: a
+  bigger allowance, or plutonium added?
+- **Forester (471 kg) and abductor (416 kg):** a multi-job lattice core,
+  three legs, a cutting laser and eye clusters. The forester adds shear
+  claws, an intake rotor and a bag; the abductor adds grapple whips and a
+  stasis sac. These are made from rare elements like rhenium, germanium,
+  gallium and tellurium, and can fall back to common ones at a steep cost.
+
+**Also done:** haulers now hover and never land, with six squid tentacles
+instead of legs. The published mockups are now in git.
+
+**Two things to know:**
+- **Old saves:** this build saves in a newer format (version 11), and saves
+  made by it won't load in older builds.
+- **Tools:** Python is needed for the parts-pricing script
+  (tools/recipes.py); `unitcheck` prints the planet report
+  (`cargo run --release --bin unitcheck`).

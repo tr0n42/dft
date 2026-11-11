@@ -15,20 +15,59 @@
 use serde::Deserialize;
 use std::collections::{BTreeMap, VecDeque};
 
-/// The kinds of ground unit the factory builds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// The kinds of ground unit the factory builds. Cutters and haulers are the
+/// swarm's own; the rest are specialists, built by the Universal Drone
+/// Replicator (for testing: normally they are earned through the meta tree).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Unit {
     Cutter,
     Hauler,
+    Sapper,
+    Tunneler,
+    #[serde(rename = "heatsink")]
+    HeatSink,
+    Forester,
+    Abductor,
 }
 
 impl Unit {
+    pub const ALL: [Unit; 7] = [Unit::Cutter, Unit::Hauler, Unit::Sapper, Unit::Tunneler, Unit::HeatSink, Unit::Forester, Unit::Abductor];
+    /// The specialists.
+    pub const SPECIALISTS: [Unit; 5] = [Unit::Sapper, Unit::Tunneler, Unit::HeatSink, Unit::Forester, Unit::Abductor];
+
     pub fn name(self) -> &'static str {
         match self {
             Unit::Cutter => "cutter",
             Unit::Hauler => "hauler",
+            Unit::Sapper => "sapper",
+            Unit::Tunneler => "tunneler",
+            Unit::HeatSink => "heat-sink bot",
+            Unit::Forester => "forester",
+            Unit::Abductor => "abductor",
         }
+    }
+
+    /// Its table name in data/economy.toml ([recipe.<key>]).
+    pub fn recipe_key(self) -> &'static str {
+        match self {
+            Unit::Cutter => "harvester",
+            Unit::Hauler => "hauler",
+            Unit::Sapper => "sapper",
+            Unit::Tunneler => "tunneler",
+            Unit::HeatSink => "heatsink",
+            Unit::Forester => "forester",
+            Unit::Abductor => "abductor",
+        }
+    }
+
+    /// Its place in Unit::ALL.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn from_index(i: usize) -> Option<Unit> {
+        Unit::ALL.get(i).copied()
     }
 }
 
@@ -81,6 +120,8 @@ pub enum Order {
     Cutter,
     /// A hauler for this flock.
     Hauler(usize),
+    /// A specialist (sapper, tunneler...: never a cutter or hauler).
+    Special(Unit),
 }
 
 impl Order {
@@ -88,6 +129,7 @@ impl Order {
         match self {
             Order::Cutter => Unit::Cutter,
             Order::Hauler(_) => Unit::Hauler,
+            Order::Special(u) => u,
         }
     }
 }
@@ -128,19 +170,21 @@ pub struct Production {
     pub orders: VecDeque<Order>,
     pub bays: Vec<Bay>,
     pub fab: Fabricator,
-    /// Units the factory has finished: cutters, haulers.
-    pub built: [u64; 2],
+    /// Units the factory has finished, by kind (in Unit::ALL's order).
+    pub built: [u64; 7],
 }
 
 impl Production {
-    pub fn new(spec: &ProductionSpec) -> Production {
+    /// The starting factory, plus `extra` bays (the Universal Drone
+    /// Replicator's, for the specialists this body has a use for).
+    pub fn new(spec: &ProductionSpec, extra: &[BaySpec]) -> Production {
         let mut bays = Vec::new();
-        for b in &spec.bay {
+        for b in spec.bay.iter().chain(extra) {
             for _ in 0..b.n {
                 bays.push(Bay { unit: b.unit, build_s: b.build_s, job: None });
             }
         }
-        Production { orders: VecDeque::new(), bays, fab: Fabricator::default(), built: [0, 0] }
+        Production { orders: VecDeque::new(), bays, fab: Fabricator::default(), built: [0; 7] }
     }
 
     /// There is a factory: units are built in it, over time.
@@ -171,9 +215,11 @@ impl Production {
     // ---- Saves ----
 
     pub fn write(&self, o: &mut crate::save::W) {
+        // (A specialist: u64::MAX less 1 + its place in Unit::ALL.)
         let order = |o: &mut crate::save::W, x: Order| match x {
             Order::Cutter => o.u64(u64::MAX),
             Order::Hauler(s) => o.u64(s as u64),
+            Order::Special(u) => o.u64(u64::MAX - 1 - u.index() as u64),
         };
         o.u32(self.orders.len() as u32);
         for x in &self.orders {
@@ -195,21 +241,30 @@ impl Production {
         o.u64(self.fab.part.map_or(u64::MAX, |p| p as u64));
         o.f64(self.fab.switch_left_s);
         o.f64(self.fab.progress_kg);
-        o.u64(self.built[0]);
-        o.u64(self.built[1]);
+        for b in self.built {
+            o.u64(b);
+        }
     }
 
-    pub fn read(r: &mut crate::save::R) -> Result<Production, String> {
+    /// `all_kinds`: the save counts every kind built (version 11 on), not
+    /// just cutters and haulers.
+    pub fn read(r: &mut crate::save::R, all_kinds: bool) -> Result<Production, String> {
         let order = |r: &mut crate::save::R| -> Result<Order, String> {
             let v = r.u64()?;
-            Ok(if v == u64::MAX { Order::Cutter } else { Order::Hauler(v as usize) })
+            Ok(if v == u64::MAX {
+                Order::Cutter
+            } else if v >= u64::MAX - 1 - Unit::ALL.len() as u64 {
+                Order::Special(Unit::from_index((u64::MAX - 1 - v) as usize).ok_or("bad unit")?)
+            } else {
+                Order::Hauler(v as usize)
+            })
         };
         let mut p = Production::default();
         for _ in 0..r.u32()? {
             p.orders.push_back(order(r)?);
         }
         for _ in 0..r.u32()? {
-            let unit = if r.u8()? == 0 { Unit::Cutter } else { Unit::Hauler };
+            let unit = Unit::from_index(r.u8()? as usize).ok_or("bad unit")?;
             let build_s = r.f64()?;
             let job = if r.u8()? != 0 { Some(Job { order: order(r)?, left_s: r.f64()? }) } else { None };
             p.bays.push(Bay { unit, build_s, job });
@@ -218,7 +273,9 @@ impl Production {
         p.fab.part = (part != u64::MAX).then_some(part as usize);
         p.fab.switch_left_s = r.f64()?;
         p.fab.progress_kg = r.f64()?;
-        p.built = [r.u64()?, r.u64()?];
+        for b in p.built.iter_mut().take(if all_kinds { 7 } else { 2 }) {
+            *b = r.u64()?;
+        }
         Ok(p)
     }
 }

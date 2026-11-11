@@ -113,22 +113,30 @@ const HAULER: [&str; 9] = [
     "  VV    VV  ",
 ];
 const HAULER_W: usize = 12;
-/// A hauler's legs: their segments' lengths (m), and how long they take to
-/// unfold or fold (game seconds).
-const LEG_SEGMENTS: [f32; 3] = [3.2, 2.8, 2.2];
-const LEG_UNFOLD_S: f64 = 6.0;
-/// How high over the ground a hauler's middle is kept while its legs are
-/// out (half its height, its legs at full stretch, a margin).
-const LEG_CLEAR_M: f64 = 4.5 + 3.2 + 2.8 + 2.2 + 1.5;
+/// A hauler's tentacles, squid-like, hanging from its belly between the
+/// thrust vents: which column each grows from, and whether it is one of the
+/// two long feeding arms (longer, swaying more, a light at the tip) or one
+/// of the short ones.
+const TENTACLES: [(usize, bool); 6] = [(1, false), (4, false), (5, true), (6, true), (7, false), (10, false)];
+/// Tentacle lengths (whole metres, below the root block): short and long.
+const TENTACLE_SHORT: (u64, u64) = (4, 6);
+const TENTACLE_LONG: (u64, u64) = (8, 10);
+/// How long a hauler takes to settle into hovering over its flock, and to
+/// gather itself up again as it lifts off (game seconds).
+const SETTLE_S: f64 = 6.0;
+/// How high over the ground a hauler's middle is always kept: half its
+/// height, its longest tentacle and the light at its tip, and a margin, so
+/// it floats and its tentacles never touch the ground.
+const HOVER_CLEAR_M: f64 = 4.5 + 1.0 + TENTACLE_LONG.1 as f64 + 2.0;
 /// Haulers are kept at least this far apart (middle to middle).
 const HAULER_GAP_M: f64 = 14.0;
 
-/// How far a hauler's legs are out (0 to 1): unfolding once it has arrived
-/// at its flock to be loaded, folding as it lifts off.
-fn leg_ext(hl: &dft_sim::swarm::HaulerView, now: f64) -> f32 {
+/// How settled a hauler is over its flock (0 to 1): settling once it has
+/// arrived to be loaded, gathering itself up as it lifts off.
+fn settle(hl: &dft_sim::swarm::HaulerView, now: f64) -> f32 {
     (match hl.state {
-        dft_sim::swarm::HaulerState::Working => ((now - hl.t1) / LEG_UNFOLD_S).clamp(0.0, 1.0),
-        dft_sim::swarm::HaulerState::Lifting => 1.0 - ((now - hl.t0) / LEG_UNFOLD_S).clamp(0.0, 1.0),
+        dft_sim::swarm::HaulerState::Working => ((now - hl.t1) / SETTLE_S).clamp(0.0, 1.0),
+        dft_sim::swarm::HaulerState::Lifting => 1.0 - ((now - hl.t0) / SETTLE_S).clamp(0.0, 1.0),
         _ => 0.0,
     }) as f32
 }
@@ -236,7 +244,7 @@ fn square(out: &mut Vec<[f32; 3]>, x: f32, y: f32, h: f32) {
 /// lower-left corner at (u0, v0) and its size `f` (cell units, from the
 /// cell's middle).
 #[allow(clippy::too_many_arguments)]
-fn rot_square(out: &mut Vec<[f32; 3]>, cx: f32, cy: f32, h: f32, angle: f32, u0: f32, v0: f32, f: f32) {
+pub(crate) fn rot_square(out: &mut Vec<[f32; 3]>, cx: f32, cy: f32, h: f32, angle: f32, u0: f32, v0: f32, f: f32) {
     let (sn, cs) = angle.sin_cos();
     let s = 2.0 * h;
     let pt = |u: f32, v: f32| -> [f32; 3] {
@@ -358,7 +366,7 @@ fn draw(
     let Some(run) = run else { return };
     // Take what changed, and the moment to draw.
     let shape = swarm.0;
-    let (now, haulers, chunks, new_booms, recent, heights) = {
+    let (now, haulers, units, chunks, new_booms, recent, heights) = {
         let mut out = run.0.out.lock();
         if let Some(v) = out.leg_full.take() {
             fleet.legs = v;
@@ -391,7 +399,7 @@ fn draw(
         if out.fields_version != paths.version {
             paths.set(out.fields_version, out.fields.clone());
         }
-        (t, out.haulers.clone(), out.chunks.clone(), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()))
+        (t, out.haulers.clone(), out.units.clone(), out.chunks.clone(), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()))
     };
     let lc = lights.rgb();
     let v = *view;
@@ -611,8 +619,8 @@ fn draw(
         let cell_px = ((1.0 / v.mpp) as f32).max(0.25);
         let reach = HAULER_W as f64 * cell_px as f64 * v.mpp;
         let hold_n = HOLD_CELLS.len();
-        // Where each is drawn: lifted (while its legs are out) high enough
-        // that they never touch the ground under it.
+        // Where each is drawn: always floating high enough over the ground
+        // that its tentacles never touch it, bobbing gently there.
         let ground = |a: f64| -> Option<f64> {
             let h = heights.as_ref()?;
             let n = h.len();
@@ -631,26 +639,26 @@ fn draw(
             if x < l - near || x > r + near || y < b - near || y > t + near {
                 continue;
             }
-            let ext = leg_ext(hl, now);
+            let ext = settle(hl, now);
             let (mut x, mut y) = (x, y);
-            if ext > 0.0 {
-                let rr = (x * x + y * y).sqrt().max(1.0);
-                if let Some(g) = ground(y.atan2(x)) {
-                    let need = g + LEG_CLEAR_M;
-                    if rr < need {
-                        let k2 = (rr + (need - rr) * ext as f64) / rr;
-                        x *= k2;
-                        y *= k2;
-                    }
+            let rr = (x * x + y * y).sqrt().max(1.0);
+            if let Some(g) = ground(y.atan2(x)) {
+                // (Never below the hover height, so it comes down to it and
+                // levels off smoothly, and never touches down.)
+                let bob = 0.6 * (real_t * 0.8 + hl.id as f64 * 1.37).sin();
+                let need = g + HOVER_CLEAR_M + bob;
+                if rr < need {
+                    x *= need / rr;
+                    y *= need / rr;
                 }
             }
             placed.push((k, x, y, ext));
         }
-        // Only landed haulers (legs out) are kept apart, and only as far as
-        // their legs are out, so the push fades in on landing and out on
-        // lifting. In flight they pass freely in front of and behind each
-        // other. (A stopgap: landing spots will be shared out so that no two
-        // land on the same one.)
+        // Only haulers hovering over their flock are kept apart, and only as
+        // far as they have settled, so the push fades in on arrival and out
+        // on lifting. In flight they pass freely in front of and behind each
+        // other. (A stopgap: hover spots will be shared out so that no two
+        // take the same one.)
         for _ in 0..6 {
             for i in 0..placed.len() {
                 for j in i + 1..placed.len() {
@@ -727,50 +735,74 @@ fn draw(
                     col.extend_from_slice(&[[lin.red, lin.green, lin.blue, lin.alpha]; 6]);
                 }
             }
-            // Its legs: while it is being loaded at its flock, four jointed
-            // limbs unfold from its belly and grope slowly about, each in its
-            // own time; they fold away as it lifts off.
-            if ext > 0.0 {
-                let armour = {
-                    let k = Color::srgb(0.22, 0.235, 0.23).to_linear();
+            // Its tentacles, squid-like: six arms of dark sinew, banded with
+            // bone, hanging from its belly in whole one-metre blocks, every
+            // block joined edge to edge with the one above (a sideways step
+            // gets its own blocks), curling and swaying at the tips. In flight
+            // they beat like a swimming squid's, flaring out and pulling in
+            // together; settled over its flock they drift, half spread. The
+            // two long middle arms carry a light at the tip.
+            {
+                let tt = real_t as f32;
+                let swim = 1.0 - ext;
+                let lin = |r: f32, g: f32, b: f32| -> [f32; 4] {
+                    let k = Color::srgb(r, g, b).to_linear();
                     [k.red, k.green, k.blue, 1.0]
                 };
-                let joint = {
-                    let k = Color::srgb(0.12, 0.13, 0.125).to_linear();
-                    [k.red, k.green, k.blue, 1.0]
-                };
-                let tip = {
-                    let k = Color::srgb(lc[0] * lamp * 0.8, lc[1] * lamp * 0.8, lc[2] * lamp * 0.8).to_linear();
-                    [k.red, k.green, k.blue, 1.0]
-                };
-                for (li, (base_u, splay)) in [(-4.5f32, -0.55f32), (-1.5, -0.18), (1.5, 0.18), (4.5, 0.55)].into_iter().enumerate() {
-                    let ph = (hl.id as f32 * 1.7 + li as f32 * 2.3) % 6.283;
-                    let tt = real_t as f32;
-                    // Straight down from its belly, splayed out, then each joint
-                    // bending slowly.
-                    let mut ang = -std::f32::consts::FRAC_PI_2 + splay * ext + 0.25 * (tt * 0.35 + ph).sin() * ext;
-                    let (mut u, mut w) = (base_u, -(HAULER.len() as f32) / 2.0 + 0.5);
-                    for (j, len) in LEG_SEGMENTS.iter().enumerate() {
-                        ang += (0.55 * (tt * (0.42 + 0.08 * j as f32) + ph + j as f32 * 1.4).sin() + 0.25 * (tt * 0.17 + ph * 1.9).sin()) * ext * if li < 2 { 1.0 } else { -1.0 };
-                        let l = len * ext;
-                        let steps = (l / 0.7).ceil().max(1.0) as usize;
-                        for k in 0..steps {
-                            let f = (k as f32 + 0.5) / steps as f32;
-                            let (cu, cw) = (u + ang.cos() * l * f, w + ang.sin() * l * f);
-                            let size = 0.75 - 0.12 * j as f32;
-                            rot_square(pos, p.x, p.y, cell_px * 0.5, angle, cu - size / 2.0, cw - size / 2.0, size);
-                            col.extend_from_slice(&[if k == 0 && j > 0 { joint } else { armour }; 6]);
+                let hid = dft_sim::noise::hash(hl.id as u64, 0, 0, 0x7E47);
+                let beat = 0.5 + 0.5 * (tt * 1.7 + crate::rnd::unit(hid, 1) as f32 * 6.283).sin();
+                let flare = swim * (0.3 + 1.2 * beat) + ext * 0.7;
+                // The root row, in cell units from the hauler's middle (the
+                // vent row's lower edge).
+                let w0 = -(HAULER.len() as f32) / 2.0;
+                for (ti, &(colm, long)) in TENTACLES.iter().enumerate() {
+                    let rr = |s: u64| crate::rnd::unit(hid, 16 + ti as u64 * 8 + s) as f32;
+                    let (lo, hi) = if long { TENTACLE_LONG } else { TENTACLE_SHORT };
+                    let len = (lo as f32 + ((hi - lo + 1) as f32 * rr(0)).floor()).min(hi as f32) as i32;
+                    let ph = rr(1) * 6.283;
+                    let curl = if rr(2) < 0.5 { -1.0 } else { 1.0 } * (0.6 + rr(3)) * if long { 1.5 } else { 1.0 };
+                    // Outer arms spread most, the middle ones hardly at all.
+                    let spread = (colm as f32 - 5.5) / 4.5;
+                    let u0 = colm as f32 - HAULER_W as f32 / 2.0;
+                    let put = |pos: &mut Vec<[f32; 3]>, col: &mut Vec<[f32; 4]>, dx: i32, k: i32| {
+                        let h = dft_sim::noise::unit(dft_sim::noise::hash(hl.id as u64, ti as i64 * 64 + k as i64, dx as i64, 0x51E7)) as f32;
+                        let c = if k > 0 && k % 4 == 0 {
+                            let v = 0.37 + 0.07 * h;
+                            lin(v * 0.95, v, v * 1.05)
+                        } else {
+                            let v = 0.11 + 0.05 * h;
+                            lin(v * 0.9, v * 0.97, (v * 1.14).min(1.0))
+                        };
+                        rot_square(pos, p.x, p.y, cell_px * 0.5, angle, u0 + dx as f32, w0 - k as f32, 1.0);
+                        col.extend_from_slice(&[c; 6]);
+                    };
+                    // The root block, under the belly.
+                    put(&mut *pos, &mut *col, 0, 0);
+                    let mut px = 0i32;
+                    for k in 1..=len {
+                        let f = k as f32 / len as f32;
+                        let sway = (tt * 0.7 + ph + k as f32 * 0.3).sin() * curl * f * f * 3.0 * (0.4 + 0.6 * ext);
+                        let out = spread * flare * f * len as f32 * 0.4;
+                        let nx = (out + sway).round() as i32;
+                        // A sideways step: blocks along the row above first.
+                        for sx in px.min(nx)..=px.max(nx) {
+                            if sx != px {
+                                put(&mut *pos, &mut *col, sx, k - 1);
+                            }
                         }
-                        u += ang.cos() * l;
-                        w += ang.sin() * l;
+                        put(&mut *pos, &mut *col, nx, k);
+                        px = nx;
                     }
-                    // A dim light at each tip.
-                    rot_square(pos, p.x, p.y, cell_px * 0.5, angle, u - 0.3, w - 0.3, 0.6);
-                    col.extend_from_slice(&[tip; 6]);
+                    if long {
+                        rot_square(pos, p.x, p.y, cell_px * 0.5, angle, u0 + px as f32, w0 - (len + 1) as f32, 1.0);
+                        col.extend_from_slice(&[lin(lc[0] * lamp, lc[1] * lamp, lc[2] * lamp); 6]);
+                    }
                 }
             }
             quads += 1;
         }
+        // The specialists (sappers, tunnelers, heat-sink bots, foresters).
+        crate::units::draw(&units, now, real_t, &v, [l, b, r, t], cell_px, lc, &mut pos, &mut col);
         if pos.is_empty() {
             pos.extend_from_slice(&[[0.0; 3]; 3]);
             col.extend_from_slice(&[[0.0; 4]; 3]);
