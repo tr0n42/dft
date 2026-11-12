@@ -39,6 +39,38 @@ pub struct LifeFile {
     pub species: [u32; 2],
     pub soils: Vec<String>,
     pub solvent: Vec<SolventRow>,
+    /// The life cycle's timings (src/life.rs).
+    #[serde(default)]
+    pub cycle: Cycle,
+}
+
+/// How fast plants come back and rot away, in seconds of game time.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Cycle {
+    /// From a stand being cut, eaten or burned to new growth there, for a
+    /// species of growth 1 (faster growers sooner).
+    pub regrow_s: f64,
+    /// From sprouting to full size, for growth 1.
+    pub mature_s: f64,
+    /// Living tissue cut off from its plant dies after this.
+    pub wilt_s: f64,
+    /// Deadwood breaks down into leaf litter after this.
+    pub rot_s: f64,
+    /// Leaf litter turns to humus after this.
+    pub humus_s: f64,
+    /// Places waiting to regrow, at most.
+    pub max_scars: usize,
+    /// Plants growing at once, at most.
+    pub max_sprouts: usize,
+    /// Dead cells waiting to rot, at most.
+    pub max_rotting: usize,
+}
+
+impl Default for Cycle {
+    fn default() -> Self {
+        Cycle { regrow_s: 240.0, mature_s: 900.0, wilt_s: 45.0, rot_s: 600.0, humus_s: 900.0, max_scars: 4000, max_sprouts: 3000, max_rotting: 200_000 }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -90,20 +122,20 @@ impl Niche {
         }
     }
 
-    fn sky(self) -> bool {
+    pub fn sky(self) -> bool {
         matches!(self, Niche::Soil | Niche::Bare | Niche::Frozen)
     }
 
-    fn wet(self) -> bool {
+    pub fn wet(self) -> bool {
         matches!(self, Niche::Shallows | Niche::Deeps)
     }
 
-    fn dark(self) -> bool {
+    pub fn dark(self) -> bool {
         matches!(self, Niche::Deeps | Niche::CaveFloor | Niche::CaveRoof | Niche::Hot)
     }
 
     /// Plants per anchor cell, and the chance an anchor carries ground cover.
-    fn density(self) -> (f64, f64) {
+    pub fn density(self) -> (f64, f64) {
         match self {
             Niche::Soil => (0.10, 0.92),
             Niche::Bare => (0.035, 0.45),
@@ -993,12 +1025,12 @@ impl Flora {
     }
 
     /// Whether `m` is a liquid life here can live in.
-    fn living(&self, m: MatId) -> bool {
+    pub fn living(&self, m: MatId) -> bool {
         self.living.get(m as usize).copied().unwrap_or(false)
     }
 
     /// Whether a cell holding `m` is soil roots can grow in.
-    fn is_soil(&self, m: MatId) -> bool {
+    pub fn is_soil(&self, m: MatId) -> bool {
         self.soil.get(m as usize).copied().unwrap_or(false)
     }
 
@@ -1372,6 +1404,45 @@ impl Flora {
         }
     }
 
+    /// Grow species `si` from the ground cell (x, y) out toward `up`, at
+    /// `age` (0 to 1), into the world as `get` reports it (not the
+    /// generator): it grows around whatever is already there. Returns the
+    /// cells it fills, with their priority.
+    pub fn grow_at(&self, p: &Planet, si: usize, x: i64, y: i64, up: (i8, i8), seed: u64, age: f64, soil: bool, get: &dyn Fn(i64, i64) -> MatId) -> Vec<(i64, i64, MatId, u8)> {
+        let sp = &self.species[si];
+        let wet = sp.niche.wet() || (sp.niche == Niche::Hot && self.living(get(x + up.0 as i64, y + up.1 as i64)));
+        let free = |x: i64, y: i64| -> Ground {
+            let m = get(x, y);
+            let st = p.mats.get(m).state;
+            if m == VACUUM {
+                if wet { Ground::Solid } else { Ground::Open }
+            } else if st == State::Liquid {
+                if wet && self.living(m) { Ground::Open } else { Ground::Solid }
+            } else if self.is_soil(m) {
+                Ground::Soil
+            } else {
+                Ground::Solid
+            }
+        };
+        let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
+        let r = (fx * fx + fy * fy).sqrt().max(1e-9);
+        let radial = (fx / r, fy / r);
+        let floor = (up.0 as f64) * radial.0 + (up.1 as f64) * radial.1 >= 0.0;
+        let upv = if floor { radial } else { (-radial.0, -radial.1) };
+        let origin = (fx + upv.0 * 0.5, fy + upv.1 * 0.5);
+        grow(sp, origin, upv, (-radial.0, -radial.1), seed, age, soil, &free)
+    }
+
+    /// The standing species of `niche`, with their weights.
+    pub fn standing_of(&self, niche: Niche) -> Vec<(usize, f64)> {
+        self.standing.get(&niche).map(|l| l.iter().map(|&i| (i, self.species[i].abundance)).collect()).unwrap_or_default()
+    }
+
+    /// The ground-cover species of `niche`, if it is alive here.
+    pub fn cover_of(&self, niche: Niche) -> Option<usize> {
+        self.cover_of.get(&niche).copied()
+    }
+
     /// Why nothing lives here, a line per place looked at.
     pub fn why_lifeless(&self) -> Vec<String> {
         if self.report.is_empty() {
@@ -1448,7 +1519,7 @@ fn in_chunk(x: i64, y: i64, x0: i64, y0: i64) -> bool {
 }
 
 /// A unit component rounded to a grid step of -1, 0 or 1 (8 directions).
-fn step(u: f64) -> i64 {
+pub(crate) fn step(u: f64) -> i64 {
     if u > 0.38 {
         1
     } else if u < -0.38 {

@@ -11,6 +11,7 @@ pub mod deep;
 pub mod economy;
 pub mod elements;
 pub mod flora;
+pub mod life;
 pub mod flow;
 pub mod recipes;
 pub mod geology;

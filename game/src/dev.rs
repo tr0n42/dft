@@ -82,7 +82,7 @@ fn speed_name(i: usize) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn panel(contexts: EguiContexts, dev: ResMut<Dev>, run: Res<Run>, tiles: Res<crate::tiles::Tiles>, view: Res<crate::view::View>, body: Res<Body>, fog: ResMut<crate::fog::Fog>, cam: ResMut<crate::camera::Camera>, saves: ResMut<crate::saves::Saves>, mut perf: ResMut<crate::log::Perf>) -> Result {
+fn panel(contexts: EguiContexts, dev: ResMut<Dev>, run: Res<Run>, tiles: Res<crate::tiles::Tiles>, view: ResMut<crate::view::View>, body: Res<Body>, fog: ResMut<crate::fog::Fog>, cam: ResMut<crate::camera::Camera>, saves: ResMut<crate::saves::Saves>, mut perf: ResMut<crate::log::Perf>) -> Result {
     let t0 = std::time::Instant::now();
     let r = panel_inner(contexts, dev, run, tiles, view, body, fog, cam, saves);
     perf.add(crate::log::P_PANEL, t0);
@@ -90,7 +90,7 @@ fn panel(contexts: EguiContexts, dev: ResMut<Dev>, run: Res<Run>, tiles: Res<cra
 }
 
 #[allow(clippy::too_many_arguments)]
-fn panel_inner(mut contexts: EguiContexts, mut dev: ResMut<Dev>, run: Res<Run>, tiles: Res<crate::tiles::Tiles>, view: Res<crate::view::View>, body: Res<Body>, mut fog: ResMut<crate::fog::Fog>, mut cam: ResMut<crate::camera::Camera>, mut saves: ResMut<crate::saves::Saves>) -> Result {
+fn panel_inner(mut contexts: EguiContexts, mut dev: ResMut<Dev>, run: Res<Run>, tiles: Res<crate::tiles::Tiles>, mut view: ResMut<crate::view::View>, body: Res<Body>, mut fog: ResMut<crate::fog::Fog>, mut cam: ResMut<crate::camera::Camera>, mut saves: ResMut<crate::saves::Saves>) -> Result {
     if !dev.open {
         return Ok(());
     }
@@ -126,6 +126,19 @@ fn panel_inner(mut contexts: EguiContexts, mut dev: ResMut<Dev>, run: Res<Run>, 
                 ui.monospace(l);
             }
         });
+        // Jump to the newest plant growing back, close enough to see it.
+        let label = if stats.regrowth.is_some() { "show regrowth" } else { "show regrowth (nothing growing back yet)" };
+        let clicked = ui.add_enabled(stats.regrowth.is_some(), egui::Button::new(label)).clicked();
+        if let (Some((x, y)), true) = (stats.regrowth, clicked) {
+            {
+                let r = (x * x + y * y).sqrt().max(1.0);
+                // A little above it, so the plant and the ground both show.
+                view.x = x + x / r * 15.0;
+                view.y = y + y / r * 15.0;
+                view.mpp = view.mpp.min(0.15);
+                cam.director = false;
+            }
+        }
         ui.monospace(format!("eaten   {:.3}%", stats.consumed * 100.0));
         ui.monospace(format!("moving  {} cells awake, {} waiting out of sight, {} loose bodies", stats.awake, stats.dormant, stats.loose));
         if control.free_drones.is_none() {

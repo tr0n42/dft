@@ -56,6 +56,14 @@ struct Meshes {
     booms: Handle<Mesh>,
 }
 
+/// What the drones' drawing keeps between frames: which materials are
+/// plants (not ground for feet), and the steady clock it draws by.
+#[derive(Default)]
+struct DrawMem {
+    flora: Vec<bool>,
+    clock: Option<f64>,
+}
+
 /// The smallest a drone is drawn, in pixels across.
 const MIN_PX: f32 = 3.0;
 
@@ -355,13 +363,15 @@ fn draw(
     mut grid: Local<Grid>,
     body: Res<crate::Body>,
     mut shown: Local<Vec<(dft_sim::swarm::Boom, f64)>>,
-    mut last_t: Local<f64>,
     time: Res<Time<Real>>,
     swarm: Res<crate::swarmview::SwarmNow>,
     lights: Res<crate::lights::Lights>,
     mut air: Local<AirLook>,
     mut paths: Local<PathIndex>,
+    mut mem: Local<DrawMem>,
 ) {
+    let mem = &mut *mem;
+    let flora = &mut mem.flora;
     let t0 = std::time::Instant::now();
     let Some(run) = run else { return };
     // Take what changed, and the moment to draw.
@@ -392,10 +402,28 @@ fn draw(
             Some(at) if !control.paused && out.stats.launched_at.is_none() => at.elapsed().as_secs_f64().min(0.25) * rate,
             _ => 0.0,
         };
-        let t = out.stats.time + ahead;
-        // (Back to the published time if it jumped back: a new body or a load.)
-        let t = if t < *last_t && *last_t - t < 30.0 * rate.max(1.0) { *last_t } else { t };
-        *last_t = t;
+        let target = out.stats.time + ahead;
+        // The moment drawn runs on a steady clock: every frame it moves on by
+        // the frame's time at the game's speed, and eases toward the
+        // simulation's own time rather than jumping to it or waiting for it,
+        // so drones and ships move smoothly at the screen's frame rate. (Back
+        // to the simulation's time at once after a jump: a new body or a load.)
+        let dt = time.delta_secs_f64().min(0.1);
+        let paused = control.paused || out.stats.launched_at.is_some();
+        let t = match mem.clock {
+            Some(c) => {
+                let mut c = c + if paused { 0.0 } else { dt * rate };
+                let err = target - c;
+                if err.abs() > 2.0 * rate.max(1.0) + 1.0 {
+                    c = target;
+                } else {
+                    c += err * (dt * 3.0).min(1.0);
+                }
+                c
+            }
+            None => target,
+        };
+        mem.clock = Some(t);
         if out.fields_version != paths.version {
             paths.set(out.fields_version, out.fields.clone());
         }
@@ -802,7 +830,18 @@ fn draw(
             quads += 1;
         }
         // The specialists (sappers, tunnelers, heat-sink bots, foresters).
-        crate::units::draw(&units, now, real_t, &v, [l, b, r, t], cell_px, lc, &mut pos, &mut col);
+        // Solid ground for feet: the screen's copy of the world (plants
+        // aren't ground).
+        if flora.len() != body.0.mats.len() {
+            *flora = (0..body.0.mats.len()).map(|m| body.0.mats.get(m as dft_sim::materials::MatId).name.starts_with("flora ")).collect();
+        }
+        let mirror = run.0.mirror.read();
+        let solid = |x: i64, y: i64| -> bool {
+            let m = mirror.get(x, y).unwrap_or_else(|| body.0.material(x, y));
+            m != dft_sim::materials::VACUUM && !flora.get(m as usize).copied().unwrap_or(false)
+        };
+        crate::units::draw(&units, now, real_t, &v, [l, b, r, t], cell_px, lc, &solid, &mut pos, &mut col);
+        drop(mirror);
         if pos.is_empty() {
             pos.extend_from_slice(&[[0.0; 3]; 3]);
             col.extend_from_slice(&[[0.0; 4]; 3]);
@@ -826,11 +865,22 @@ fn draw(
     // trailing; and a scatter of the swarm's own lights from the wreckage.
     // The bigger the blast, the more of all of it, and the longer it lasts.
     for b in new_booms {
+        let (vl, vb, vr, vt) = v.bounds();
+        // Only a blast the player can see flashes and shakes the screen;
+        // anywhere else the physics just runs.
+        let near = b.x > vl && b.x < vr && b.y > vb && b.y < vt;
+        if b.buried && near {
+            // A charge going off underground: a white flash over everything,
+            // the screen shaking (the proving ground's flash and shake).
+            let kt = (b.size_m as f64 / 2.2 / 14.0).powi(3);
+            crate::fx::flash((0.35 + (kt + 1.0).log10() * 0.22).min(1.0) as f32);
+            crate::fx::shake((3.0 + 5.0 * (kt * 10.0 + 1.0).log10()).min(22.0) as f32);
+        }
         if shown.len() < 600 {
             shown.push((b, real));
         }
     }
-    shown.retain(|(bm, at)| real - at < boom_life(bm.size_m));
+    shown.retain(|(bm, at)| real - at < if bm.buried { BURIED_LIFE_S } else { boom_life(bm.size_m) });
     if let Some(mut mm) = meshes.get_mut(&meshes_r.booms) {
         let mut pos = take_positions(&mut mm);
         let mut col = Vec::new();
@@ -868,12 +918,37 @@ fn draw(
             if bm.x < l - reach || bm.x > r + reach || bm.y < b - reach || bm.y > t + reach || budget == 0 {
                 continue;
             }
+            // Its light: a flash, fading as it burns out.
+            let fade = (1.0 - age / life).clamp(0.0, 1.0) as f32;
+            crate::fx::emit(bm.x, bm.y, size * 1.4 + 8.0, [255.0, 200.0, 140.0], 2.2 * fade * fade);
             let seed = dft_sim::noise::hash((bm.x * 8.0) as i64 as u64, (bm.y * 8.0) as i64, (*at * 10.0) as i64, 0xB0_0B);
             let u = |k: u64| crate::rnd::unit(seed, k);
             // Up (away from the body), and along the ground.
             let rr = (bm.x * bm.x + bm.y * bm.y).sqrt().max(1.0);
             let (ux, uy) = (bm.x / rr, bm.y / rr);
             let g = 9.0;
+            if bm.buried {
+                // Underground: a shock ring of blocks running out at 260 m/s
+                // to twice the blast's reach, fading (the proving ground's
+                // rings); and the broken rock's heat, glowing and fading.
+                let max = bm.size_m as f64;
+                let rr_ = age * 260.0;
+                if rr_ <= max {
+                    let a = (1.0 - rr_ / max) as f32 * 0.8;
+                    let n = ((rr_ * 6.0) as usize).max(24);
+                    let mut seen = std::collections::HashSet::new();
+                    for k in 0..n {
+                        let ang = k as f64 / n as f64 * std::f64::consts::TAU;
+                        let c = ((bm.x + ang.cos() * rr_).round(), (bm.y + ang.sin() * rr_).round());
+                        if seen.insert((c.0 as i64, c.1 as i64)) {
+                            block(&mut pos, &mut col, c.0, c.1, 1.0, [1.0, 0.94, 0.82, a]);
+                        }
+                    }
+                }
+                let heat = (1.0 - age / BURIED_LIFE_S).clamp(0.0, 1.0) as f32;
+                crate::fx::emit(bm.x, bm.y, max * 0.55, [255.0, 150.0, 50.0], 1.3 * heat * heat);
+                continue;
+            }
             let start = pos.len();
             // The core: a ragged white-hot knot, gone in a blink.
             let core_t = 0.12 + 0.02 * size.sqrt();
@@ -971,6 +1046,9 @@ fn draw(
 
 
 /// How long an explosion this big takes to burn out (seconds).
+/// How long a buried blast's heat is seen glowing (s).
+const BURIED_LIFE_S: f64 = 4.0;
+
 fn boom_life(size_m: f32) -> f64 {
     (1.4 + 0.06 * size_m as f64).min(6.0)
 }

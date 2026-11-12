@@ -335,6 +335,9 @@ pub struct Boom {
     pub x: f64,
     pub y: f64,
     pub size_m: f32,
+    /// A sapper's charge going off underground: a flash, a shock ring and
+    /// the heat it leaves, rather than a fireball in the open.
+    pub buried: bool,
 }
 
 /// Something worth a look happened (for the camera director).
@@ -655,6 +658,22 @@ pub struct Sim {
     tunnelers: Vec<Bore>,
     /// Rock cracked by a Tunneler's passing: quicker to cut, and no depth penalty.
     fractured: CellSet,
+    /// Loose debris (blast rubble, thrown and fallen rock): cutters pick it
+    /// up in `harvester.loose_s` a cell, whatever it is.
+    loose: CellSet,
+    /// Materials that are always loose (dead plant matter).
+    loose_mat: Vec<bool>,
+    /// Melt from sapper blasts, cooling: (tick it turns to glass, cell).
+    melt: std::collections::VecDeque<(u64, (i64, i64))>,
+    /// Loose rubble and melt that may still move: it falls, slides down
+    /// slopes, and melt runs sideways into cracks (the proving ground's
+    /// settling), a cell or two a tick.
+    settling: CellSet,
+    /// Broken rock in the air on its way out of a plume, thrown a little at
+    /// a time: (tick, from, material, velocity).
+    plume_out: std::collections::VecDeque<(u64, (f64, f64), MatId, (f64, f64))>,
+    /// Sappers caught in a blast, going off a moment later: (tick, where).
+    chain: Vec<(u64, (f64, f64))>,
     next_tunnel_k: usize,
     /// Metres of shaft bored, shafts finished, and kg the drills cut.
     pub tunnel_m: u64,
@@ -677,6 +696,11 @@ pub struct Sim {
     /// For a renderer keeping its own copy of every drone's flight leg: the
     /// drones whose leg changed since it last looked. None keeps no record.
     pub leg_track: Option<LegTrack>,
+    /// The plants' life cycle (src/life.rs), if anything lives here.
+    pub life: Option<crate::life::Life>,
+    /// Sapper plumes since the screen last looked: where the broken rock
+    /// blasts out of the ground, and how hard (for the dust column).
+    pub plumes: Vec<(f64, f64, f32)>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -839,8 +863,19 @@ impl Sim {
     }
 
     /// A swarm with nothing yet: no ring, no dig face, no drones.
-    fn blank(world: World, eco: Economy) -> Self {
+    fn blank(mut world: World, eco: Economy) -> Self {
         let n_up = eco.upgrade.len();
+        // Dead plant matter is always loose debris.
+        let loose_mat = ["deadwood", "leaf litter", "humus"].iter().fold(vec![false; world.planet.mats.len()], |mut v, n| {
+            if let Ok(m) = world.planet.mats.id(n) {
+                v[m as usize] = true;
+            }
+            v
+        });
+        let life = crate::life::Life::new(&world);
+        if let Some(l) = &life {
+            world.life_watch = l.watch();
+        }
         let sandbox = Sandbox::new(&world);
         let bodies = Bodies::new(&world);
         let stock = crate::recipes::Stock::new(&world.planet.mats.elements);
@@ -976,6 +1011,12 @@ impl Sim {
             tunneler_unlocked: false,
             tunnelers: Vec::new(),
             fractured: CellSet::default(),
+            loose: CellSet::default(),
+            loose_mat,
+            melt: Default::default(),
+            settling: CellSet::default(),
+            plume_out: Default::default(),
+            chain: Vec::new(),
             next_tunnel_k: 0,
             tunnel_m: 0,
             tunnels_done: 0,
@@ -986,6 +1027,8 @@ impl Sim {
             counts: [0; 6],
             free_drones: None,
             leg_track: None,
+            life,
+            plumes: Vec::new(),
         };
         sim
     }
@@ -1340,7 +1383,7 @@ impl Sim {
     }
 
     fn explode(&mut self, at: (f64, f64), cells: u32, size_m: f32) {
-        self.booms.push(Boom { x: at.0, y: at.1, size_m });
+        self.booms.push(Boom { x: at.0, y: at.1, size_m, buried: false });
         // Blasts dig: a crater a good part of the blast's size, where it
         // reaches the ground.
         self.crater(at, size_m as f64 * 0.45);
@@ -1776,6 +1819,10 @@ impl Sim {
                 self.liquid_landed(c, m);
                 continue;
             }
+            // Fallen and thrown rock lies loose, and may roll on.
+            self.loose.insert(c);
+            self.world.set_look(c.0, c.1, crate::world::Look::RUBBLE);
+            self.settling.insert(c);
             self.sandbox.wake_around_filled(&self.world, c);
             self.apply_sandbox(vec![Change { cell: c, from: VACUUM, to: m }]);
         }
@@ -2003,6 +2050,7 @@ impl Sim {
     fn open_cell(&mut self, c: (i64, i64)) {
         self.sandbox.wake_around_filled(&self.world, c);
         self.open_cell_woken(c);
+        self.unsettle_around(c);
     }
 
     /// As `open_cell`, for a cell whose neighbourhood the sandbox has already
@@ -2134,13 +2182,14 @@ impl Sim {
                         let (cx, cy) = (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
                         // Rock cracked by a Tunneler: open access (no depth
                         // penalty) and quicker to cut.
-                        let cracked = any_cracked && self.fractured.contains(&c);
+                        let loose = self.is_loose(c, f.mat);
+                        let cracked = loose || (any_cracked && self.fractured.contains(&c));
                         if cracked && packet {
                             continue;
                         }
                         let depth = if cracked || !peel { 0.0 } else { (self.world.planet.radius - (cx * cx + cy * cy).sqrt()).max(0.0) };
                         let eff = fly + self.eco.seed_swarm.peel * depth;
-                        let true_dig = self.eco.harvester.dig_s_for(mat.hardness) / dig_mult * if cracked { self.eco.tunneler.fracture_dig } else { 1.0 };
+                        let true_dig = if loose { self.eco.harvester.loose_s } else { self.eco.harvester.dig_s_for(mat.hardness) / dig_mult * if cracked { self.eco.tunneler.fracture_dig } else { 1.0 } };
                         let est_dig = se * true_dig + (1.0 - se) * typ_dig;
                         let est_kg = se * left.min(hold) + (1.0 - se) * typ_kg;
                         // Worth: the cell's own multiplier, plus the smell of richer
@@ -2333,8 +2382,18 @@ impl Sim {
 
     /// Seconds to cut `kg` of material `m` at cell c.
     fn cut_s(&self, c: (i64, i64), m: MatId, kg: f64) -> f64 {
+        if self.is_loose(c, m) {
+            // Loose debris: picked up, not cut.
+            let d = self.world.planet.mats.get(m).density.max(1.0);
+            return self.eco.harvester.loose_s * (kg / d).max(0.05);
+        }
         let per_load = self.dig_s(m) * if self.fractured.contains(&c) { self.eco.tunneler.fracture_dig } else { 1.0 };
         per_load * (kg / self.eco.harvester.cargo_kg).max(0.05) / self.cold_factor(c, m)
+    }
+
+    /// Whether cell c (holding m) is loose debris.
+    fn is_loose(&self, c: (i64, i64), m: MatId) -> bool {
+        self.loose_mat.get(m as usize).copied().unwrap_or(false) || (!self.loose.is_empty() && self.loose.contains(&c))
     }
 
     /// Cold ground: how much faster a cutter works it (and the same, how
@@ -4477,6 +4536,9 @@ impl Sim {
         }
         v.push(format!("built   {} cutters, {} haulers", self.prod.built[0], self.prod.built[1]));
         v.extend(self.specialist_lines());
+        if let Some(l) = &self.life {
+            v.extend(l.lines());
+        }
         v
     }
 
@@ -4700,6 +4762,7 @@ impl Sim {
             self.apply_sandbox(changes);
         }
         self.throw_ejecta();
+        self.blast_tick();
         let t2 = clock();
         self.body_tick();
         let t3 = clock();
@@ -4734,6 +4797,19 @@ impl Sim {
             self.packet_work();
             self.tunnel_work();
             self.specialists_work();
+            if let Some(l) = &mut self.life {
+                // Drones still cutting in or round a square (cells reserved
+                // for them within a square's width of it).
+                let reserved = &self.reserved;
+                let busy = |sx: i64, sy: i64| {
+                    let s = crate::life::SQUARE;
+                    if reserved.is_empty() {
+                        return false;
+                    }
+                    ((sy - 1) * s..(sy + 2) * s).any(|y| ((sx - 1) * s..(sx + 2) * s).any(|x| reserved.contains_key(&(x, y))))
+                };
+                l.work(&mut self.world, &mut self.sandbox, self.tick, self.eco.tick_s, &busy);
+            }
             self.hauler_work();
             self.site_safety();
             self.waiting_heat();
@@ -5123,7 +5199,7 @@ pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches f
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 11; // 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
+const SIM_VERSION: u32 = 12; // 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -5344,12 +5420,19 @@ impl Sim {
             put_cell(o, c);
         }
         // Rock in the air: lost on loading (only its materials are kept, for the books).
-        let air = self.bodies.cells();
+        let mut air: Vec<MatId> = self.bodies.cells().into_iter().map(|(_, m)| m).collect();
+        air.extend(self.plume_out.iter().map(|p| p.2));
         o.u64(air.len() as u64);
-        for (_, m) in air {
+        for m in air {
             o.u16(m);
         }
         self.write_units(o);
+        self.write_units_12(o);
+        o.f64s(&self.world.ledger.grown);
+        o.u8(self.life.is_some() as u8);
+        if let Some(l) = &self.life {
+            l.write(o);
+        }
     }
 
     /// Rebuild a game from what `write_save` wrote, on the same body, with
@@ -5571,6 +5654,18 @@ impl Sim {
         }
         if version >= 11 {
             s.read_units(r)?;
+        }
+        if version >= 12 {
+            s.read_units_12(r)?;
+            s.resettle();
+            s.world.ledger.grown = r.f64s()?;
+            let had = r.u8()? != 0;
+            if had {
+                match &mut s.life {
+                    Some(l) => l.read(r)?,
+                    None => return Err("this save has a life cycle but the body has no life".into()),
+                }
+            }
         }
         s.sandbox.time_s = s.time();
         s.legs_all_changed();

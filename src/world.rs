@@ -92,7 +92,42 @@ pub struct World {
     /// Where cells changed since a renderer last looked; None (the default)
     /// keeps no record. Not part of the world's state or its hash.
     pub track: Option<Track>,
+    /// Living plant tissue, by material (empty: nobody is watching). Cells
+    /// of it taken away or set down by a falling body are noted in
+    /// `life_notes` for the life cycle (src/life.rs) to act on. Not part of
+    /// the world's state or its hash.
+    pub life_watch: Vec<bool>,
+    pub life_notes: LifeNotes,
+    /// How cells look beyond their material: a blast's marks (see `Look`),
+    /// by leaf, then by cell. Gone when the cell changes. Not part of the
+    /// world's state or its hash (the simulation saves them).
+    pub looks: HashMap<(i64, i64), HashMap<(i64, i64), u8>>,
 }
+
+/// How a cell looks beyond its material, as the sapper proving ground draws
+/// what a blast leaves: cracked through, a big piece held together, loose
+/// rubble, rubble baked by the heat, molten, and melt cooled to glass.
+pub struct Look;
+impl Look {
+    pub const CRACKED: u8 = 1;
+    pub const HELD: u8 = 2;
+    pub const RUBBLE: u8 = 3;
+    pub const BAKED: u8 = 4;
+    pub const MELT: u8 = 5;
+    pub const GLASS: u8 = 6;
+}
+
+/// What happened to living plant cells since the life cycle last looked.
+#[derive(Default, Debug)]
+pub struct LifeNotes {
+    /// Cells of living tissue taken away (cut, burned, eaten, blown up).
+    pub removed: Vec<(i64, i64, MatId)>,
+    /// Living tissue set down by a falling body: cut off, it will die.
+    pub landed: Vec<(i64, i64, MatId)>,
+}
+
+/// Notes kept at most (nobody may be reading them).
+const LIFE_NOTES_MAX: usize = 200_000;
 
 /// Changed places, for a renderer: 64 x 64 blocks of cells (cell >> 6) and
 /// whole rectangles (x0, x1, y0, y1; ends exclusive) emptied at once.
@@ -154,7 +189,7 @@ impl World {
         let initial_kg = est.iter().enumerate().map(|(i, c)| c * planet.mats.get(i as crate::materials::MatId).density).collect();
         let mut nodes = NodeMap::default();
         nodes.insert(key(root), Entry { state: State::Untouched, totals: est });
-        World { ledger: Ledger::new(initial_kg), planet, tree, nodes, track: None }
+        World { ledger: Ledger::new(initial_kg), planet, tree, nodes, track: None, life_watch: Vec::new(), life_notes: LifeNotes::default(), looks: HashMap::new() }
     }
 
     /// Note that cell (x, y) changed (if anyone is keeping track).
@@ -163,6 +198,76 @@ impl World {
         if let Some(t) = &mut self.track {
             t.blocks.insert((x >> 6, y >> 6));
         }
+    }
+
+    /// Give cell (x, y) a look (0: none).
+    pub fn set_look(&mut self, x: i64, y: i64, look: u8) {
+        let k = self.leaf_of(x, y);
+        if look == 0 {
+            if let Some(l) = self.looks.get_mut(&k) {
+                if l.remove(&(x, y)).is_some() {
+                    if l.is_empty() {
+                        self.looks.remove(&k);
+                    }
+                    self.mark(x, y);
+                }
+            }
+            return;
+        }
+        self.looks.entry(k).or_default().insert((x, y), look);
+        self.mark(x, y);
+    }
+
+    /// Cell (x, y)'s look (0: none).
+    pub fn look(&self, x: i64, y: i64) -> u8 {
+        self.looks.get(&self.leaf_of(x, y)).and_then(|l| l.get(&(x, y)).copied()).unwrap_or(0)
+    }
+
+    /// A changed cell loses its look.
+    #[inline]
+    fn clear_look(&mut self, x: i64, y: i64) {
+        if !self.looks.is_empty() {
+            let k = self.leaf_of(x, y);
+            if let Some(l) = self.looks.get_mut(&k) {
+                l.remove(&(x, y));
+                if l.is_empty() {
+                    self.looks.remove(&k);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn watched(&self, m: MatId) -> bool {
+        self.life_watch.get(m as usize).copied().unwrap_or(false)
+    }
+
+    #[inline]
+    fn note_removed(&mut self, x: i64, y: i64, from: MatId) {
+        if self.watched(from) && self.life_notes.removed.len() < LIFE_NOTES_MAX {
+            self.life_notes.removed.push((x, y, from));
+        }
+    }
+
+    /// Life changing cell (x, y) to `to`: a plant growing into open space or
+    /// water, or tissue wilting and rotting. The difference in mass is
+    /// taken from (or given back to) the air and water life lives on, and
+    /// booked as grown. Not noted for the life cycle. Returns what was there.
+    pub fn life_cell(&mut self, x: i64, y: i64, to: MatId) -> Option<MatId> {
+        if !self.in_bounds(x, y) || self.material(x, y) == to {
+            return None;
+        }
+        let watch = std::mem::take(&mut self.life_watch);
+        let put = self.put(x, y, to);
+        self.life_watch = watch;
+        let (leaf, from) = put?;
+        let mats = &self.planet.mats;
+        self.ledger.grown[from as usize] -= mats.get(from).density;
+        self.ledger.grown[to as usize] += mats.get(to).density;
+        if to == VACUUM {
+            self.collapse_from(leaf);
+        }
+        Some(from)
     }
 
     fn nm(&self) -> usize {
@@ -524,6 +629,8 @@ impl World {
         e.totals[m as usize] -= 1.0;
         self.adjust_ancestors(leaf, m as usize, -1.0);
         self.mark(x, y);
+        self.note_removed(x, y, m);
+        self.clear_look(x, y);
         self.ledger.mine(&self.planet.mats, m, 1.0);
         self.ledger.cell_ops += 1;
         self.collapse_from(leaf);
@@ -545,6 +652,8 @@ impl World {
         if from != to {
             e.totals[from as usize] -= 1.0;
             e.totals[to as usize] += 1.0;
+            self.note_removed(x, y, from);
+            self.clear_look(x, y);
             // One walk up for both materials (each count changes exactly as
             // two separate walks would change it).
             let mut p = self.parent(leaf);
@@ -568,6 +677,14 @@ impl World {
         let (ma, mb) = (self.material(a.0, a.1), self.material(b.0, b.1));
         if ma == mb || !self.in_bounds(a.0, a.1) || !self.in_bounds(b.0, b.1) {
             return false;
+        }
+        // (A look goes with the cell that had it.)
+        if !self.looks.is_empty() {
+            let (la, lb) = (self.look(a.0, a.1), self.look(b.0, b.1));
+            if la != lb {
+                self.set_look(a.0, a.1, lb);
+                self.set_look(b.0, b.1, la);
+            }
         }
         // A swap moves one cell of each material between the two leaves, so
         // only the nodes holding one leaf and not the other change: below
@@ -687,6 +804,9 @@ impl World {
         }
         self.put(x, y, m);
         self.ledger.aloft[m as usize] -= self.planet.mats.get(m).density;
+        if self.watched(m) && self.life_notes.landed.len() < LIFE_NOTES_MAX {
+            self.life_notes.landed.push((x, y, m));
+        }
         true
     }
 
@@ -723,6 +843,7 @@ impl World {
         self.adjust_ancestors(leaf, from as usize, -1.0);
         self.adjust_ancestors(leaf, to as usize, 1.0);
         self.mark(x, y);
+        self.note_removed(x, y, from);
         self.ledger.change(&self.planet.mats, from, to);
         Some(from)
     }

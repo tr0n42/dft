@@ -94,6 +94,8 @@ pub struct Stats {
     /// What production is doing: the fabricator, the factory's bays and
     /// the orders waiting (counted once a second).
     pub production: Vec<String>,
+    /// A plant growing back, to look at (dev panel: "show regrowth").
+    pub regrowth: Option<(f64, f64)>,
     pub haulers_built: u64,
     /// Drones out of work, resting in the mother swarm (counted once a second).
     pub resting: usize,
@@ -172,6 +174,8 @@ pub struct Out {
     pub mother: (f64, f64, f64),
     /// Explosions not yet shown.
     pub booms: Vec<dft_sim::swarm::Boom>,
+    /// Sapper plumes (where, how hard), for the dust columns.
+    pub plumes: Vec<(f64, f64, f32)>,
     /// The ground's height round the body (see Sim::ground_heights), and
     /// which sweep it is from.
     pub heights: Option<(u64, Arc<Vec<f32>>)>,
@@ -206,6 +210,8 @@ pub struct Out {
 pub struct Mirror {
     origin: (i64, i64),
     leaves: std::collections::HashMap<(i64, i64), dft_sim::world::LeafSnap>,
+    /// Cells' looks beyond their material (a blast's marks), by leaf.
+    looks: std::collections::HashMap<(i64, i64), Arc<std::collections::HashMap<(i64, i64), u8>>>,
 }
 
 impl Mirror {
@@ -215,6 +221,36 @@ impl Mirror {
         let (lx, ly) = ((x - self.origin.0).div_euclid(L), (y - self.origin.1).div_euclid(L));
         let snap = self.leaves.get(&(lx, ly))?;
         Some(snap.at(x - self.origin.0 - lx * L, y - self.origin.1 - ly * L))
+    }
+
+    /// Cell (x, y)'s look (0: none; see dft_sim::world::Look).
+    pub fn look(&self, x: i64, y: i64) -> u8 {
+        if self.looks.is_empty() {
+            return 0;
+        }
+        const L: i64 = dft_sim::totals::LEAF;
+        let k = ((x - self.origin.0).div_euclid(L), (y - self.origin.1).div_euclid(L));
+        self.looks.get(&k).and_then(|l| l.get(&(x, y)).copied()).unwrap_or(0)
+    }
+
+    /// Every cell with a look in leaves overlapping the rectangle (cells).
+    pub fn looks_in(&self, x0: i64, x1: i64, y0: i64, y1: i64, mut f: impl FnMut((i64, i64), u8)) {
+        const L: i64 = dft_sim::totals::LEAF;
+        let (a, b) = (((x0 - self.origin.0).div_euclid(L), (y0 - self.origin.1).div_euclid(L)), ((x1 - self.origin.0).div_euclid(L), (y1 - self.origin.1).div_euclid(L)));
+        if (b.0 - a.0 + 1) * (b.1 - a.1 + 1) > 4096 {
+            return;
+        }
+        for ly in a.1..=b.1 {
+            for lx in a.0..=b.0 {
+                if let Some(l) = self.looks.get(&(lx, ly)) {
+                    for (&c, &k) in l.iter() {
+                        if c.0 >= x0 && c.0 <= x1 && c.1 >= y0 && c.1 <= y1 {
+                            f(c, k);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -255,7 +291,7 @@ impl Shared {
 pub fn start(mut sim: Sim, control: Control) -> Arc<Shared> {
     sim.world.track = Some(Default::default());
     sim.leg_track = Some(Default::default());
-    let mirror = Mirror { origin: sim.world.leaf_corner(0, 0), leaves: Default::default() };
+    let mirror = Mirror { origin: sim.world.leaf_corner(0, 0), leaves: Default::default(), looks: Default::default() };
     let shared = Arc::new(Shared { sim: Mutex::new(sim), mirror: parking_lot::RwLock::new(mirror), readers: AtomicUsize::new(0), out: Mutex::new(Out::default()), control: Mutex::new(control), blasts: Mutex::new(Vec::new()) });
     let s = shared.clone();
     std::thread::Builder::new().name("simulation".into()).spawn(move || run(&s)).expect("start the simulation thread");
@@ -427,6 +463,7 @@ fn run(shared: &Shared) {
                         .collect();
                     stats.built_for_room = s.cutters_built_for_room;
                     stats.production = s.production_lines();
+                    stats.regrowth = s.life.as_ref().and_then(|l| l.showcase());
                     stats.room = s.last_room;
                 }
                 if stats.director.len() != s.director_log.len() || stats.director.last() != s.director_log.back() {
@@ -447,6 +484,7 @@ fn run(shared: &Shared) {
                     None
                 };
                 let mut booms = s.take_booms();
+                let mut plumes = std::mem::take(&mut s.plumes);
                 let mut happenings = s.take_happenings();
                 // The screen's copy of the ground: the leaves changed since,
                 // then a few hundred of those waiting, nearest the view first.
@@ -481,11 +519,34 @@ fn run(shared: &Shared) {
                         chosen.truncate(MIRROR_PER_BATCH);
                     }
                     let snaps: Vec<((i64, i64), Option<dft_sim::world::LeafSnap>)> = chosen.iter().map(|&(lx, ly)| ((lx, ly), s.world.leaf_snapshot(lx, ly))).collect();
+                    let looks: Vec<Option<Arc<std::collections::HashMap<(i64, i64), u8>>>> = chosen.iter().map(|k| s.world.looks.get(k).map(|l| Arc::new(l.clone()))).collect();
                     let mut blocks = Vec::with_capacity(snaps.len() * 4);
                     {
                         let mut m = shared.mirror.write();
-                        for (k, snap) in snaps {
+                        for ((k, snap), look) in snaps.into_iter().zip(looks) {
                             pending.remove(&k);
+                            // Its looks changed: every square of it is drawn again.
+                            let same = match (m.looks.get(&k), &look) {
+                                (None, None) => true,
+                                (Some(a), Some(b)) => **a == **b,
+                                _ => false,
+                            };
+                            if !same {
+                                let (x0, y0) = (o.0 + k.0 * L, o.1 + k.1 * L);
+                                for sy in 0..L / 8 {
+                                    for sx in 0..L / 8 {
+                                        fine.push(((x0 >> 3) + sx, (y0 >> 3) + sy));
+                                    }
+                                }
+                            }
+                            match look {
+                                Some(l) => {
+                                    m.looks.insert(k, l);
+                                }
+                                None => {
+                                    m.looks.remove(&k);
+                                }
+                            }
                             // Which 8 x 8 squares of it changed (all of it,
                             // where it was as generated before or is now).
                             let (x0, y0) = (o.0 + k.0 * L, o.1 + k.1 * L);
@@ -548,6 +609,9 @@ fn run(shared: &Shared) {
                 out.step_max = step_max_shown;
                 if out.happenings.len() < 2000 {
                     out.happenings.append(&mut happenings);
+                }
+                if out.plumes.len() < 200 {
+                    out.plumes.append(&mut plumes);
                 }
                 if out.booms.len() < 2000 {
                     out.booms.append(&mut booms);

@@ -24,6 +24,7 @@
 
 use super::*;
 use crate::production::{Order, Unit};
+use crate::world::Look;
 
 /// What a body offers the specialists' skills, from what it was made of.
 #[derive(Debug, Clone, Copy, Default)]
@@ -166,6 +167,8 @@ pub enum WalkState {
     Stride,
     /// Working: creeping from one catch to the next.
     Work,
+    /// Leaping over ground too steep to walk (a cliff, a mountain).
+    Jump,
 }
 
 #[derive(Debug, Clone)]
@@ -191,7 +194,74 @@ pub struct Walker {
     /// The cell its claws are on, and when it last cut (tick).
     claw: (f64, f64),
     cut_at: u64,
+    /// How high its body rides over the ground (m): over the treetops.
+    lift: f64,
+    /// A leap under way: from (direction, ground radius) to (direction,
+    /// ground radius), the arc's top (radius), seconds into it, and its length.
+    jump: Option<Jump>,
+    /// Where its laser's last sweep began (it ends at `laser`).
+    laser_from: (f64, f64),
+    /// What is in its bag: cells of each material.
+    load: Vec<(MatId, f64)>,
 }
+
+/// A walker's leap over ground too steep to walk.
+#[derive(Debug, Clone, Copy)]
+pub struct Jump {
+    a0: f64,
+    g0: f64,
+    a1: f64,
+    g1: f64,
+    top: f64,
+    t: f64,
+    dur: f64,
+}
+
+/// A full bag a walker dropped, waiting on the ground for couriers to carry
+/// it up to the mother swarm. What it holds is only credited when it gets
+/// there.
+#[derive(Debug, Clone)]
+pub struct Bag {
+    id: u32,
+    kind: Unit,
+    pos: (f64, f64),
+    kg: f64,
+    load: Vec<(MatId, f64)>,
+    /// The tick couriers lift it away.
+    due: u64,
+}
+
+/// Seconds a bag is seen rising with its couriers after they lift it.
+const BAG_RISE_S: f64 = 3.0;
+
+/// Walkers leap ground steeper than this (rise over run, looked at this far
+/// ahead), landing where it is gentler than this, at most this far off;
+/// they clear the highest ground on the way by this much and cover this
+/// many metres a second.
+const LEAP_SLOPE: f64 = 1.0;
+const LEAP_LOOK_M: f64 = 24.0;
+const LEAP_MIN_RISE_M: f64 = 20.0;
+const LEAP_LAND_SLOPE: f64 = 0.45;
+const LEAP_MAX_M: f64 = 800.0;
+const LEAP_CLEAR_M: f64 = 25.0;
+const LEAP_SPEED: f64 = 35.0;
+
+/// The most cells a claw shears off a plant at one go.
+const SECTION_MAX: usize = 60;
+
+/// Rubble cells moved per tick, at most.
+const SETTLE_PER_TICK: usize = 20_000;
+
+/// A walker towers over all plant life: its body rides this far over the
+/// tallest plant round it (and never lower than that over bare ground); it
+/// rises and settles this fast (m/s).
+const LIFT_MIN_M: f64 = 50.0;
+const LIFT_OVER_M: f64 = 50.0;
+const LIFT_RATE: f64 = 5.0;
+/// How far round it (m, each way) it looks for the tallest plant.
+const CANOPY_ROUND_M: i64 = 30;
+/// The tallest plants a walker looks over (m).
+const CANOPY_MAX_M: i64 = 160;
 
 /// All the specialists, and what the director knows of their work.
 #[derive(Debug, Clone, Default)]
@@ -199,6 +269,8 @@ pub struct Units {
     pub(super) sappers: Vec<Sapper>,
     pub(super) bots: Vec<HeatBot>,
     pub(super) walkers: Vec<Walker>,
+    /// Full bags on the ground, waiting for couriers.
+    pub(super) bags: Vec<Bag>,
     /// Tunnelers (built as units: wide shafts; see `Sim::tunnel_work`).
     pub(super) bores: Vec<Bore>,
     next_id: u32,
@@ -216,6 +288,8 @@ pub struct Units {
     pub frozen_kg: f64,
     pub harvested_kg: f64,
     pub fires: u64,
+    /// Leaps walkers made over ground too steep to walk.
+    pub leaps: u64,
     /// Sappers destroyed (by a blast, magma, heat or falling rock), each of
     /// which went off.
     pub destroyed: u64,
@@ -238,6 +312,14 @@ pub struct UnitView {
     pub c: f32,
     /// A point it is working on (laser mark, tentacle tip, drill head...).
     pub mark: (f64, f64),
+    /// A walker's body height over the ground (m); 0 for the rest.
+    pub lift: f32,
+    /// A walker's laser sweep: where it began (it ends at `mark`), and the
+    /// game time it fired; its claw's last cut and when.
+    pub sweep_from: (f64, f64),
+    pub fired_at: f64,
+    pub claw: (f64, f64),
+    pub cut_at: f64,
 }
 
 impl UnitView {
@@ -249,6 +331,10 @@ impl UnitView {
 
 /// How often the director looks for magma pools and plants (s).
 const SCAN_EVERY_S: f64 = 30.0;
+/// The heart of a sapper's blast is heated to this (K): it melts, and cools
+/// to glass after about this long (s).
+const MELT_K: f64 = 2000.0;
+const MELT_COOL_S: f64 = 25.0;
 /// Ground this hot next to a sapper (a blast's heat) destroys it, and so sets it off.
 const SAPPER_COOK_K: f64 = 800.0;
 
@@ -331,6 +417,26 @@ impl Sim {
         };
         let r = self.mother_radius();
         (a.cos() * r, a.sin() * r)
+    }
+
+    /// The terrain's height in direction `a`: the first solid cell coming
+    /// down that isn't a plant, dead plant matter or loose rubble.
+    fn terrain_at(&self, a: f64) -> f64 {
+        let (ux, uy) = (a.cos(), a.sin());
+        let mut r = (self.world.planet.surface_radius(ux, uy) + 64.0).min(self.world.planet.max_radius + 1.0);
+        for _ in 0..4000 {
+            if r <= 0.0 {
+                break;
+            }
+            let c = ((ux * r).floor() as i64, (uy * r).floor() as i64);
+            let m = self.world.material(c.0, c.1);
+            let soft = self.units.is_flora.get(m as usize).copied().unwrap_or(false) || self.loose_mat.get(m as usize).copied().unwrap_or(false) || self.loose.contains(&c);
+            if m != VACUUM && !soft {
+                return r + 0.5;
+            }
+            r -= 1.0;
+        }
+        r.max(0.0)
     }
 
     /// The ground's height in direction `a`: the first cell met coming down
@@ -450,28 +556,18 @@ impl Sim {
         self.sappers_work();
         self.bots_work();
         self.walkers_work();
+        // Melt cools to glass.
+        while let Some(&(due, c)) = self.melt.front() {
+            if due > self.tick {
+                break;
+            }
+            self.melt.pop_front();
+            if self.world.look(c.0, c.1) == Look::MELT {
+                self.world.set_look(c.0, c.1, Look::GLASS);
+            }
+        }
     }
 
-    /// Keep what was dug out by a specialist (a share of it: the rest is
-    /// crushed to spoil): mined from the world, credited, into the stockpile.
-    fn take_cell(&mut self, c: (i64, i64), keep: f64) {
-        let m = self.world.material(c.0, c.1);
-        if m == VACUUM {
-            return;
-        }
-        let mat = self.world.planet.mats.get(m);
-        let (kg, mult) = (mat.density, mat.multiplier);
-        let comp = mat.composition.clone();
-        self.world.mine_cell(c.0, c.1);
-        self.progress.remove(&c);
-        self.reserved.remove(&c);
-        self.open_cell(c);
-        let credited = kg * mult * keep;
-        self.stock.add_composition(&self.world.planet.mats.elements, &comp, kg * keep);
-        self.mass += credited;
-        self.delivered_credited += credited;
-        self.window_mined += kg;
-    }
 
     // ---- Sappers ----
 
@@ -510,7 +606,9 @@ impl Sim {
     /// From where it landed, its way down: the deepest open cell it can
     /// crawl to (along cracks and through caves, always touching rock)
     /// within crawl_m, stopping at the first deep enough.
-    fn sapper_path(&self, from: (f64, f64), ground_r: f64, want: f64, limit_m: f64) -> Vec<(i64, i64)> {
+    /// Spots within `keep_off` of `taken` (where other sappers are headed)
+    /// are left to them.
+    fn sapper_path(&self, from: (f64, f64), ground_r: f64, want: f64, limit_m: f64, taken: &[(f64, f64)], keep_off: f64) -> Vec<(i64, i64)> {
         let start = cell_of(from);
         let solid = |c: (i64, i64)| self.world.material(c.0, c.1) != VACUUM;
         let crawlable = |c: (i64, i64)| {
@@ -524,7 +622,8 @@ impl Sim {
         while let Some(c) = queue.pop_front() {
             let (_, d) = parent[&c];
             let depth = ground_r - len(mid(c));
-            if depth > best_depth {
+            let claimed = taken.iter().any(|&t| dist2(t, mid(c)) < keep_off * keep_off);
+            if depth > best_depth && !claimed {
                 best = c;
                 best_depth = depth;
                 if depth >= want {
@@ -576,7 +675,10 @@ impl Sim {
                 SapState::Fly => {
                     if approach(&mut s.pos, s.goal, sp.fly_speed) {
                         s.state = SapState::Crawl;
-                        s.path = self.sapper_path(s.pos, s.ground_r, s.want, sp.crawl_m);
+                        // Where the others are going (the end of their way).
+                        let taken: Vec<(f64, f64)> = self.units.sappers.iter().filter(|o| o.id != s.id && !o.path.is_empty()).map(|o| mid(*o.path.last().unwrap())).collect();
+                        let r = sp.radius_m_per_cbrt_kt * sp.yield_kt.max(0.0).cbrt();
+                        s.path = self.sapper_path(s.pos, s.ground_r, s.want, sp.crawl_m, &taken, 0.7 * r);
                         s.along = 0.0;
                     }
                 }
@@ -613,9 +715,24 @@ impl Sim {
                             // just stops at and arms.
                             break;
                         }
-                        for o in [-1.0, 0.0, 1.0] {
+                        // What it bores through spouts up out of the hole and
+                        // comes down round it as loose rubble.
+                        for (k, o) in [-1.0, 0.0, 1.0].into_iter().enumerate() {
                             let q = cell_of((next.0 + side.0 * o, next.1 + side.1 * o));
-                            self.take_cell(q, sp.spoil_recovery);
+                            let Some(m) = self.world.lift_cell(q.0, q.1) else { continue };
+                            self.progress.remove(&q);
+                            self.reserved.remove(&q);
+                            self.open_cell(q);
+                            let h = hash(self.tick, q.0, q.1, 0xD811 + k as u64);
+                            let vs = 45.0 + 35.0 * crate::noise::unit(h);
+                            let vx = (crate::noise::unit(hash(h, 1, 0, 0)) - 0.5) * 3.0;
+                            let from = (s.pos.0 + down.0 * 2.0, s.pos.1 + down.1 * 2.0);
+                            if let Some(t) = self.bodies.throw(&mut self.world, from, m, (down.0 * vs + side.0 * vx, down.1 * vs + side.1 * vx)) {
+                                self.loose.insert(t);
+                                self.world.set_look(t.0, t.1, Look::RUBBLE);
+                                self.settling.insert(t);
+                                self.scrap_landed(t);
+                            }
                         }
                         let _ = c;
                         s.pos = next;
@@ -677,65 +794,384 @@ impl Sim {
     /// Sappers within `r` of a blast at `at` are destroyed by it, and go
     /// off a moment later (the next second): one blast can set off a chain.
     pub(super) fn sappers_caught(&mut self, at: (f64, f64), r: f64) {
-        let arm = self.eco.units.sapper.arm_s;
+        let mut caught = Vec::new();
         for s in self.units.sappers.iter_mut() {
-            if s.armed_s >= 0.0 && dist2(s.pos, at) < r * r && s.armed_s < arm {
-                s.state = SapState::Arm;
-                s.armed_s = arm;
+            if s.armed_s >= 0.0 && dist2(s.pos, at) < r * r {
+                // Gone from the field; it goes off a moment later.
+                s.armed_s = -1.0;
                 self.units.destroyed += 1;
+                caught.push((s.id, s.pos));
+            }
+        }
+        self.units.sappers.retain(|s| s.armed_s >= 0.0);
+        for (id, pos) in caught {
+            let d = 0.12 + 0.1 * crate::noise::unit(hash(self.tick, id as i64, 0, 0xC4A1));
+            let due = self.tick + self.ticks(d);
+            self.chain.push((due, pos));
+        }
+    }
+
+    /// The blasts' moving parts, every tick: sappers caught in a blast going
+    /// off, broken rock pouring out of a plume, and loose rubble and melt
+    /// settling.
+    pub(super) fn blast_tick(&mut self) {
+        if !self.chain.is_empty() {
+            let tick = self.tick;
+            let (now, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.chain).into_iter().partition(|c| c.0 <= tick);
+            self.chain = later;
+            let y = self.eco.units.sapper.yield_kt;
+            for (_, at) in now {
+                self.sapper_blast(at, y);
+            }
+        }
+        while let Some(&(due, from, m, vel)) = self.plume_out.front() {
+            if due > self.tick {
+                break;
+            }
+            self.plume_out.pop_front();
+            if let Some(t) = self.bodies.throw(&mut self.world, from, m, vel) {
+                self.loose.insert(t);
+                self.world.set_look(t.0, t.1, Look::RUBBLE);
+                self.settling.insert(t);
+                self.scrap_landed(t);
+            }
+        }
+        if !self.settling.is_empty() {
+            self.settle();
+        }
+    }
+
+    /// Loose rubble settles, as in the proving ground: down, or down a
+    /// slope (both cells beside it open); melt runs sideways too, into the
+    /// cracks. Bottom first. Cells that can't move stop being looked at
+    /// until something beside them opens.
+    fn settle(&mut self) {
+        let mut cells: Vec<(i64, i64)> = self.settling.iter().copied().collect();
+        // Nearest the centre first (the proving ground goes bottom up).
+        cells.sort_unstable_by_key(|c| (c.0 * c.0 + c.1 * c.1, c.0, c.1));
+        self.settling = CellSet::default();
+        let mut moves = 0usize;
+        for c in cells {
+            if moves >= SETTLE_PER_TICK {
+                self.settling.insert(c);
+                continue;
+            }
+            let m = self.world.material(c.0, c.1);
+            if m == VACUUM || !self.loose.contains(&c) {
+                continue;
+            }
+            let look = self.world.look(c.0, c.1);
+            if look == Look::GLASS {
+                continue;
+            }
+            let melt = look == Look::MELT;
+            let p = mid(c);
+            let r = len(p).max(1.0);
+            let step = |u: f64| if u > 0.38 { 1 } else if u < -0.38 { -1 } else { 0 };
+            let down = (-step(p.0 / r), -step(p.1 / r));
+            let side = (-down.1, down.0);
+            let open = |q: (i64, i64)| self.world.material(q.0, q.1) == VACUUM;
+            let h = hash(self.tick, c.0, c.1, 0x5E77);
+            let s = if h & 1 == 0 { 1 } else { -1 };
+            let below = (c.0 + down.0, c.1 + down.1);
+            let mut to = None;
+            if open(below) {
+                to = Some(below);
+            } else {
+                for k in [s, -s] {
+                    let sd = (c.0 + side.0 * k, c.1 + side.1 * k);
+                    let dg = (below.0 + side.0 * k, below.1 + side.1 * k);
+                    if open(sd) && open(dg) {
+                        to = Some(dg);
+                        break;
+                    }
+                }
+                if to.is_none() && melt {
+                    let sd = (c.0 + side.0 * s, c.1 + side.1 * s);
+                    if open(sd) && crate::noise::unit(hash(h, 1, 0, 0)) < 0.6 {
+                        to = Some(sd);
+                    }
+                }
+            }
+            let Some(n) = to else { continue };
+            if !self.world.swap_cells(c, n) {
+                continue;
+            }
+            moves += 1;
+            self.loose.remove(&c);
+            self.loose.insert(n);
+            self.progress.remove(&c);
+            self.reserved.remove(&c);
+            self.sandbox.wake_around(c);
+            self.sandbox.wake_around(n);
+            self.apply_sandbox(vec![crate::sandbox::Change { cell: c, from: m, to: VACUUM }, crate::sandbox::Change { cell: n, from: VACUUM, to: m }]);
+            self.settling.insert(n);
+            // What rested on it may follow.
+            self.unsettle_around(c);
+        }
+    }
+
+    /// Loose cells round an opened cell `c` may be free to move again.
+    pub(super) fn unsettle_around(&mut self, c: (i64, i64)) {
+        if self.loose.is_empty() {
+            return;
+        }
+        for d in [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            let q = (c.0 + d.0, c.1 + d.1);
+            if self.loose.contains(&q) {
+                self.settling.insert(q);
             }
         }
     }
 
-    /// A sapper goes off at `at`: a flash and a shock wave (for the screen),
-    /// a cavity blown out at the heart, and all the rock round about cracked
-    /// through (ragged at the edge; hard rock holds best), so cutters take
-    /// it in half the time.
+    /// A sapper goes off at `at`, exactly as the sapper proving ground
+    /// (mockups/sapper-proving-ground.html) has it:
+    /// - rays out from the charge, each spending its energy on what it passes
+    ///   through (little in open passages and rubble, far more in hard rock);
+    ///   everything a ray gets through is broken; where one gives out in
+    ///   rock, now and then a crack runs on, further in harder rock;
+    /// - hard rock away from the heart does not always go to rubble: some of
+    ///   it holds together in big pieces, split off along seams (cracked);
+    /// - the heart of it melts; of the rest, what the blast still had plenty
+    ///   of energy for is thrown clear (softer rock harder), the rest left
+    ///   loose where it was, as rubble;
+    /// - a plume: if there is an open way from the blast up to the surface
+    ///   (cracks, caves, its drill hole, through the rubble), most blasts
+    ///   drive a share of the rubble up it and out of the top;
+    /// - sappers caught in it go off too.
+    /// Rubble, melt and thrown rock are loose: cutters pick them up quickly.
     pub fn sapper_blast(&mut self, at: (f64, f64), yield_kt: f64) {
         let sp = &self.eco.units.sapper;
         let r = sp.radius_m_per_cbrt_kt * yield_kt.max(0.0).cbrt();
-        self.booms.push(Boom { x: at.0, y: at.1, size_m: (2.0 * r) as f32 });
+        self.booms.push(Boom { x: at.0, y: at.1, size_m: (2.2 * r) as f32, buried: true });
         self.explosions += 1;
         self.units.blasts += 1;
         self.happen(Happening::Explosion, at);
-        let core = (0.3 * r).min(12.0);
-        self.crater(at, core);
         let c0 = cell_of(at);
-        let ci = core.ceil() as i64;
-        for dy in -ci..=ci {
-            for dx in -ci..=ci {
-                if ((dx * dx + dy * dy) as f64) <= core * core {
-                    self.sandbox.heat_cell(&self.world, (c0.0 + dx, c0.1 + dy), BLAST_K);
-                }
-            }
-        }
-        let seed = hash(self.tick, c0.0, c0.1, 0x5A99);
-        let ri = r.ceil() as i64 + 1;
+        let blast = hash(self.tick, c0.0, c0.1, 0x5A99);
+        let up = unit_of(at);
+        let hard = |s: &Self, m: MatId| (s.world.planet.mats.get(m).hardness as f64 / 10.0).clamp(0.05, 0.95);
+        // The rays.
+        let rays = ((r * 10.0).round() as usize).clamp(360, 5000);
+        let reach = (r * 2.4).min(1500.0) as i64;
+        let mut broken: CellMap<(f64, f64)> = CellMap::default();
+        let mut order: Vec<(i64, i64)> = Vec::new();
         let mut cracked = 0u64;
-        for dy in -ri..=ri {
-            for dx in -ri..=ri {
-                let c = (c0.0 + dx, c0.1 + dy);
+        for ray in 0..rays {
+            let a = ray as f64 / rays as f64 * std::f64::consts::TAU + (crate::noise::unit(hash(blast, ray as i64, 0, 5)) - 0.5) * 0.01;
+            let (ca, sa) = crate::noise::cos_sin(a);
+            let mut e = 1.0;
+            for step in 0..reach {
+                let c = ((at.0 + ca * step as f64).round() as i64, (at.1 + sa * step as f64).round() as i64);
                 let m = self.world.material(c.0, c.1);
                 if m == VACUUM {
+                    e -= 0.12 / r;
                     continue;
                 }
-                let mat = self.world.planet.mats.get(m);
-                if mat.state != State::Solid && mat.state != State::Powder {
+                if self.loose.contains(&c) || broken.contains_key(&c) {
+                    e -= 0.3 / r;
                     continue;
                 }
-                let d = ((dx * dx + dy * dy) as f64).sqrt();
-                let n = crate::noise::unit(hash(seed, dx, dy, 1));
-                if d > r * (0.75 + 0.35 * n) * (1.0 - 0.03 * mat.hardness as f64) {
+                let st = self.world.planet.mats.get(m).state;
+                if st == State::Liquid || st == State::Gas {
+                    e -= 0.12 / r;
                     continue;
                 }
-                if self.fractured.insert(c) {
-                    cracked += 1;
+                let h = hard(self, m);
+                e -= (0.45 + 1.7 * h) / r;
+                if e <= 0.0 {
+                    // A crack may run on, wandering, further in harder rock.
+                    if ray % 9 == 0 {
+                        let (mut ax, mut ay, mut aa) = (c.0 as f64, c.1 as f64, a);
+                        let len = (r * (0.2 + 0.7 * h)) as i64;
+                        for k in 0..len {
+                            aa += (crate::noise::unit(hash(blast, ray as i64, k, 9)) - 0.5) * (1.2 - h);
+                            let (cc, ss) = crate::noise::cos_sin(aa);
+                            ax += cc;
+                            ay += ss;
+                            let q = (ax.round() as i64, ay.round() as i64);
+                            if self.world.material(q.0, q.1) == VACUUM {
+                                break;
+                            }
+                            if self.fractured.insert(q) {
+                                cracked += 1;
+                            }
+                            self.world.set_look(q.0, q.1, Look::CRACKED);
+                        }
+                    }
+                    break;
+                }
+                broken.insert(c, (e, step as f64));
+                order.push(c);
+            }
+        }
+        // What was broken: held in big pieces, melted, thrown clear, or left
+        // loose as rubble.
+        let piece = |x: i64, y: i64, size: f64| -> u64 {
+            let (i0, j0) = ((x as f64 / size).floor() as i64, (y as f64 / size).floor() as i64);
+            let (mut best, mut id) = (f64::INFINITY, 0u64);
+            for i in i0 - 1..=i0 + 1 {
+                for j in j0 - 1..=j0 + 1 {
+                    let px = (i as f64 + crate::noise::unit(hash(41, i, j, 0))) * size;
+                    let py = (j as f64 + crate::noise::unit(hash(43, j, i, 0))) * size;
+                    let d = (px - x as f64).powi(2) + (py - y as f64).powi(2);
+                    if d < best {
+                        best = d;
+                        id = hash(0x91EC, i, j, 0);
+                    }
+                }
+            }
+            id
+        };
+        let mut rubble: Vec<(i64, i64)> = Vec::new();
+        let mut thrown = 0u64;
+        let power = (0.6 + yield_kt.max(0.0).cbrt() * 0.4).min(3.0);
+        for &c in &order {
+            let Some(&(e, d)) = broken.get(&c) else { continue };
+            let m = self.world.material(c.0, c.1);
+            if m == VACUUM {
+                continue;
+            }
+            let h = hard(self, m);
+            if h > 0.6 && e < 0.85 && d > r * 0.3 {
+                let size = 5.0 + 9.0 * h;
+                let id = piece(c.0, c.1, size);
+                if crate::noise::unit(hash(id, blast as i64, 0, 61)) < (h - 0.5) * 1.3 {
+                    let edge = piece(c.0 + 1, c.1, size) != id || piece(c.0 - 1, c.1, size) != id || piece(c.0, c.1 + 1, size) != id || piece(c.0, c.1 - 1, size) != id;
+                    if !edge {
+                        // Held together, cracked through, hot.
+                        if self.fractured.insert(c) {
+                            cracked += 1;
+                        }
+                        self.world.set_look(c.0, c.1, Look::HELD);
+                        continue;
+                    }
+                }
+            }
+            // The heart melts.
+            if d < r * 0.3 * (1.15 - 0.4 * h) {
+                self.sandbox.heat_cell(&self.world, c, MELT_K);
+                self.loose.insert(c);
+                self.settling.insert(c);
+                self.world.set_look(c.0, c.1, Look::MELT);
+                let cool = self.ticks(MELT_COOL_S * (0.7 + 0.6 * crate::noise::unit(hash(blast, c.0, c.1, 21))));
+                self.melt.push_back((self.tick + cool, c));
+                continue;
+            }
+            if e > 0.35 + 0.35 * h {
+                // Thrown clear, out from the blast.
+                let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
+                self.progress.remove(&c);
+                self.reserved.remove(&c);
+                self.open_cell(c);
+                let p = mid(c);
+                let dd = ((p.0 - at.0).powi(2) + (p.1 - at.1).powi(2)).sqrt().max(1e-6);
+                let (ox, oy) = ((p.0 - at.0) / dd, (p.1 - at.1) / dd);
+                let sp = (18.0 + 70.0 * e * (1.0 - 0.6 * h)) * (0.7 + 0.6 * crate::noise::unit(hash(blast, c.0, c.1, 12))) * power;
+                let vel = (ox * sp + up.0 * 6.0, oy * sp + up.1 * 6.0);
+                thrown += 1;
+                if let Some(t) = self.bodies.throw(&mut self.world, p, m, vel) {
+                    self.loose.insert(t);
+                    self.world.set_look(t.0, t.1, Look::RUBBLE);
+                    self.settling.insert(t);
+                    self.scrap_landed(t);
+                }
+            } else {
+                // Left loose where it was: baked near the heart.
+                self.loose.insert(c);
+                self.settling.insert(c);
+                self.world.set_look(c.0, c.1, if d < r * 0.6 { Look::BAKED } else { Look::RUBBLE });
+                rubble.push(c);
+            }
+        }
+        let _ = thrown;
+        self.units.cracked += cracked + broken.len() as u64;
+        // The plume: most blasts find a way up.
+        if crate::noise::unit(hash(blast, 0, 0, 77)) < 0.9 && !rubble.is_empty() {
+            if let Some(mouth) = self.way_up(c0, r) {
+                let share = 0.35 + 0.25 * crate::noise::unit(hash(blast, 0, 0, 7));
+                let take = ((rubble.len() as f64 * share).round() as usize).min(rubble.len());
+                // A random share of the rubble, the same every run.
+                let mut pick: Vec<(u64, (i64, i64))> = rubble.iter().map(|&c| (hash(blast, c.0, c.1, 13), c)).collect();
+                pick.sort_unstable();
+                let pw = (0.8 + yield_kt.max(0.0).cbrt() * 0.35).min(4.0);
+                // How long it pours out (the proving ground's plume).
+                let dur = 0.6 + 0.35 * (yield_kt * 10.0 + 1.0).log10();
+                if self.plumes.len() < 100 {
+                    let m = mid(mouth);
+                    self.plumes.push((m.0, m.1, pw as f32));
+                }
+                let mu = unit_of(mid(mouth));
+                let side = (-mu.1, mu.0);
+                for (k, &(h, c)) in pick.iter().take(take).enumerate() {
+                    let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
+                    self.loose.remove(&c);
+                    self.progress.remove(&c);
+                    self.reserved.remove(&c);
+                    self.open_cell(c);
+                    let vx = (crate::noise::unit(hash(h, k as i64, 1, 0)) - 0.5) * 16.0 * pw;
+                    let vy = (50.0 + 60.0 * crate::noise::unit(hash(h, k as i64, 2, 0))) * pw;
+                    let from = mid(mouth);
+                    let from = (from.0 + side.0 * (crate::noise::unit(hash(h, k as i64, 3, 0)) - 0.5) * 2.0, from.1 + side.1 * (crate::noise::unit(hash(h, k as i64, 3, 0)) - 0.5) * 2.0);
+                    // Out over the plume's time, a steady stream.
+                    let at = self.tick + self.ticks(dur * k as f64 / take.max(1) as f64);
+                    self.plume_out.push_back((at, from, m, (side.0 * vx + mu.0 * vy, side.1 * vx + mu.1 * vy)));
                 }
             }
         }
-        self.units.cracked += cracked;
         // Sappers caught in it go off too, a moment later.
         self.sappers_caught(at, r * 0.9);
+    }
+
+    /// An open way up from cell `from` to open sky over the ground (through
+    /// open space and the cells in `loose`), within reach of a blast of
+    /// radius `r`: the cell where it comes out, if there is one.
+    fn way_up(&self, from: (i64, i64), r: f64) -> Option<(i64, i64)> {
+        let limit = r * 3.0 + 90.0;
+        let mut seen = CellSet::default();
+        let mut queue = std::collections::VecDeque::new();
+        seen.insert(from);
+        queue.push_back(from);
+        // The ground's height by direction, worked out as needed.
+        let mut tops: HashMap<i64, f64> = HashMap::new();
+        let r0 = len(mid(from)).max(1.0);
+        while let Some(c) = queue.pop_front() {
+            if seen.len() > 40_000 {
+                break;
+            }
+            let p = mid(c);
+            let a = p.1.atan2(p.0);
+            let key = (a * r0).round() as i64;
+            let top = *tops.entry(key).or_insert_with(|| self.ground_at(a, true));
+            if len(p) >= top {
+                return Some(c);
+            }
+            // Up, across, down, and up a diagonal (never down one), as the
+            // proving ground looks, in the frame of the ground here.
+            let pu = unit_of(mid(c));
+            let st = |u: f64| if u > 0.38 { 1 } else if u < -0.38 { -1 } else { 0 };
+            let upv = (st(pu.0), st(pu.1));
+            let side = (-upv.1, upv.0);
+            let dirs = [upv, side, (-side.0, -side.1), (-upv.0, -upv.1), (upv.0 + side.0, upv.1 + side.1), (upv.0 - side.0, upv.1 - side.1)];
+            for d in dirs {
+                let n = (c.0 + d.0, c.1 + d.1);
+                if seen.contains(&n) {
+                    continue;
+                }
+                let dx = (n.0 - from.0) as f64;
+                let dy = (n.1 - from.1) as f64;
+                if dx * dx + dy * dy > limit * limit {
+                    continue;
+                }
+                let m = self.world.material(n.0, n.1);
+                if m != VACUUM && !self.loose.contains(&n) && !self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
+                    continue;
+                }
+                seen.insert(n);
+                queue.push_back(n);
+            }
+        }
+        None
     }
 
     // ---- Tunnelers ----
@@ -961,7 +1397,7 @@ impl Sim {
         let start = self.mother_over(a);
         let id = self.units.new_id();
         let life = self.eco.units.forester.life_s;
-        self.units.walkers.push(Walker { id, kind: u, state: WalkState::Drop, pos: start, prev: start, moved_at: self.tick, goal_a: a, facing: 1.0, life, timer: 0.0, bag: 0.0, taken_kg: 0.0, laser: start, laser_at: 0, claw: start, cut_at: 0 });
+        self.units.walkers.push(Walker { id, kind: u, state: WalkState::Drop, pos: start, prev: start, moved_at: self.tick, goal_a: a, facing: 1.0, life, timer: 0.0, bag: 0.0, taken_kg: 0.0, laser: start, laser_at: 0, claw: start, cut_at: 0, lift: LIFT_MIN_M, load: Vec::new(), jump: None, laser_from: start });
     }
 
     fn walkers_work(&mut self) {
@@ -989,6 +1425,7 @@ impl Sim {
                     }
                 }
                 WalkState::Unfold => {
+                    self.walker_stand(&mut w);
                     w.timer += 1.0;
                     if w.timer >= 3.0 {
                         w.state = WalkState::Stride;
@@ -1008,93 +1445,318 @@ impl Sim {
                     };
                     let step = fs.stride_speed / r;
                     w.facing = if da >= 0.0 { 1.0 } else { -1.0 };
-                    let na = if da.abs() <= step { w.goal_a } else { a + step * w.facing };
-                    let g = self.ground_at(na, true);
-                    w.pos = (na.cos() * g, na.sin() * g);
-                    if da.abs() <= step {
-                        w.state = WalkState::Work;
-                        w.timer = 0.0;
+                    // It works as it goes: claws and laser on what it passes.
+                    self.walker_stand(&mut w);
+                    self.walker_hands(&mut w, &fs);
+                    if let Some(j) = self.leap_over(a, w.facing, da.abs() * r) {
+                        w.jump = Some(j);
+                        w.state = WalkState::Jump;
+                        self.units.leaps += 1;
+                    } else {
+                        let na = if da.abs() <= step { w.goal_a } else { a + step * w.facing };
+                        let g = self.ground_at(na, true);
+                        w.pos = (na.cos() * g, na.sin() * g);
+                        self.walker_rise(&mut w);
+                        if da.abs() <= step {
+                            w.state = WalkState::Work;
+                            w.timer = 0.0;
+                        }
+                    }
+                }
+                WalkState::Jump => {
+                    // Along its arc, a second at a time; down on the far side.
+                    match w.jump.as_mut() {
+                        Some(j) => {
+                            j.t = (j.t + 1.0).min(j.dur);
+                            let k = j.t / j.dur;
+                            let aa = j.a0 + (j.a1 - j.a0) * k;
+                            let base = j.g0 + (j.g1 - j.g0) * k;
+                            let mid_line = (j.g0 + j.g1) / 2.0;
+                            let rr = base + 4.0 * (j.top - mid_line) * k * (1.0 - k);
+                            w.pos = (aa.cos() * rr, aa.sin() * rr);
+                            if j.t >= j.dur {
+                                w.jump = None;
+                                w.state = WalkState::Stride;
+                                self.walker_stand(&mut w);
+                            }
+                        }
+                        None => w.state = WalkState::Stride,
                     }
                 }
                 WalkState::Work => {
+                    self.walker_stand(&mut w);
                     self.walker_feed(&mut w, &fs);
                 }
             }
             self.units.walkers[k] = w;
         }
-        self.units.walkers.retain(|w| w.life > 0.0);
-    }
-
-    /// One second of a forester's work where it stands: shear the nearest
-    /// plants in reach into its bag, creep toward the next, now and then set
-    /// the ground cover alight; with nothing left near, stride to the next
-    /// stand.
-    fn walker_feed(&mut self, w: &mut Walker, fs: &crate::economy::ForesterSpec) {
-        let a = w.pos.1.atan2(w.pos.0);
-        let r = len(w.pos).max(1.0);
-        let up = unit_of(w.pos);
-        let side = (-up.1, up.0);
-        // Plant cells near it (claws reach a little ahead and above).
-        let reach = fs.reach_m;
-        let ri = reach.ceil() as i64 + 1;
-        let c0 = cell_of(w.pos);
-        let mut near: Vec<(f64, (i64, i64))> = Vec::new();
-        for dy in -ri - 4..=ri + 4 {
-            for dx in -ri - 4..=ri + 4 {
-                let c = (c0.0 + dx, c0.1 + dy);
-                let m = self.world.material(c.0, c.1);
-                if !self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
-                    continue;
-                }
-                let p = mid(c);
-                let along = (p.0 - w.pos.0) * side.0 + (p.1 - w.pos.1) * side.1;
-                let height = (p.0 - w.pos.0) * up.0 + (p.1 - w.pos.1) * up.1;
-                // Its claws reach about its height up and `reach` round.
-                if height < -2.0 || height > reach + 4.0 || along.abs() > reach + 4.0 {
-                    continue;
-                }
-                near.push((along.abs() + 0.3 * height.max(0.0), c));
+        // A walker at the end of its life leaves its bag for the couriers.
+        for k in 0..self.units.walkers.len() {
+            if self.units.walkers[k].life <= 0.0 && self.units.walkers[k].bag > 0.0 {
+                let mut w = self.units.walkers[k].clone();
+                self.drop_bag(&mut w);
+                self.units.walkers[k] = w;
             }
         }
-        near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        let cuts = (1.0 / fs.cut_s.max(0.05)).round().max(1.0) as usize;
-        let mut cut = 0;
-        for &(_, c) in near.iter().take(cuts) {
-            let m = self.world.material(c.0, c.1);
-            let kg = self.world.planet.mats.get(m).density;
-            self.take_cell(c, 1.0);
-            w.bag += kg;
-            w.taken_kg += kg;
-            self.units.harvested_kg += kg;
-            w.claw = mid(c);
-            w.cut_at = self.tick;
-            cut += 1;
+        self.units.walkers.retain(|w| w.life > 0.0);
+        self.bags_work();
+    }
+
+    /// Ground too steep to walk just ahead of a walker at direction `a`
+    /// going `facing` (+1 counter-clockwise), `left_m` short of its goal: a
+    /// leap over it to the first walkable ground beyond, if there is any.
+    fn leap_over(&self, a: f64, facing: f64, left_m: f64) -> Option<Jump> {
+        let r = self.terrain_at(a).max(1.0);
+        let at = |m: f64| self.terrain_at(a + facing * m / r);
+        let g0 = at(0.0);
+        // Steep just ahead, and for a good height? (Not a bump, a tree, a
+        // fallen trunk or a heap of rubble.)
+        let ahead = LEAP_LOOK_M.min(left_m.max(1.0));
+        let rise = (at(ahead) - g0).abs();
+        if rise / ahead < LEAP_SLOPE || rise < LEAP_MIN_RISE_M {
+            return None;
         }
-        if w.bag >= fs.bag_kg {
-            // Couriers latch on and carry it up; a new one grows.
-            w.bag = 0.0;
+        // The first spot past it gentle enough to stand on, and the highest
+        // ground on the way.
+        let mut top = g0;
+        let mut m = ahead;
+        while m <= LEAP_MAX_M {
+            let g = at(m);
+            top = top.max(g);
+            let slope = (at(m + 4.0) - at(m - 4.0)).abs() / 8.0;
+            if m > ahead + 8.0 && slope < LEAP_LAND_SLOPE {
+                let dur = (m / LEAP_SPEED).max(2.0).ceil();
+                return Some(Jump { a0: a, g0, a1: a + facing * m / r, g1: g, top: top + LEAP_CLEAR_M, t: 0.0, dur });
+            }
+            m += 4.0;
         }
-        // Its laser: now and then, the ground cover some way off is set alight.
-        w.timer += 1.0;
-        if w.timer >= fs.burn_every_s {
-            w.timer = 0.0;
-            let h = hash(self.tick, w.id as i64, 0, 0xF12E);
-            let off = (crate::noise::unit(h) * 2.0 - 1.0) * fs.laser_m;
-            let aa = a + off / r;
-            let g = self.ground_at(aa, true);
-            let (ux, uy) = (aa.cos(), aa.sin());
-            for hgt in 0..12 {
-                let c = cell_of((ux * (g + hgt as f64), uy * (g + hgt as f64)));
+        None
+    }
+
+    /// Keep a standing walker's feet on the ground (the swarm may have eaten
+    /// it away under it) and its body over the treetops.
+    fn walker_stand(&self, w: &mut Walker) {
+        let a = w.pos.1.atan2(w.pos.0);
+        let g = self.ground_at(a, true);
+        w.pos = (a.cos() * g, a.sin() * g);
+        self.walker_rise(w);
+    }
+
+    /// Its body rides over the tallest plant round it: up as the forest rises,
+    /// down as it is cleared.
+    fn walker_rise(&self, w: &mut Walker) {
+        let want = (self.canopy_at(w.pos) + LIFT_OVER_M).max(LIFT_MIN_M);
+        w.lift += (want - w.lift).clamp(-LIFT_RATE, LIFT_RATE);
+    }
+
+    /// Leave a walker's bag on the ground behind it for the couriers, and
+    /// start a new one.
+    fn drop_bag(&mut self, w: &mut Walker) {
+        if w.bag <= 0.0 {
+            return;
+        }
+        let up = unit_of(w.pos);
+        let side = (-up.1, up.0);
+        let behind = (w.pos.0 - side.0 * w.facing * 6.0, w.pos.1 - side.1 * w.facing * 6.0);
+        let a = behind.1.atan2(behind.0);
+        let g = self.ground_at(a, true);
+        let pos = (a.cos() * g, a.sin() * g);
+        let (pickup_s, speed) = (self.eco.units.forester.pickup_s, self.eco.units.forester.courier_speed.max(1.0));
+        let m = self.mother_pos();
+        let d = ((m.0 - pos.0).powi(2) + (m.1 - pos.1).powi(2)).sqrt();
+        let id = self.units.new_id();
+        let due = self.tick + self.ticks(pickup_s + d / speed);
+        self.units.bags.push(Bag { id, kind: w.kind, pos, kg: w.bag, load: std::mem::take(&mut w.load), due });
+        w.bag = 0.0;
+    }
+
+    /// Bags the couriers have reached go up to the mother swarm: what they
+    /// hold is credited now.
+    fn bags_work(&mut self) {
+        let tick = self.tick;
+        // Credited as the couriers lift it; seen rising for a few seconds
+        // more, then gone.
+        let gone = self.ticks(BAG_RISE_S);
+        let mut arrived = Vec::new();
+        for b in self.units.bags.iter_mut() {
+            if b.due <= tick && !b.load.is_empty() {
+                arrived.append(&mut b.load);
+            }
+        }
+        self.units.bags.retain(|b| tick < b.due + gone);
+        for (m, cells) in arrived {
+            self.credit(m, cells);
+        }
+    }
+
+    /// Credit `cells` cells of material `m` arriving at the mother swarm.
+    fn credit(&mut self, m: MatId, cells: f64) {
+        let mat = self.world.planet.mats.get(m);
+        let kg = mat.density * cells;
+        let credited = kg * mat.multiplier;
+        let comp = mat.composition.clone();
+        self.stock.add_composition(&self.world.planet.mats.elements, &comp, kg);
+        self.mass += credited;
+        self.delivered_credited += credited;
+        self.window_mined += kg;
+    }
+
+    /// The top of the plants round `pos` (within a few metres), as height
+    /// over the ground there (m); 0 if bare.
+    fn canopy_at(&self, pos: (f64, f64)) -> f64 {
+        let up = unit_of(pos);
+        let side = (-up.1, up.0);
+        let mut top = 0.0f64;
+        for k in (-CANOPY_ROUND_M..=CANOPY_ROUND_M).step_by(3) {
+            let k = k as f64;
+            let base = (pos.0 + side.0 * k, pos.1 + side.1 * k);
+            for h in (1..=CANOPY_MAX_M).rev() {
+                if (h as f64) <= top {
+                    break;
+                }
+                let c = cell_of((base.0 + up.0 * h as f64, base.1 + up.1 * h as f64));
                 let m = self.world.material(c.0, c.1);
                 if self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
-                    self.sandbox.heat_cell(&self.world, c, 1100.0);
-                    self.units.fires += 1;
-                    w.laser = mid(c);
-                    w.laser_at = self.tick;
+                    top = h as f64;
                     break;
                 }
             }
         }
+        top
+    }
+
+    /// One second of a forester's work where it stands, as the mockup works
+    /// it: a claw goes for the nearest plant within reach ahead (behind if
+    /// none) and shears a section off its top (about 4 m of it) into the
+    /// bag; its laser sweeps the ground some way off, setting the cover and
+    /// the small plants alight; with nothing in reach it creeps toward the
+    /// nearest plant, and with nothing near, strides to the next stand.
+    fn walker_feed(&mut self, w: &mut Walker, fs: &crate::economy::ForesterSpec) {
+        let a = w.pos.1.atan2(w.pos.0);
+        let r = len(w.pos).max(1.0);
+        let cut = self.walker_hands(w, fs);
+        self.walker_creep(w, fs, a, r, cut);
+    }
+
+    /// A forester's claws and laser, a second's worth, wherever it is: the
+    /// cells it sheared.
+    fn walker_hands(&mut self, w: &mut Walker, fs: &crate::economy::ForesterSpec) -> usize {
+        let a = w.pos.1.atan2(w.pos.0);
+        let r = len(w.pos).max(1.0);
+        let up = unit_of(w.pos);
+        let side = (-up.1, up.0);
+        let flora = |s: &Self, c: (i64, i64)| s.units.is_flora.get(s.world.material(c.0, c.1) as usize).copied().unwrap_or(false);
+        // The plant to go for: the nearest column of plant within reach
+        // (ahead first), and its top.
+        let reach = fs.reach_m;
+        let mut best: Option<(f64, f64, (i64, i64))> = None;
+        let mut along_m = -reach;
+        while along_m <= reach {
+            let base = (w.pos.0 + side.0 * along_m * w.facing, w.pos.1 + side.1 * along_m * w.facing);
+            for h in (0..=(w.lift.ceil() as i64 + 2)).rev() {
+                let c = cell_of((base.0 + up.0 * h as f64, base.1 + up.1 * h as f64));
+                if flora(self, c) {
+                    // Either side, nearest first (its claws are one a side).
+                    let d = along_m.abs();
+                    if best.is_none_or(|b| d < b.0) {
+                        best = Some((d, h as f64, c));
+                    }
+                    break;
+                }
+            }
+            along_m += 1.0;
+        }
+        let mut cut = 0;
+        if let Some((_, top_h, c)) = best {
+            // A section off its top: the plant's cells in the top 4 m round
+            // that column.
+            let tc = mid(c);
+            let mut section: Vec<(i64, i64)> = Vec::new();
+            for dy in -6..=6 {
+                for dx in -6..=6 {
+                    let q = (c.0 + dx, c.1 + dy);
+                    if !flora(self, q) {
+                        continue;
+                    }
+                    let p = mid(q);
+                    let along = (p.0 - tc.0) * side.0 + (p.1 - tc.1) * side.1;
+                    let height = (p.0 - w.pos.0) * up.0 + (p.1 - w.pos.1) * up.1;
+                    if along.abs() <= 4.5 && height >= top_h - 4.0 {
+                        section.push(q);
+                    }
+                }
+            }
+            section.sort_unstable();
+            for q in section.into_iter().take(SECTION_MAX) {
+                let m = self.world.material(q.0, q.1);
+                let kg = self.world.planet.mats.get(m).density;
+                // Into its bag: credited once couriers carry the bag up.
+                self.world.mine_cell(q.0, q.1);
+                self.progress.remove(&q);
+                self.reserved.remove(&q);
+                self.open_cell(q);
+                match w.load.iter_mut().find(|e| e.0 == m) {
+                    Some(e) => e.1 += 1.0,
+                    None => w.load.push((m, 1.0)),
+                }
+                w.bag += kg;
+                w.taken_kg += kg;
+                self.units.harvested_kg += kg;
+                cut += 1;
+            }
+            w.claw = tc;
+            w.cut_at = self.tick;
+        }
+        if w.bag >= fs.bag_kg {
+            // Full, and nothing to hand it to: it drops the bag for the
+            // couriers to pick up, grows a new one and carries on.
+            self.drop_bag(w);
+        }
+        // Its laser: every couple of seconds, a sweep along the ground off to
+        // one side, setting alight what grows there.
+        w.timer += 1.0;
+        let h = hash(self.tick, w.id as i64, 0, 0xF12E);
+        if w.timer >= fs.burn_every_s + crate::noise::unit(h) {
+            w.timer = 0.0;
+            let d = if crate::noise::unit(hash(h, 1, 0, 0)) < 0.5 { -1.0 } else { 1.0 };
+            let from_m = d * (10.0 + 20.0 * crate::noise::unit(hash(h, 2, 0, 0)));
+            let to_m = from_m + d * (15.0 + 25.0 * crate::noise::unit(hash(h, 3, 0, 0)));
+            let mut lit = 0;
+            let (mut first, mut last) = (None, None);
+            let n = (to_m - from_m).abs().ceil() as i64;
+            for k in 0..=n {
+                let m_along = from_m + d * k as f64;
+                let aa = a + m_along / r;
+                let g = self.ground_at(aa, false);
+                let (ux, uy) = (aa.cos(), aa.sin());
+                let gp = (ux * g, uy * g);
+                if first.is_none() {
+                    first = Some(gp);
+                }
+                last = Some(gp);
+                // The ground cover and small plants there (down to the ground).
+                for hgt in -2..6 {
+                    let c = cell_of((ux * (g + hgt as f64), uy * (g + hgt as f64)));
+                    if flora(self, c) {
+                        self.sandbox.heat_cell(&self.world, c, 1100.0);
+                        lit += 1;
+                        break;
+                    }
+                }
+            }
+            self.units.fires += lit;
+            if let (Some(f), Some(l)) = (first, last) {
+                w.laser_from = f;
+                w.laser = l;
+                w.laser_at = self.tick;
+            }
+        }
+        cut
+    }
+
+    /// With nothing in its claws' reach: creep toward the nearest plant, or
+    /// stride off to the next stand.
+    fn walker_creep(&mut self, w: &mut Walker, fs: &crate::economy::ForesterSpec, a: f64, r: f64, cut: usize) {
         if cut == 0 {
             // Nothing in its claws' reach: creep toward the nearest plant
             // near by, else stride off to the next stand.
@@ -1138,14 +1800,14 @@ impl Sim {
         let sec = self.ticks(1.0) as f64 * self.eco.tick_s;
         let mut out = Vec::new();
         for s in &self.units.sappers {
-            out.push(UnitView { kind: Unit::Sapper, id: s.id, state: s.state as u8, from: s.prev, to: s.pos, t0: t(s.moved_at), t1: t(s.moved_at) + sec, a: s.armed_s as f32, b: s.drilled as f32, c: 0.0, mark: s.goal });
+            out.push(UnitView { kind: Unit::Sapper, id: s.id, state: s.state as u8, from: s.prev, to: s.pos, t0: t(s.moved_at), t1: t(s.moved_at) + sec, a: s.armed_s as f32, b: s.drilled as f32, c: 0.0, mark: s.goal , lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
         }
         for b in &self.units.bores {
-            out.push(UnitView { kind: Unit::Tunneler, id: (b.resume_at as u32) ^ 0x7000_0000, state: b.active as u8, from: b.prev, to: (b.x, b.y), t0: t(b.moved_at), t1: t(b.moved_at) + sec, a: b.hx as f32, b: b.hy as f32, c: b.length as f32, mark: (b.x, b.y) });
+            out.push(UnitView { kind: Unit::Tunneler, id: (b.resume_at as u32) ^ 0x7000_0000, state: b.active as u8, from: b.prev, to: (b.x, b.y), t0: t(b.moved_at), t1: t(b.moved_at) + sec, a: b.hx as f32, b: b.hy as f32, c: b.length as f32, mark: (b.x, b.y) , lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
         }
         for b in &self.units.bots {
             let tip = b.tips.first().map(|&c| mid(c)).unwrap_or(mid(b.spot));
-            out.push(UnitView { kind: Unit::HeatSink, id: b.id, state: b.state as u8, from: b.prev, to: b.pos, t0: t(b.moved_at), t1: t(b.moved_at) + sec, a: b.reach as f32, b: (b.life / self.eco.units.heatsink.life_s.max(1.0)) as f32, c: b.tips.len() as f32, mark: tip });
+            out.push(UnitView { kind: Unit::HeatSink, id: b.id, state: b.state as u8, from: b.prev, to: b.pos, t0: t(b.moved_at), t1: t(b.moved_at) + sec, a: b.reach as f32, b: (b.life / self.eco.units.heatsink.life_s.max(1.0)) as f32, c: b.tips.len() as f32, mark: tip , lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
         }
         for w in &self.units.walkers {
             let firing = self.tick.saturating_sub(w.laser_at) < self.ticks(1.0) && w.laser_at > 0;
@@ -1162,7 +1824,18 @@ impl Sim {
                 b: (w.bag / self.eco.units.forester.bag_kg.max(1.0)) as f32,
                 c: if firing { 2.0 } else if cutting { 1.0 } else { 0.0 },
                 mark: if firing { w.laser } else { w.claw },
+                lift: w.lift as f32,
+                sweep_from: w.laser_from,
+                fired_at: if w.laser_at > 0 { t(w.laser_at) } else { -1e9 },
+                claw: w.claw,
+                cut_at: if w.cut_at > 0 { t(w.cut_at) } else { -1e9 },
             });
+        }
+        // Dropped bags (state 9), waiting on the ground: t0 is when the
+        // couriers lift it (game seconds).
+        for b in &self.units.bags {
+            let due = t(b.due);
+            out.push(UnitView { kind: b.kind, id: b.id, state: 9, from: b.pos, to: b.pos, t0: due, t1: due, a: 1.0, b: 1.0, c: 0.0, mark: b.pos, lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
         }
         out
     }
@@ -1196,7 +1869,7 @@ impl Sim {
             }
         }
         let u = &self.units;
-        v.push(format!("  blasts {} ({} set off by being destroyed; {} cells cracked) · frozen {:.0} t · plants taken {:.0} t, fires {}", u.blasts, u.destroyed, u.cracked, u.frozen_kg / 1000.0, u.harvested_kg / 1000.0, u.fires));
+        v.push(format!("  blasts {} ({} set off by being destroyed; {} cells cracked) · frozen {:.0} t · plants taken {:.0} t, fires {}, leaps {}", u.blasts, u.destroyed, u.cracked, u.frozen_kg / 1000.0, u.harvested_kg / 1000.0, u.fires, u.leaps));
         if self.prod.bays_of(Unit::HeatSink) > 0 {
             v.push(format!("  open magma pools near the flocks: {}", u.molten.len()));
         }
@@ -1242,8 +1915,13 @@ impl Sim {
         for w in &u.walkers {
             o.u32(w.id);
             o.u8(w.kind.index() as u8);
-            o.u8(w.state as u8);
-            for v in [w.pos.0, w.pos.1, w.goal_a, w.facing, w.life, w.timer, w.bag, w.taken_kg] {
+            // A leap is saved as having landed, striding on.
+            let (state, pos) = match (w.state, w.jump) {
+                (WalkState::Jump, Some(j)) => (WalkState::Stride, (j.a1.cos() * j.g1, j.a1.sin() * j.g1)),
+                (s, _) => (s, w.pos),
+            };
+            o.u8(state as u8);
+            for v in [pos.0, pos.1, w.goal_a, w.facing, w.life, w.timer, w.bag, w.taken_kg] {
                 o.f64(v);
             }
         }
@@ -1255,6 +1933,97 @@ impl Sim {
             o.u8(b.active as u8);
             o.u64(b.resume_at);
         }
+    }
+
+    /// What version 12 added: walkers' heights and bags, dropped bags, and
+    /// loose debris.
+    pub(super) fn write_units_12(&self, o: &mut crate::save::W) {
+        let mut looks: Vec<((i64, i64), u8)> = self.world.looks.values().flat_map(|l| l.iter().map(|(c, k)| (*c, *k))).collect();
+        looks.sort_unstable();
+        o.u32(looks.len() as u32);
+        for (c, k) in looks {
+            put_cell(o, c);
+            o.u8(k);
+        }
+        o.u32(self.melt.len() as u32);
+        for &(due, c) in &self.melt {
+            o.u64(due);
+            put_cell(o, c);
+        }
+        let loose = sorted(self.loose.iter());
+        o.u32(loose.len() as u32);
+        for c in loose {
+            put_cell(o, c);
+        }
+        let u = &self.units;
+        for w in &u.walkers {
+            o.f64(w.lift);
+            o.u32(w.load.len() as u32);
+            for &(m, n) in &w.load {
+                o.u16(m);
+                o.f64(n);
+            }
+        }
+        o.u32(u.bags.len() as u32);
+        for b in &u.bags {
+            o.u32(b.id);
+            o.u8(b.kind.index() as u8);
+            o.f64(b.pos.0);
+            o.f64(b.pos.1);
+            o.f64(b.kg);
+            o.u64(b.due);
+            o.u32(b.load.len() as u32);
+            for &(m, n) in &b.load {
+                o.u16(m);
+                o.f64(n);
+            }
+        }
+    }
+
+    /// After loading: loose rubble may move again.
+    pub(super) fn resettle(&mut self) {
+        self.settling = self.loose.clone();
+    }
+
+    pub(super) fn read_units_12(&mut self, r: &mut crate::save::R) -> Result<(), String> {
+        for _ in 0..r.u32()? {
+            let c = get_cell(r)?;
+            let k = r.u8()?;
+            self.world.set_look(c.0, c.1, k);
+        }
+        for _ in 0..r.u32()? {
+            let due = r.u64()?;
+            let c = get_cell(r)?;
+            self.melt.push_back((due, c));
+        }
+        for _ in 0..r.u32()? {
+            self.loose.insert(get_cell(r)?);
+        }
+        let nm = self.world.planet.mats.len();
+        let load = |r: &mut crate::save::R| -> Result<Vec<(MatId, f64)>, String> {
+            let mut v = Vec::new();
+            for _ in 0..r.u32()? {
+                let (m, n) = (r.u16()?, r.f64()?);
+                if (m as usize) < nm {
+                    v.push((m, n));
+                }
+            }
+            Ok(v)
+        };
+        for k in 0..self.units.walkers.len() {
+            self.units.walkers[k].lift = r.f64()?;
+            self.units.walkers[k].load = load(r)?;
+        }
+        for _ in 0..r.u32()? {
+            let id = r.u32()?;
+            let kind = Unit::from_index(r.u8()? as usize).ok_or("bad unit")?;
+            let pos = (r.f64()?, r.f64()?);
+            let kg = r.f64()?;
+            let due = r.u64()?;
+            let l = load(r)?;
+            self.units.bags.push(Bag { id, kind, pos, kg, load: l, due });
+        }
+        Ok(())
     }
 
     pub(super) fn read_units(&mut self, r: &mut crate::save::R) -> Result<(), String> {
@@ -1294,12 +2063,13 @@ impl Sim {
             let id = r.u32()?;
             let kind = Unit::from_index(r.u8()? as usize).ok_or("bad unit")?;
             let state = [WalkState::Drop, WalkState::Unfold, WalkState::Stride, WalkState::Work][(r.u8()? as usize).min(3)];
+            // (A leap is saved as having landed.)
             let mut f = [0.0; 8];
             for v in f.iter_mut() {
                 *v = r.f64()?;
             }
             let pos = (f[0], f[1]);
-            u.walkers.push(Walker { id, kind, state, pos, prev: pos, moved_at: tick, goal_a: f[2], facing: f[3], life: f[4], timer: f[5], bag: f[6], taken_kg: f[7], laser: pos, laser_at: 0, claw: pos, cut_at: 0 });
+            u.walkers.push(Walker { id, kind, state, pos, prev: pos, moved_at: tick, goal_a: f[2], facing: f[3], life: f[4], timer: f[5], bag: f[6], taken_kg: f[7], laser: pos, laser_at: 0, claw: pos, cut_at: 0, lift: LIFT_MIN_M, load: Vec::new(), jump: None, laser_from: pos });
         }
         for _ in 0..r.u32()? {
             let mut f = [0.0; 8];

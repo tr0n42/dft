@@ -80,6 +80,57 @@ const TILE_TO_BLOCK: i64 = TEX.trailing_zeros() as i64 - BLOCK_SHIFT;
 /// Plants are drawn on tiles finer than this level (texels under 16 m).
 const FLORA_LEVEL: i8 = 4;
 
+/// Plants sway on tiles this fine or finer (two texels a cell and up): they
+/// are left out of the tile's picture and drawn by sway.rs over it.
+pub const SWAY_LEVEL: i8 = -1;
+
+/// A plant cell drawn swaying: where it is, its colour, how far it is up
+/// its plant (cells), and how it moves.
+#[derive(Clone, Copy, Debug)]
+pub struct SwayCell {
+    pub x: i64,
+    pub y: i64,
+    pub c: [u8; 3],
+    pub h: f32,
+    /// 1 sway, 2 ripple, 3 drift (as flora::Motion).
+    pub motion: u8,
+    pub amp: f32,
+    pub leaf: bool,
+}
+
+/// Per material: how its cells sway (None: they don't), and whether it is
+/// plant tissue at all.
+struct SwayTable {
+    kind: Vec<Option<(u8, f32, bool, bool)>>,
+    tissue: Vec<bool>,
+}
+
+fn sway_table(p: &Planet) -> Option<SwayTable> {
+    use dft_sim::flora::{Motion, Niche};
+    let f = p.flora.as_ref()?;
+    let n = p.mats.len();
+    let mut t = SwayTable { kind: vec![None; n], tissue: vec![false; n] };
+    for sp in &f.species {
+        let code = match sp.motion {
+            Motion::Rigid => 0,
+            Motion::Sway => 1,
+            Motion::Ripple => 2,
+            Motion::Drift => 3,
+        };
+        for (k, m) in [sp.stem_m, sp.foliage_m, sp.organ_m, sp.root_m].into_iter().enumerate() {
+            if (m as usize) >= n || m == VACUUM {
+                continue;
+            }
+            t.tissue[m as usize] = true;
+            // Roots are in the ground: they don't move.
+            if code != 0 && k != 3 {
+                t.kind[m as usize] = Some((code, sp.sway as f32, sp.niche == Niche::CaveRoof, k == 1));
+            }
+        }
+    }
+    Some(t)
+}
+
 /// The finest level: 16 texels to a cell.
 const FINEST: i8 = -4;
 
@@ -141,7 +192,9 @@ enum Shown {
 
 struct Slot {
     shown: Shown,
-    task: Option<Task<Option<(Vec<u8>, bool)>>>,
+    task: Option<Task<Option<(Vec<u8>, bool, Vec<SwayCell>)>>>,
+    /// Its plants drawn swaying (left out of its picture).
+    plants: Arc<Vec<SwayCell>>,
     /// It shows some of the backdrop behind eaten ground (redrawn as the
     /// backdrop collapses).
     ghost: bool,
@@ -307,7 +360,7 @@ pub struct TilesPlugin;
 
 impl Plugin for TilesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Tiles>().add_systems(Update, (take_changes, request, collect, place).chain());
+        app.init_resource::<Tiles>().init_resource::<crate::sway::Shown>().add_systems(Update, (take_changes, request, collect, place, crate::sway::draw).chain());
     }
 }
 
@@ -354,12 +407,51 @@ fn keys_in_view(view: &View, level: i8, margin: i64, under: bool) -> Vec<Key> {
 
 /// Build a tile's pixels (RGBA, top row first), or None if it's all empty
 /// space. `live`: the running world, read where the swarm has been.
-fn build(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, heights: Option<Arc<Vec<f32>>>) -> Option<(Vec<u8>, bool)> {
+fn build(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, heights: Option<Arc<Vec<f32>>>) -> Option<(Vec<u8>, bool, Vec<SwayCell>)> {
     let t0 = std::time::Instant::now();
     let r = build_inner(p, k, live, collapse, heights.as_deref().map(|v| v.as_slice()));
     BUILDS.fetch_add(1, Relaxed);
     BUILD_NS.fetch_add(t0.elapsed().as_nanos() as u64, Relaxed);
     r
+}
+
+/// How a cell with a look is coloured, as the sapper proving ground colours
+/// what a blast leaves: cracks dark; pieces held together a little dark;
+/// rubble a little darker, block by block; rock baked short of melting
+/// changed (limestone burned to quicklime, sandstone glassy green, the rest
+/// reddened and darkened); melt glowing; melt cooled to glass, near black
+/// (green from sandstone).
+fn look_tint(p: &Planet, m: MatId, c: [u8; 3], look: u8, cx: i64, cy: i64) -> [u8; 3] {
+    use dft_sim::world::Look;
+    let f = |c: [u8; 3], k: f32| [(c[0] as f32 * k) as u8, (c[1] as f32 * k) as u8, (c[2] as f32 * k) as u8];
+    let mix = |a: [u8; 3], b: [f32; 3], t: f32| [(a[0] as f32 + (b[0] - a[0] as f32) * t) as u8, (a[1] as f32 + (b[1] - a[1] as f32) * t) as u8, (a[2] as f32 + (b[2] - a[2] as f32) * t) as u8];
+    let comp = &p.mats.get(m).composition;
+    let share = |e: &str| comp.get(e).copied().unwrap_or(0.0);
+    let n = dft_sim::noise::unit(dft_sim::noise::hash(0x10C, cx, cy, 3)) as f32;
+    match look {
+        Look::CRACKED => f(c, 0.45),
+        Look::HELD => f(c, 0.82),
+        Look::RUBBLE => f(c, 0.75 + 0.25 * n),
+        Look::BAKED => {
+            let b = if share("Ca") > 0.15 {
+                mix(c, [228.0, 224.0, 214.0], 0.85)
+            } else if share("Si") > 0.38 {
+                mix(c, [150.0, 176.0, 150.0], 0.6)
+            } else {
+                [(c[0] as f32 * 0.85 + 12.0).min(255.0) as u8, (c[1] as f32 * 0.68) as u8, (c[2] as f32 * 0.66) as u8]
+            };
+            f(b, 0.9 + 0.2 * n)
+        }
+        Look::MELT => {
+            let k = 0.85 + 0.15 * n;
+            [(255.0 * k) as u8, (150.0 * k) as u8, (55.0 * k) as u8]
+        }
+        Look::GLASS => {
+            let g = if share("Si") > 0.38 && share("Ca") < 0.1 && share("Fe") < 0.05 { [96.0, 140.0, 116.0] } else { [30.0, 28.0, 36.0] };
+            f(mix(c, g, 0.85), 0.85 + 0.3 * n)
+        }
+        _ => c,
+    }
 }
 
 /// The backdrop's collapse: as the body is eaten, the ghost of what was
@@ -381,7 +473,7 @@ pub fn collapse_radius(p: &Planet, eaten: f64) -> f64 {
     (r / full * 400.0).ceil() / 400.0 * full
 }
 
-fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, heights: Option<&[f32]>) -> Option<(Vec<u8>, bool)> {
+fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, heights: Option<&[f32]>) -> Option<(Vec<u8>, bool, Vec<SwayCell>)> {
     use dft_sim::texture::{self as tx, Sides};
     let span = span_cells(k.level);
     // Texel size in cells, and texels per cell.
@@ -406,6 +498,7 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
     };
     // What the swarm has changed, from the screen's own copy of the dug
     // ground (never the running world: drawing doesn't wait on it).
+    let mut looks: Vec<u8> = Vec::new();
     let stored: Option<Vec<Option<MatId>>> = live.map(|live| {
         let tw = std::time::Instant::now();
         let mirror = live.mirror.read();
@@ -415,6 +508,20 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
             for i in 0..gn {
                 let (x, y) = cell_of(i, j);
                 v.push(mirror.get(x, y));
+            }
+        }
+        // A blast's marks on the cells (see dft_sim::world::Look).
+        let mut any = false;
+        let (ax, ay) = cell_of(0, 0);
+        let (bx, by) = cell_of(gn - 1, gn - 1);
+        mirror.looks_in(ax, bx, ay, by, |_, _| any = true);
+        if any {
+            looks = vec![0; (gn * gn) as usize];
+            for j in 0..gn {
+                for i in 0..gn {
+                    let (x, y) = cell_of(i, j);
+                    looks[(j * gn + i) as usize] = mirror.look(x, y);
+                }
             }
         }
         drop(mirror);
@@ -435,6 +542,41 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
     }
     // A cell by world position (fine tiles only: the grid holds them all).
     let at = |cx: i64, cy: i64| -> MatId { cells[((cy - gy0) * gn + (cx - gx0)) as usize] };
+    // Plants that sway are drawn apart, over the tile.
+    let swaying = if fine && k.level <= SWAY_LEVEL && !k.under { sway_table(p) } else { None };
+    let mut plants = Vec::new();
+    if let Some(tab) = &swaying {
+        let inside = |x: i64, y: i64| x >= gx0 && x < gx0 + gn && y >= gy0 && y < gy0 + gn;
+        for cy in y0..y0 + span {
+            for cx in x0..x0 + span {
+                let m = at(cx, cy);
+                let Some((motion, amp, hang, leaf)) = tab.kind[m as usize] else { continue };
+                // How far up its plant: plant cells between it and its ground.
+                let (fx, fy) = (cx as f64 + 0.5, cy as f64 + 0.5);
+                let r = (fx * fx + fy * fy).sqrt().max(1e-9);
+                let st = |u: f64| if u > 0.38 { 1 } else if u < -0.38 { -1 } else { 0 };
+                let (mut bx, mut by) = (-st(fx / r), -st(fy / r));
+                if hang {
+                    (bx, by) = (-bx, -by);
+                }
+                let (mut qx, mut qy, mut h) = (cx, cy, 0);
+                while h < 64 {
+                    qx += bx;
+                    qy += by;
+                    let q = if inside(qx, qy) { at(qx, qy) } else { p.material(qx, qy) };
+                    if !tab.tissue.get(q as usize).copied().unwrap_or(false) {
+                        break;
+                    }
+                    h += 1;
+                }
+                let ground = p.surface_radius(fx / r, fy / r);
+                let c0 = dft_sim::render::colour_at(p, m, cx, cy, ground);
+                let c = tx::texel(kinds.get(m as usize).copied().unwrap_or(tx::Kind::Rock), c0, cx, cy, 0.5, 0.5, ppc, Sides::default());
+                plants.push(SwayCell { x: cx, y: cy, c, h: h as f32, motion, amp, leaf });
+            }
+        }
+    }
+    let sways = |m: MatId| swaying.as_ref().is_some_and(|t| t.kind[m as usize].is_some());
     let mut ghosts: HashMap<(i64, i64), [u8; 3]> = HashMap::new();
     let mut ghost = |g: (i64, i64)| *ghosts.entry(g).or_insert_with(|| tx::ghost(p, g.0 + 1, g.1 + 1));
     let gm = tx::GHOST_M;
@@ -454,6 +596,8 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
             let (cx, cy) = (x.floor() as i64, y.floor() as i64);
             let (u, v) = (x - cx as f64, y - cy as f64);
             let m = if fine { at(cx, cy) } else { cells[(j * TEX + i) as usize] };
+            // (A swaying plant is drawn over the tile: here, what's behind it.)
+            let m = if sways(m) { VACUUM } else { m };
             let o = ((row * TEX + i) * 4) as usize;
             let (fx, fy) = (cx as f64 + 0.5, cy as f64 + 0.5);
             let r = (fx * fx + fy * fy).sqrt().max(1e-9);
@@ -572,6 +716,13 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
                 }
             } else {
                 let mut c = dft_sim::render::colour_at(p, m, cx, cy, ground);
+                if !looks.is_empty() {
+                    let li = if fine { ((cy - gy0) * gn + (cx - gx0)) as usize } else { (j * TEX + i) as usize };
+                    let look = looks.get(li).copied().unwrap_or(0);
+                    if look != 0 {
+                        c = look_tint(p, m, c, look, cx, cy);
+                    }
+                }
                 if ppc >= 1.0 {
                     let sides = if fine && ppc >= 4.0 {
                         let ns = [at(cx, cy + 1), at(cx, cy - 1), at(cx - 1, cy), at(cx + 1, cy)];
@@ -586,7 +737,7 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
             px[o..o + 4].copy_from_slice(&rgba);
         }
     }
-    Some((px, has_ghost))
+    Some((px, has_ghost, plants))
 }
 
 /// Take the simulation's news of changed ground.
@@ -747,7 +898,7 @@ fn request(mut tiles: ResMut<Tiles>, view: Res<View>, body: Res<crate::Body>, ru
         let task = AsyncComputeTaskPool::get().spawn(async move { build(&p, k, live, collapse, heights) });
         tiles.building += 1;
         if fresh {
-            tiles.slots.insert(k, Slot { shown: Shown::Pending, task: Some(task), stale: false, built_at: now, image_from: now, changed_at: 0.0, seen: frame, ghost: false, away: false });
+            tiles.slots.insert(k, Slot { shown: Shown::Pending, task: Some(task), plants: Arc::new(Vec::new()), stale: false, built_at: now, image_from: now, changed_at: 0.0, seen: frame, ghost: false, away: false });
         } else {
             let s = tiles.slots.get_mut(&k).unwrap();
             s.task = Some(task);
@@ -786,10 +937,14 @@ fn collect(mut commands: Commands, mut tiles: ResMut<Tiles>, mut images: ResMut<
     for (k, result) in done {
         tiles.building -= 1;
         let Some(s) = tiles.slots.get_mut(&k) else { continue };
-        let result = result.map(|(px, ghost)| {
+        let result = result.map(|(px, ghost, plants)| {
             s.ghost = ghost;
+            s.plants = Arc::new(plants);
             px
         });
+        if result.is_none() {
+            s.plants = Arc::new(Vec::new());
+        }
         s.image_from = s.built_at;
         s.away = false;
         let old = std::mem::replace(&mut s.shown, Shown::Pending);
@@ -859,7 +1014,9 @@ fn place(
     mut pool: Local<Vec<Entity>>,
     mut perf: ResMut<crate::log::Perf>,
     time: Res<Time>,
+    mut swaying: ResMut<crate::sway::Shown>,
 ) {
+    swaying.0.clear();
     let now = time.elapsed_secs_f64();
     let t0 = std::time::Instant::now();
     let mut shown = 0;
@@ -980,6 +1137,11 @@ fn place(
             continue;
         }
         shown += 1;
+        if let Some(sl) = tiles.slots.get(&k) {
+            if !sl.plants.is_empty() {
+                swaying.0.push(sl.plants.clone());
+            }
+        }
         let (c, size) = snap(x0, y0, s);
         tf.translation = Vec3::new(c.x, c.y, -(k.level as f32));
         sprite.custom_size = Some(size);

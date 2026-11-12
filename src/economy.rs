@@ -53,6 +53,10 @@ fn zone() -> f64 {
     500.0
 }
 
+fn loose_s() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Harvester {
     pub mass_cost: f64,
@@ -72,6 +76,10 @@ pub struct Harvester {
     /// rock fills it in fewer cells).
     #[serde(default = "hold")]
     pub hold_kg: f64,
+    /// Seconds a cutter takes to pick up a cell of loose debris (blast
+    /// rubble, fallen rock, dead plant matter), whatever it is.
+    #[serde(default = "loose_s")]
+    pub loose_s: f64,
     /// Energy a cutter carries for itself (E). It burns part of its cargo to
     /// keep this topped up, and is lost if it runs dry.
     #[serde(default = "tank")]
@@ -513,8 +521,13 @@ pub struct ForesterSpec {
     /// It sets the ground cover alight this often (s), this far out (m).
     pub burn_every_s: f64,
     pub laser_m: f64,
-    /// Its bag holds this much (kg) before couriers carry it up.
+    /// Its bag holds this much (kg); full, it is dropped for couriers to
+    /// carry up.
     pub bag_kg: f64,
+    /// Couriers reach a dropped bag after this (s), plus its distance from
+    /// the mother swarm at this speed (m/s).
+    pub pickup_s: f64,
+    pub courier_speed: f64,
 }
 
 /// An abductor: a spider on three legs that snatches live animals. No body

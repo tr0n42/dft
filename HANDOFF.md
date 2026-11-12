@@ -1,7 +1,7 @@
 # The Dark Forest Theory: handoff for a new session
 
 Read this first, then ROADMAP.md (what's built and what's next) and README.md
-(how the code is laid out). Last updated 11 November 2026.
+(how the code is laid out). Last updated 12 November 2026.
 
 ## Working with Benjamin
 
@@ -14,8 +14,8 @@ Read this first, then ROADMAP.md (what's built and what's next) and README.md
 - He wants honest numbers, frequent short progress messages during long
   work, and plain words.
 - The project is a git repo pushed to https://github.com/tr0n42/dft. Since
-  11 November 2026 it is cloned on his PC (Windows on ARM64) in
-  `Downloads\dft`, and the work happens in Claude Code there (see
+  11 November 2026 it is cloned on his PC in
+  `Downloads\DarkForestTheory-source`, and the work happens in Claude Code there (see
   CLAUDE.md). Rust stable (MSVC, aarch64), the VS 2022 Build Tools and
   Python 3.12 (for tools/*.py; `%LOCALAPPDATA%\Programs\Python\Python312-arm64`)
   were installed on 11 Nov.
@@ -60,7 +60,67 @@ DarkForestTheory project, opened by link:
 
 ## Where things stand (November 2026)
 
-Most recent work, all built and passing the tests, waiting on a PC look:
+Most recent work (12 Nov), built and passing the tests, waiting on a PC look:
+
+- **Plant life cycle (L1e, src/life.rs; tests/life.rs; test-life.bat).**
+  Felled living tissue wilts to deadwood and leaf litter, which rot to
+  humus. Where living plants are taken away, the 8 m square is remembered;
+  every few minutes, any open ground with *living* plants within about a
+  square spreads back: ground cover as the ground's top layer, new plants
+  of the species growing beside it, waking the squares round it, until it
+  is as wooded as before or nothing near is alive. Waits while drones still
+  work there. Plant mass made or rotted is booked in the ledger's `grown`
+  column. Timings in `[life.cycle]` (data/life.toml defaults in
+  src/flora.rs `Cycle`). F1: "Life:" lines and a "show regrowth" button.
+- **Plant sway (game/src/sway.rs):** near the camera (2+ px a metre) plants
+  that move are left out of the tiles and drawn swaying (trees in rolling
+  gusts, grass rippling, sea plants drifting). Benjamin approved it.
+- **Forester and abductor, ported one for one from the swarm mockup**
+  (game/src/units.rs `draw_tripod`, `gait_step`): shell, eye stalks, saw
+  claws, rotor, bag; the abductor's head, eyes, fangs, whip palps and sac;
+  the mockup's gait (planted feet, springy body). The body rides 50 m over
+  the tallest plant within 30 m (src/specialists.rs `walker_rise`), feet
+  re-found on the ground every second. A full bag is dropped for couriers
+  (drawn coming down for it); its contents are credited when they lift it.
+- **Sapper blast, ported one for one from the proving ground**
+  (src/specialists.rs `sapper_blast`): energy rays, cracks, pieces held
+  together, molten heart, thrown rock, loose rubble and a plume out of the
+  drill hole; goes off with the top of its blast 50 m down; keeps off spots
+  other sappers are heading for; drill spoil spouts out and lands as rubble.
+- **Procedural legs (game/src/rig.rs):** any number of legs and joints a
+  leg. Feet planted on the ground as drawn (the screen's copy), stepping
+  when the body leaves them too far behind, in gait groups that take turns;
+  each leg solved by FABRIK with a pole so knees bow up and out; the body on
+  springs. The forester is now a sideways crab (`draw_crab`): four legs in
+  diagonal pairs, a big claw each side, the bag under the middle, eye stalks
+  in the middle firing the laser. The abductor keeps the mockup's spider
+  look on three curved four-bone legs. Rigs are defined in `rig_of`.
+- **Forester behaviour:** claws and laser work while it walks too
+  (`walker_hands`); a claw shears a ~4 m section off the nearest plant
+  within 32 m; the laser sweeps 15-40 m of ground every 1.5-2.5 s; it leaps
+  only real terrain (`terrain_at` ignores plants, dead plant matter and
+  rubble; 20 m rise at 45 degrees within 24 m). Bag 80 t.
+- **Sapper physics, as the proving ground:** rubble and melt settle each
+  tick (`settle`), the plume pours out over ~1 s, caught sappers go off
+  0.12-0.22 s later; buried blasts draw a shock ring, a white flash and a
+  screen shake only when on screen, and a fading heat glow. Yield 5 kt;
+  drills 25 m where it can't crawl deep enough.
+- **Smooth drawing clock (game/src/drones.rs):** drones, haulers and units
+  are drawn on a clock that advances every frame and eases onto the
+  simulation's time (they were stepping when updates arrived late).
+- `--watch <unit>` keeps the camera on the first unit of a kind.
+- **Loose debris:** blast rubble, fallen and thrown rock, deadwood, leaf
+  litter and humus take a cutter `harvester.loose_s` (1 s) a cell.
+- **Looks** (src/world.rs `Look`): cracked, held, rubble, baked, melt,
+  glass, kept per cell beside the material, carried to the screen's copy
+  of the ground and tinted in the tiles. Melt cools to glass after ~25 s.
+- **One lighting engine** (game/src/fx.rs): the mockup's emit/lightPass, a
+  1 m light map near the camera in stepped bands; lights from the tripods'
+  eyes and lasers, explosions, melt, the sapper's drill and blink. Also
+  sparks, smoke and dust, and plume dust columns.
+- Save version 12 (the world save 6).
+
+Earlier (11 Nov), built and passing the tests, waiting on a PC look:
 
 - **Universal Drone Replicator** (11 Nov, testing stand-in for the meta
   tree; `[units]` in data/economy.toml, src/specialists.rs,
@@ -187,73 +247,71 @@ Not yet redesigned: the fabricator and factory ("later").
   each flock's haulers from its round trip instead.
 - Open questions for Benjamin: which generation-bending perks go in the
   meta tree first; planet ranking for selection (parked until he decides).
-- Also waiting: map icons for the zoomed-out view, life L1e, the lava flow
+- Also waiting: map icons for the zoomed-out view, the lava flow
   bug (lava not running into hollows), warm ground and decay with
   radioactivity (technetium, polonium, astatine and francium are on no body
   until then).
 
-## Last session's report (11 November 2026)
+## Last session's report (12 November 2026)
 
 When Benjamin asks for a "handoff digestion", repeat this section to him
-as it stands (he didn't get to read it at the end of the session).
+as it stands.
 
-All the drones are now in the game, built by a Universal Drone Replicator.
-To see them, double-click `test-replicator.bat`. It opens a 5 km living
-world, which gets every specialist type except abductors, and F1 shows what
-each bay is building and what the specialists have done.
+**What we did:** plants now live and die, the forester became a sideways
+crab, walkers got procedural legs, the sapper's blast is ported one for
+one from the proving ground, and the game has its lighting engine.
 
-**Testing so far:** the full test suite passes: 96 tests, none failing,
-including 4 new ones. In headless 20-minute runs, sappers went off and
-cracked rock, the tunneler bored shafts, heat-sink bots froze 12,600 t of
-magma on a lava world, and foresters took 380 t of plants on a living world.
-Nobody has watched any of it on screen yet, so the drawings and animations
-are untested until Benjamin looks.
+**Plants:**
+- Felled trees die and rot: deadwood and leaf litter, then dark humus soil.
+- Where plants are cut, eaten or burned, life spreads back from living
+  plants nearby, all the time: ground cover first, then new plants of the
+  species beside it, creeping out over eaten ground until it is as wooded
+  as before. Nothing grows back where nothing nearby is alive, and not
+  while drones are still working there.
+- F1 shows "Life:" counts and a "show regrowth" button that jumps the camera
+  to a plant growing back.
+- Plants near the camera sway (you said it looks good).
 
-**Which planets get which drones:** cutters, haulers, sappers and tunnelers
-are built on every body.
+**Forester:** now a sideways crab: a claw each side, the bag slung in the
+middle, four legs (two a side, stepping in diagonal pairs), lasers from eye
+stalks centred on the body. Its body stands 50 m over the tallest plant
+around it and the legs scale to reach the ground. It cuts with its claws
+and burns with its laser while it walks, not just when it stops, and it
+leaps only over steep terrain (at least 20 m of rise), never over trees,
+fallen trunks or rubble. A full bag is dropped; couriers come down for it
+and carry it up, and only then does it count. In a 20 min test it took
+1,675 t of plants, fired 1,894 times and leapt 25 times.
 
-| Specialist | Built on |
-|---|---|
-| Heat-sink bot | Bodies with magma or molten metal or sulfur: active planetoid, barren, dry, hothouse, iron, lava, living and sulfur worlds, plus the 3 km test planetoid and two demo bodies. It's only built once an open pool turns up near the cutters. |
-| Forester | Bodies that grow plants: living, dry, ocean, rogue and ice worlds, and the methane world only at the 5 km test size. |
-| Abductor | Nowhere yet: no body has animals. Its recipe and bay are ready for when they exist. |
+**Abductor:** ported from the mockup on three long curved legs; it still
+has nothing to catch (that waits for animals).
 
-**How each one acts:**
-- **Sapper:** drops where the digging is hardest, crawls down cracks and
-  caves (or drills if there are none) and goes off deep. That leaves a
-  cavity and a zone of cracked rock that cutters dig in half the time.
-- **Benjamin's chaos rule:** anything that destroys a sapper sets it off.
-  That includes another blast (so they chain), magma, ground still hot from
-  a blast, or rock falling on it. On the lava world, 20 of the 25 sappers
-  went off this way.
-- **Tunneler:** bores a 12 m shaft and leaves staging points for cutters
-  along it.
-- **Heat-sink bot:** hovers over a magma pool, grows tentacles down through
-  it and freezes it to stone, which powers the swarm.
-- **Forester:** a three-legged crab that walks to the thickest plants,
-  shears them into its bag and sets the ground cover alight with its laser.
+**Procedural legs (new, game/src/rig.rs):** one system for any number of
+legs and joints, built from the usual game method (FABRIK reach solving,
+feet planted on the ground until they lag too far, legs stepping in turns,
+a springy body). It replaced the old hand-made gait for both walkers.
 
-**Parts and costs:**
-- **Sapper (157 kg of parts):** needs a nuclear charge, detonator, blast
-  casing and eye cluster. The charge needs 8 kg of uranium with no
-  substitute.
-- **Uranium limits sappers:** plutonium isn't in the element table, and
-  other parts are stopped from using uranium as filler. The fleet brings
-  200 kg (25 charges), and in 20-minute test runs mining never brought back
-  enough for another charge, so sappers stop after 25. Open question: a
-  bigger allowance, or plutonium added?
-- **Forester (471 kg) and abductor (416 kg):** a multi-job lattice core,
-  three legs, a cutting laser and eye clusters. The forester adds shear
-  claws, an intake rotor and a bag; the abductor adds grapple whips and a
-  stasis sac. These are made from rare elements like rhenium, germanium,
-  gallium and tellurium, and can fall back to common ones at a steep cost.
+**Sapper:** the blast breaks rock the way the proving ground does (rays,
+cracks, held chunks, a molten heart that cools to glass, rubble that
+settles, thrown rock, and a plume out of the drill hole that lasts several
+seconds), with the shock ring, the heat glow and chain blasts timed as on
+the bench. Yield is 5 kt by default; a sapper that would go off near the
+surface digs down about 25 m first. The flash and screen shake happen only
+when the blast is on screen. In a test, 28 blasts cracked about 100,000
+cells.
 
-**Also done:** haulers now hover and never land, with six squid tentacles
-instead of legs. The published mockups are now in git.
+**Smoother motion:** drones, haulers and walkers are now drawn from a
+smoothed clock, so they move at the screen's frame rate instead of
+stepping at about 30 per second.
 
-**Two things to know:**
-- **Old saves:** this build saves in a newer format (version 11), and saves
-  made by it won't load in older builds.
-- **Tools:** Python is needed for the parts-pricing script
-  (tools/recipes.py); `unitcheck` prints the planet report
-  (`cargo run --release --bin unitcheck`).
+**Loose debris** (rubble, fallen rock, dead plants) takes a cutter about one
+second a cell, whatever it is.
+
+**Lighting:** one engine, as in the mockup: eyes, lasers, explosions, melt
+and drill sparks light the blocks around them in stepped bands.
+
+**Tests:** full suite 99 passed, 0 failed. Game builds. Everything is
+committed; not yet pushed.
+
+**Open questions:** uranium for sappers (bigger allowance or plutonium?);
+then plant panic (species-by-species losses; most species don't react;
+exodus rare, about one living world in three).

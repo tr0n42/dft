@@ -13,7 +13,7 @@ use crate::totals::LEAF;
 use crate::world::{Entry, State, World};
 
 const MAGIC: &[u8; 4] = b"DFTS";
-const VERSION: u32 = 5;
+const VERSION: u32 = 6; // 6: the ledger's grown column (life)
 
 /// Identifies a body: same spec and seed, same fingerprint.
 pub fn fingerprint(p: &Planet) -> u64 {
@@ -126,6 +126,7 @@ impl<'a> R<'a> {
 pub fn save(w: &World) -> (usize, Vec<u8>) {
     let mut o = W(Vec::new());
     write_world(&mut o, w);
+    o.f64s(&w.ledger.grown);
     let raw = o.0;
     let out = pack(MAGIC, VERSION, &raw);
     (raw.len(), out)
@@ -216,7 +217,10 @@ pub fn write_world(o: &mut W, w: &World) {
 /// Rebuild a world from a save and the same body.
 pub fn load(bytes: &[u8], planet: Planet) -> Result<World, String> {
     let raw = unpack(MAGIC, VERSION, bytes)?;
-    read_world(&mut R(&raw, 0), std::sync::Arc::new(planet))
+    let mut r = R(&raw, 0);
+    let mut w = read_world(&mut r, std::sync::Arc::new(planet))?;
+    w.ledger.grown = r.f64s()?;
+    Ok(w)
 }
 
 /// Read what `write_world` wrote, onto the same body.
@@ -233,6 +237,8 @@ pub fn read_world(r: &mut R, planet: std::sync::Arc<Planet>) -> Result<World, St
         vented: r.f64s()?,
         aloft: r.f64s()?,
         deposited: r.f64s()?,
+        // (Kept after the world by whoever saves it: older saves have none.)
+        grown: vec![0.0; nm],
         credited: r.f64()?,
         bonus: r.f64()?,
         generated: r.f64()?,
@@ -271,5 +277,5 @@ pub fn read_world(r: &mut R, planet: std::sync::Arc<Planet>) -> Result<World, St
         nodes.insert(k, Entry { state, totals });
     }
     let tree = crate::totals::Tree::for_planet(&planet);
-    Ok(World { planet, tree, nodes, ledger, track: None })
+    Ok(World { planet, tree, nodes, ledger, track: None, life_watch: Vec::new(), life_notes: Default::default(), looks: Default::default() })
 }

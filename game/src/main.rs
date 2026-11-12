@@ -30,6 +30,7 @@
 //!   --screenshot <file>   draw, save a PNG of the window and quit
 //!   --frames <n>          with --screenshot: n pictures, 4 frames apart
 //!   --view <x>,<y>,<mpp>  where to look (metres, and metres per pixel)
+//!   --watch <unit>        keep the view on the first unit of a kind (forester, sapper...)
 //!   --size <w>x<h>        a window this size (default: maximized)
 //!   --windowed            a 1600x900 window rather than maximized
 //!   --continue            load the newest save (saves folder)
@@ -49,6 +50,7 @@ mod dev;
 mod drones;
 mod eyedropper;
 mod finder;
+mod fx;
 mod fog;
 mod log;
 mod saves;
@@ -57,9 +59,11 @@ mod stars;
 mod stockpile;
 mod storage;
 mod swarmview;
+mod sway;
 mod lights;
 mod cargo;
 mod rnd;
+mod rig;
 mod tiles;
 mod units;
 mod view;
@@ -91,6 +95,8 @@ pub struct Options {
     /// With --screenshot: this many pictures, a few frames apart (name-0.png, ...).
     pub frames: u32,
     pub view: Option<(f64, f64, f64)>,
+    /// Keep the view on the first unit of this kind (--watch forester).
+    pub watch: Option<String>,
     pub size: (u32, u32),
     /// A window of `size` (--size, --windowed) rather than maximized.
     pub windowed: bool,
@@ -125,6 +131,7 @@ impl Options {
             screenshot: None,
             frames: 1,
             view: None,
+            watch: None,
             size: (1600, 900),
             windowed: false,
             load: None,
@@ -205,6 +212,7 @@ impl Options {
                 }
                 "--screenshot" => o.screenshot = Some(PathBuf::from(val(i)?)),
                 "--frames" => o.frames = val(i)?.parse().map_err(|_| "--frames takes a number")?,
+                "--watch" => o.watch = Some(val(i)?),
                 "--view" => {
                     let v: Vec<f64> = val(i)?.split(',').filter_map(|x| x.parse().ok()).collect();
                     if v.len() != 3 {
@@ -387,12 +395,27 @@ fn main() {
         .insert_resource(Run(run))
         .insert_resource(o)
         .add_plugins((view::ViewPlugin, tiles::TilesPlugin, drones::DronesPlugin, dev::DevPlugin, log::LogPlugin, bench::BenchPlugin, stars::StarsPlugin, fog::FogPlugin, camera::CameraPlugin, saves::SavesPlugin, eyedropper::EyedropperPlugin, stockpile::StockpilePlugin, finder::FinderPlugin))
-        .add_plugins((storage::StoragePlugin, swarmview::SwarmViewPlugin, lights::LightsPlugin))
+        .add_plugins((storage::StoragePlugin, swarmview::SwarmViewPlugin, lights::LightsPlugin, fx::FxPlugin))
         .add_systems(Startup, |mut c: Commands| {
             c.spawn(Camera2d);
         })
-        .add_systems(Update, (speed_keys.run_if(not(bevy_egui::input::egui_wants_any_keyboard_input)), screenshot_when_ready, quit_after, attention))
+        .add_systems(Update, (speed_keys.run_if(not(bevy_egui::input::egui_wants_any_keyboard_input)), screenshot_when_ready, quit_after, attention, watch_unit))
         .run();
+}
+
+/// With --watch: keep the view on the first unit of that kind (its body
+/// in the middle of the screen).
+fn watch_unit(o: Res<Options>, run: Res<Run>, mut view: ResMut<view::View>) {
+    let Some(kind) = &o.watch else { return };
+    let now = run.0.out.lock();
+    let Some(u) = now.units.iter().find(|u| u.kind.name() == kind.as_str() && u.state != 9) else { return };
+    let t = now.stats.time;
+    let (x, y) = u.at(t);
+    let r = (x * x + y * y).sqrt().max(1.0);
+    let up = u.lift.max(10.0) as f64 * 0.6;
+    view.x = x + x / r * up;
+    view.y = y + y / r * up;
+    view.mpp = view.mpp.min(0.25);
 }
 
 /// With --quit-after: close once that much real time has passed.

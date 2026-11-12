@@ -20,6 +20,18 @@ the per-run tech tree.
 200 kg; mined traces rarely make another 8 kg): a bigger allowance, or
 plutonium bred in a reactor? Fauna (a life layer for abductors).
 
+**Life, agreed 12 Nov:** finish plants first (L1e life cycle: built; L1f
+panic next), then carry it to animals (Fauna L1, simple wildlife; research
+on creature generation done: skeleton plus parts, mirrored masks for small
+life, IK/verlet motion, boids for flocks and schools; small life as swarms
+at 1 m scale). Panic rules: no planet-wide doom meter; each species reacts
+only to the share of its own kind eradicated; most species don't react,
+they just die off; stages: stress colours, mass bloom, exodus. Exodus only
+for advanced species with complex organs, about one living world in three,
+one spectacular launch. Defences (damaging drones) come later. Captured
+animals give a value bonus over laser-cooked ones, and each capture's seed
+is recorded for a menagerie.
+
 ## M6, the native game (in progress)
 
 - G1 window and planet: done.
