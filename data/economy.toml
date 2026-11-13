@@ -227,7 +227,7 @@ U = 200                      # fissile metal for sappers' charges: 25 of them (m
 # the fleet brings a replicator with a bay for every specialist this body
 # has a use for: sappers and tunnelers anywhere; heat-sink bots only where
 # there is magma (or molten metal or sulfur); foresters only where plants
-# grow; abductors only where animals live (no body has any yet). The
+# grow; abductors only where animals live (only the Dev planet so far). The
 # director orders each kind while there is work for it.
 [units]
 universal_replicator = true
@@ -321,6 +321,11 @@ courier_speed = 60           # ...plus its distance from the mother swarm at thi
 [units.abductor]
 energy_cost = 3000
 keep = 2
+reach_m = 12                 # snatches an animal this close...
+chase_m = 250                # ...runs down ones this near...
+chase_speed = 10             # ...this fast (they flee at 7 m/s); strides to farther herds
+bag_kg = 2000                # stasis sacs full: dropped for the couriers
+live_multiplier = 2.0        # a live catch is worth twice its mass
 
 # ---- The fuser (a refinery module) ----
 # Fuses two atoms into one heavier one: their atomic numbers add up (iron 26

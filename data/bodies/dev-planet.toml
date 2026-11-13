@@ -1,0 +1,253 @@
+# Dev planet: a small test world where every drone in the game has work.
+# This is not a real world for players. Whenever a new drone is added, its
+# work is added here too, so one body exercises the whole roster.
+#
+# What each drone finds here:
+#   cutters, haulers  anything: soil, sediments, granite
+#   sappers           hard granite and gneiss near the surface, plus
+#                     uranium shale and coal for their charges
+#   tunnelers         veins and ore halos round many granite stocks,
+#                     close under the ground
+#   heat-sink bots    open lava pools dotted all over the land (no crust)
+#   foresters         plant life (as on the living world)
+#   abductors         herds of placeholder animals that panic when machines
+#                     come near ([fauna])
+#
+# 5 km across by default; any size works (F1 > body picker).
+name = "Dev planet"
+archetype = "living-world"
+seed = 77001
+radius_m = 5000
+heart = false
+regolith_depth_m = 2
+regolith_material = "soil"
+regolith_max_slope = 0.6
+atmosphere_m = 600
+atmosphere_colour = [120, 170, 230]
+oxygen = 0.21
+space_k = 288
+polar_cooling_k = 20
+polar_depth_m = 40
+
+# Placeholder animals: about this many herds per km of the body's
+# circumference, each with this many animals of this weight (kg).
+[fauna]
+herds_per_km = 3.0
+herd_size = [4, 9]
+kg = [40, 400]
+
+[sun]
+day_k = 300
+day_s = 600
+start_deg = 0
+
+[shape]
+roughness = 0.004
+wavelength_m = 1500
+
+[[layer]]
+name = "inner core"
+outer = 0.19
+material = "iron-nickel"
+temperature_k = 2600
+boundary_noise = 0.01
+
+[[layer]]
+name = "outer core"
+outer = 0.45
+material = "molten-iron"
+temperature_k = 2300
+boundary_noise = 0.012
+
+[[layer]]
+name = "mantle"
+outer = 0.88
+material = "peridotite"
+temperature_k = 1500
+boundary_noise = 0.02
+
+[[layer]]
+name = "crust"
+outer = 1.0
+material = "granite"
+temperature_k = 288
+
+# Thin sediments over the granite: hard rock is never far down.
+[strata]
+depth_m = 120
+fold_amplitude_m = 15
+fold_wavelength_m = 700
+pinch = 0.5
+pinch_wavelength_m = 300
+
+[[strata.band]]
+material = "sandstone"
+thickness_m = [4, 12]
+weight = 2
+
+[[strata.band]]
+material = "shale"              # uranium black shale (the sappers' charges)
+thickness_m = [4, 12]
+weight = 3
+
+[[strata.band]]
+material = "limestone"
+thickness_m = [4, 14]
+weight = 2
+
+[[strata.band]]
+material = "coal"
+thickness_m = [1, 4]
+weight = 1.5
+
+[[strata.band]]
+material = "clay"
+thickness_m = [2, 6]
+weight = 0.8
+
+[[strata.lens]]
+host = "conglomerate"
+material = "gravel"
+position = "base"
+length_m = [15, 50]
+thickness = 0.6
+spacing_m = 80
+nugget = "gold"
+nugget_chance = 0.002
+
+[strata.old]
+cover_m = [100, 200]
+cover_wavelength_m = 1000
+erode_m = 150
+conglomerate = "conglomerate"
+conglomerate_m = [2, 6]
+depth_m = 400
+fold_amplitude_m = 150
+fold_wavelength_m = 300
+pinch = 0.3
+pinch_wavelength_m = 500
+
+[[strata.old.band]]
+material = "gneiss"
+thickness_m = [10, 30]
+weight = 3
+
+[[strata.old.band]]
+material = "quartzite"
+thickness_m = [5, 15]
+weight = 2
+
+[[strata.old.band]]
+material = "banded iron"
+thickness_m = [3, 10]
+weight = 1.5
+
+[faults]
+count = 12
+throw_m = [5, 30]
+length_m = 600
+dip = 0.25
+gouge = "impact breccia"
+gouge_width_m = 1.5
+scarp = 0.4
+
+[[cave]]
+kind = "karst"
+host = ["limestone"]
+scale_m = 20
+threshold = 0.88
+max_depth_m = 200
+
+# Many small granite stocks close under the ground, ringed with ore
+# (copper, lead-zinc, gold veins): the tunnelers' noses lead them there.
+[[intrusion]]
+material = "granite"
+kind = "felsic"
+count = 40
+radius_m = [30, 80]
+top_depth_m = [40, 200]
+dikes = [1, 3]
+dike_material = "andesite"
+veins = [10, 20]
+vein_width_m = [1, 3]
+halo_m = 150
+aureole_m = 10
+skarn_m = 5
+
+[[intrusion]]
+material = "gabbro"
+kind = "mafic"
+count = 20
+radius_m = [40, 100]
+top_depth_m = [250, 600]
+dikes = [1, 2]
+veins = [4, 8]
+halo_m = 100
+aureole_m = 8
+
+[[blob]]
+material = "water"
+count = 10
+radius_min_m = 4
+radius_max_m = 10
+r_min = 0.95
+r_max = 0.98
+
+[[sprinkle]]
+material = "gold"
+host = ["gold-quartz"]
+chance = 0.0005
+r_min = 0.0
+r_max = 1.0
+
+# ---- surface ----
+[[relief]]              # a small sea, so there are coasts
+kind = "lowland"
+chance = 1.0
+width_m = [900, 900]
+height_m = [250, 250]
+sea_level_m = 60
+floor = "basalt"
+floor_m = 40
+
+[[relief.material]]
+material = "water"
+
+[[relief]]              # hills to climb and leap
+kind = "range"
+chance = 1.0
+count = [2, 3]
+width_m = [500, 1000]
+height_m = [100, 300]
+
+# Open lava pools all over the land, with no crust: the heat-sink bots'
+# work, always near some flock.
+[[relief]]
+kind = "basin"
+chance = 1.0
+count = [60, 80]
+width_m = [30, 90]
+height_m = [10, 25]
+extra = 3
+fill_m = 12
+
+[[relief.material]]
+material = "magma"
+
+[[relief]]              # and a few live volcanoes
+kind = "volcano"
+chance = 1.0
+count = [3, 5]
+width_m = [200, 400]
+height_m = [60, 150]
+extra = 0.15
+band_m = [3, 8]
+active_chance = 1.0
+
+[[relief.material]]
+material = "basalt"
+weight = 3
+
+[[relief.material]]
+material = "tuff"
+weight = 1

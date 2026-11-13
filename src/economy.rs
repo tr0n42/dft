@@ -571,13 +571,23 @@ pub struct ForesterSpec {
     pub courier_speed: f64,
 }
 
-/// An abductor: a spider on three legs that snatches live animals. No body
-/// has animals yet, so none is ever built.
+/// An abductor: a spider on three legs that snatches live animals (only
+/// the Dev planet has any yet: placeholder herds, src/fauna.rs). It walks
+/// on the forester's machinery (its life, stride and couriers).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct AbductorSpec {
     pub energy_cost: f64,
     pub keep: u32,
+    /// Snatches an animal this close along the ground (m); runs down ones
+    /// within `chase_m` at `chase_speed` (m/s), strides to farther ones.
+    pub reach_m: f64,
+    pub chase_m: f64,
+    pub chase_speed: f64,
+    /// Kg of live animals in its sacs before it drops them for couriers.
+    pub bag_kg: f64,
+    /// Live animals are worth this many times their mass.
+    pub live_multiplier: f64,
 }
 
 impl Economy {

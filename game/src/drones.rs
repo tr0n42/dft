@@ -427,7 +427,7 @@ fn draw(
         if out.fields_version != paths.version {
             paths.set(out.fields_version, out.fields.clone());
         }
-        (t, out.haulers.clone(), out.units.clone(), out.chunks.clone(), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()))
+        (t, out.haulers.clone(), (out.units.clone(), out.animals.clone()), out.chunks.clone(), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()))
     };
     let lc = lights.rgb();
     let v = *view;
@@ -840,7 +840,8 @@ fn draw(
             let m = mirror.get(x, y).unwrap_or_else(|| body.0.material(x, y));
             m != dft_sim::materials::VACUUM && !flora.get(m as usize).copied().unwrap_or(false)
         };
-        crate::units::draw(&units, now, real_t, &v, [l, b, r, t], cell_px, lc, &solid, &mut pos, &mut col);
+        crate::units::draw(&units.0, now, real_t, &v, [l, b, r, t], cell_px, lc, &solid, &mut pos, &mut col);
+        crate::units::draw_animals(&units.1, now, real_t, &v, [l, b, r, t], cell_px, &mut pos, &mut col);
         drop(mirror);
         if pos.is_empty() {
             pos.extend_from_slice(&[[0.0; 3]; 3]);

@@ -169,6 +169,8 @@ pub struct Out {
     pub haulers: Vec<dft_sim::swarm::HaulerView>,
     /// The specialists (sappers, tunnelers, heat-sink bots, foresters).
     pub units: Vec<dft_sim::swarm::UnitView>,
+    /// Placeholder animals (the Dev planet).
+    pub animals: Vec<dft_sim::swarm::AnimalView>,
     /// The mother swarm: its middle and reach either side (radians), and
     /// its distance from the body's centre (metres).
     pub mother: (f64, f64, f64),
@@ -417,6 +419,7 @@ fn run(shared: &Shared) {
                 stats.tick = s.tick;
                 let haulers = s.hauler_views();
                 let units = s.unit_views();
+                let animals = s.animal_views();
                 stats.haulers = haulers.len();
                 stats.haulers_away = haulers.iter().filter(|h| h.state != dft_sim::swarm::HaulerState::Working).count();
                 stats.starved = s.starved;
@@ -602,6 +605,7 @@ fn run(shared: &Shared) {
                 out.hubs = hubs;
                 out.haulers = haulers;
                 out.units = units;
+                out.animals = animals;
                 out.mother = mother;
                 if heights.is_some() {
                     out.heights = heights;

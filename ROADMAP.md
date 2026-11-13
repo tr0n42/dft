@@ -1,20 +1,93 @@
-# The Dark Forest Theory: what's next
+# The Dark Forest Theory: roadmap
 
-New session? Read HANDOFF.md first.
+New session? Read HANDOFF.md first (how we work, how to set up a PC, what
+was done last), then this file. Last updated 13 November 2026.
 
-**Next up: production, step 2 of the skeleton** (plan agreed with Benjamin
-10 Nov, see HANDOFF.md "Production plan"): machines placed along the mother
-swarm as it wraps the planet, material flowing between them with
-distance-based delays, and the swarm building its own machines (storage
-ships, refiners, fabricators, factories and factory bays) block by block
-from refined elements. Then the drawing (fleet arriving, the modular
-factory with lasers, couriers drawn along the flows), then each hauler's
-own landing spot. Energy (ground units beam it up) after. Heat-sink bots,
-tunnelers, sappers and foresters are in the game for testing through the
-Universal Drone Replicator (below); they still need the meta tree to earn
-them, Benjamin's look and tuning. Abductors wait for animals. Premium units
-(magma diver, seer, beam relay, deep hauler, core lance) come later through
-the per-run tech tree.
+## The documents
+
+Everything we have written down, and where it lives. The design docs live in
+claude.ai (the DarkForestTheory project); `docs/design/` holds Markdown
+snapshots (pulled 10 Nov, see its README). Edit the live doc, then re-export.
+
+| Document | What it is for | Where |
+| --- | --- | --- |
+| HANDOFF.md | How we work with Benjamin, setting up a PC, the latest work in detail, the last session's report ("handoff digestion") | repo root |
+| ROADMAP.md | This file: what's built, where we are, what's next | repo root |
+| README.md | How the code and data are laid out; the tool `.bat` files | repo root |
+| CLAUDE.md | Short standing instructions Claude Code loads every session | repo root |
+| The Dark Forest Theory — Plan | The master plan: vision, architecture, milestones, geology passes, decision log | [live](https://claude.ai/artifact/4Wfryd7cBArfBR7cx6SkCr) · `docs/design/game-design-plan.md` |
+| Swarm Production Design | Production in the swarm: parts, factories, the director's queue, energy, heat-sink bots and tunnelers, build phases, carry-over between runs | [live](https://claude.ai/artifact/3LKCygqRGZSwUVzDd1CktB) · `docs/design/swarm-production.md` |
+| Element Abundance Master Table | All 75 elements against Earth's crust, specialties and their odds, rarity-priced parts, the meta-tree bias | [live](https://claude.ai/artifact/2yb9kfVeL86XptSLn7KX7Y) · `docs/design/element-abundance.md` |
+| Life L1 — Procedural Flora Design | Plants: genomes, the growing-tip engine, niches by chemistry, defences | [live](https://claude.ai/artifact/Ss3ZUbdBKLF9Kk3dJbrS4o) · `docs/design/flora-design.md` |
+| Swarm foundry mockup | The machines' look (factory, refiner, fabricator, couriers, storage ships; the Units and Replicators pages: every specialist) | [live](https://claude.ai/artifact/F1JNmmbvsJ247V5VZPhQvi) · `mockups/swarm-foundry.html` (open-mockup.bat) |
+| Sapper proving ground | The sapper blast's reference (rays, cracks, rubble, plume); the game's blast is ported from it | `mockups/sapper-proving-ground.html` |
+| Planet Viewer | Pictures of every body | [live](https://claude.ai/artifact/DGDJXTtTUNXxRk2LrrJsFx) · built from `viewer/` |
+| Glamour Pass Results | The 5 Nov report on the glamour dial, block textures and dig backdrop | [live](https://claude.ai/artifact/BMYPm1ASX6BQk9jh4TPaSo) |
+| Performance history | Every "500k cutters with X" bench run: cost per unit, per machine and commit | `perf/history.csv` (bench-units.bat) |
+| Measured abundance | What each body holds, element by element | `data/reference/abundance*.csv` (run-abundance.bat) |
+| Locked fingerprints | The generator's locked output per body | `data/reference/fingerprints.toml` |
+
+Not yet written down as a doc (the decisions live in HANDOFF.md and below):
+the Fauna L1 design (animals, panic, abductors), the unit roster's final
+designs, and the economy pass's two tech trees.
+
+## Where we are (13 Nov): reassessment
+
+The plan of 10 Nov said "next: production, step 2". We went elsewhere for
+three days. Most of that work still serves the plan:
+
+| Work since 10 Nov | Where it fits | State |
+| --- | --- | --- |
+| Universal Drone Replicator and the specialists (sappers, tunnelers, heat-sink bots, foresters, abductors) | Swarm Production Design's ground units, built early for testing; the meta tree earns them later | built, waiting on a PC look |
+| Hovering haulers, procedural legs, crab forester, spider abductor, the lighting engine | Unit beautification (later phases), done early from the mockup | built, waiting on a PC look |
+| Sapper blast physics, charges, the fuser, uranium in rubble | The sapper's design; the fuser is a first refinery module (production) | built, waiting on a PC look |
+| Plant life cycle (L1e), plant sway | Life L1 | built; sway approved |
+| The CPU fix (off screen approximated) | Keeps the game playable as units are added | done |
+| The unit platform (`src/units/`), samecheck, the "500k cutters with X" bench | Benjamin's 13 Nov workflow: measure each unit's cost as it is designed | done; stage 1 baseline recorded |
+| The Dev planet and placeholder animals | One body that exercises every drone; a first step toward Fauna L1 | done, waiting on a PC look |
+
+Still skipped since 10 Nov: production steps 2-4 (machines placed along the
+mother swarm, distance delays, swarm-built machines, their drawing, hauler
+landing spots), energy as an economy, L1f plant panic, Fauna L1 proper, the
+economy pass (tech trees), and a long list of things waiting on a PC look
+(everything marked so below).
+
+**Proposed order, for Benjamin to confirm:**
+1. **A PC-look session:** run-dev-planet.bat first (every drone in one
+   place), then the older test-*.bat files; note what looks wrong.
+2. **Unit design, one stage at a time** with the bench (agreed 13 Nov):
+   cutters and haulers to what Benjamin wants (stage 1), then sappers,
+   tunnelers, heat-sink bots, foresters and abductors. Each unit's work is
+   added to the Dev planet; bench-units.bat after each.
+3. **Production steps 2-4**, now with the whole roster to build: placement
+   along the swarm, distance delays, swarm-built machines, drawing, hauler
+   landing spots. Then energy.
+4. **Life:** L1f plant panic, then Fauna L1 (real animals replacing the
+   placeholders); then the economy pass and M7.
+
+## Units: the roster and the "500k cutters with X" bench
+
+Each unit's code is its own file in `src/units/` (cutter, hauler, sapper,
+tunneler, heatsink, forester, abductor; shared code in `platform.rs`).
+`bench-units.bat` runs 500,000 cutters with the units designed so far
+(`perf/stage.txt`), times each unit's code and appends to
+`perf/history.csv`; `samecheck` proves a refactor changed nothing. Details
+in HANDOFF.md.
+
+| Stage | Adds | State |
+| --- | --- | --- |
+| 1 | cutters + haulers | working; Benjamin's design pass is next. Baseline 189 s real for 20 game min |
+| 2 | sappers | working (blast, charges, fuser); waits for stage 1 |
+| 3 | tunnelers | working (the old Tunneler's shaft); waits |
+| 4 | heat-sink bots | working; the bench needs magma near the flocks (the Dev planet has it) |
+| 5 | foresters, abductors | working; abductors hunt the Dev planet's placeholder animals |
+
+Loose bolts found so far (measured, not fixed) are listed in HANDOFF.md.
+
+Heat-sink bots, tunnelers, sappers, foresters and abductors still need the
+meta tree to earn them, and Benjamin's look and tuning. Premium units (magma
+diver, seer, beam relay, deep hauler, core lance) come later through the
+per-run tech tree.
 
 **Sappers' uranium, settled 12 Nov (built, tests pass, waiting on a PC look:
 test-fuser.bat):** the refinery's fuser (src/fuser.rs, `[fuser]` in
@@ -24,8 +97,7 @@ partners first from common atoms (Fe+Fe=Te, Ca+Ca=Zr, Te+Zr=U). With no
 uranium to be had or fused, a sapper gets a conventional 5 kt charge cast
 from the stockpile (`[[units.sapper.charge]]`: RDX 3,125 t, else aluminium
 or magnesium + oxygen slurry 5,000 t). A nuclear blast leaves half its
-unreacted uranium (~3.9 kg) in its rubble; cutters bring it back. Open:
-fauna (a life layer for abductors).
+unreacted uranium (~3.9 kg) in its rubble; cutters bring it back.
 
 **Life, agreed 12 Nov:** finish plants first (L1e life cycle: built; L1f
 panic next), then carry it to animals (Fauna L1, simple wildlife; research
@@ -36,8 +108,10 @@ only to the share of its own kind eradicated; most species don't react,
 they just die off; stages: stress colours, mass bloom, exodus. Exodus only
 for advanced species with complex organs, about one living world in three,
 one spectacular launch. Defences (damaging drones) come later. Captured
-animals give a value bonus over laser-cooked ones, and each capture's seed
-is recorded for a menagerie.
+animals give a value bonus over laser-cooked ones (the placeholder abductor
+credits live catches at 2x), and each capture's seed is recorded for a
+menagerie. Placeholder herds on the Dev planet (src/fauna.rs) stand in until
+Fauna L1.
 
 ## M6, the native game (in progress)
 
@@ -62,10 +136,11 @@ is recorded for a menagerie.
 - **Universal Drone Replicator and the specialists: built, tests pass,
   waiting on a PC look (test-replicator.bat).** See HANDOFF.md. Extra
   factory bays (`[units]` in data/economy.toml) build sappers, tunnelers,
-  heat-sink bots and foresters, each only on bodies where its skill has work
+  heat-sink bots, foresters and abductors (abductors only where there are
+  animals: the Dev planet), each only on bodies where its skill has work
   (`cargo run --release --bin unitcheck` prints every body) and only while
-  there is work. Behaviours in src/specialists.rs, drawing in
-  game/src/units.rs, tests in tests/specialists.rs. New parts (nuclear
+  there is work. Behaviours in src/units/*.rs (one file per unit, since
+  13 Nov), drawing in game/src/units.rs, tests in tests/specialists.rs. New parts (nuclear
   charge, lattice core, tripod leg, cutting laser...) priced by
   tools/recipes.py; the charge takes uranium only. Sappers that are
   destroyed go off (chains). Drawn from the mockup's designs but not yet
@@ -282,8 +357,8 @@ is recorded for a menagerie.
     a sparse probe (about 3 ms a surface chunk, from 20). Tiles coarser
     than 16 m a texel leave plants out. Sim cost off-screen +14%, memory
     about +50 MB on the living world.
-  - Next: L1e life cycle, defences and animation (the plant draw layer
-    near the camera), L1f doom reactions. Later: bound the flora caches,
+  - L1e life cycle: built (12 Nov); plant sway near the camera: approved.
+    Next: L1f doom reactions (panic), defences and attack animation. Later: bound the flora caches,
     a canopy tint for far-out tiles.
   - Economy pass, Benjamin's sketch: two tech trees.
     - The base tree is unlocked step by step on every planet: from a base,

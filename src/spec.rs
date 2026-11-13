@@ -593,11 +593,24 @@ pub struct BodySpec {
     /// (bodies opt in until life is part of the game).
     #[serde(default)]
     pub life: Option<f64>,
+    /// Placeholder animals (the Dev planet): herds that wander the land and
+    /// panic when machines come near, prey for abductors (src/fauna.rs).
+    #[serde(default)]
+    pub fauna: Option<FaunaSpec>,
     /// Pin the body's colour scheme instead of drawing it from the seed:
     /// "analogous", "complementary", "split-complementary", "triadic" or
     /// "square", and the base hue in degrees (0 red, 120 green, 240 blue).
     #[serde(default)]
     pub palette: Option<PaletteSpec>,
+}
+
+/// Placeholder animals: about `herds_per_km` herds per km of the body's
+/// circumference, each of `herd_size` animals weighing `kg` (ranges).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FaunaSpec {
+    pub herds_per_km: f64,
+    pub herd_size: [u32; 2],
+    pub kg: [f64; 2],
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

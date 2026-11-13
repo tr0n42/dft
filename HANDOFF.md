@@ -1,7 +1,8 @@
 # The Dark Forest Theory: handoff for a new session
 
-Read this first, then ROADMAP.md (what's built and what's next) and README.md
-(how the code is laid out). Last updated 12 November 2026.
+Read this first, then ROADMAP.md (what's built, where we are, what's next,
+and a map of every document) and README.md (how the code is laid out). Last
+updated 13 November 2026, on BKONEN-R16-W11.
 
 ## Working with Benjamin
 
@@ -13,12 +14,53 @@ Read this first, then ROADMAP.md (what's built and what's next) and README.md
   live progress, not popping over his other work.
 - He wants honest numbers, frequent short progress messages during long
   work, and plain words.
-- The project is a git repo pushed to https://github.com/tr0n42/dft. Since
-  11 November 2026 it is cloned on his PC in
-  `Downloads\DarkForestTheory-source`, and the work happens in Claude Code there (see
-  CLAUDE.md). Rust stable (MSVC, aarch64), the VS 2022 Build Tools and
-  Python 3.12 (for tools/*.py; `%LOCALAPPDATA%\Programs\Python\Python312-arm64`)
-  were installed on 11 Nov.
+- The project is a git repo pushed to https://github.com/tr0n42/dft
+  (branch `main`). He works on more than one PC; on each it is cloned in
+  `Downloads\DarkForestTheory-source` and the work happens in Claude Code
+  there (see CLAUDE.md). Commit and push only when he asks.
+
+## Picking up on another PC
+
+1. **Pull first:** `git pull` in the project folder. If the other PC has
+   work not yet pushed, push it there first (as of 13 Nov the second PC's
+   forester and sapper hull work and its 8:00 sim runs were not on GitHub).
+2. **Tools** (installed on the first PC on 11 Nov): Rust stable (MSVC),
+   the VS 2022 Build Tools (C++ workload), Python 3.12 for tools/*.py, git,
+   and the GitHub CLI. If `git push` asks for a username, run
+   `gh auth login` once, then `gh auth setup-git`.
+3. **First builds are slow** (fat LTO, one codegen unit): `cargo build
+   --release` at the root, `cd game && cargo build --release
+   --ignore-rust-version` for the game. `cargo check --release` for quick
+   compile checks.
+4. **Check it plays the same:** `cargo run --release --bin samecheck`
+   (about 4 minutes) prints a fingerprint per fixed game; compare with the
+   lines in "The unit platform" below. They should match on any PC with
+   the same commit (if not, that's a finding worth reporting).
+5. **Benchmarks are per machine:** perf/history.csv keeps each PC's rows
+   apart (by computer name); the first `bench-units.bat` on a new PC
+   records its own baseline. Compare impacts on one PC, not across PCs.
+6. **Claude's memory is per PC** (it lives in the user profile, not in
+   git). The standing rules it holds are copied here so a fresh PC has
+   them:
+   - Art: everything in 1 m blocks, no smooth circles or gradients; one
+     lighting engine (the mockup's emit/lightPass). Every machine is
+     biomechanical (carapace, ribs, sinew, tendrils, eyes; no long rigid
+     bars). One parts library classed by matter, picked by the planet;
+     body-horror grafts switchable; life parts only where there is life.
+     (See "Machine art" below.)
+   - After publishing a claude.ai page (e.g. the foundry mockup), open it
+     for Benjamin with the Artifact tool: he can't find links in chat.
+   - Off screen can almost always be approximated: the sim must keep going,
+     at least to the eye.
+   - Performance: "we need performance impacts more than performance now".
+     Measure every change per unit (bench-units.bat), no optimisation that
+     isn't essential, each unit's code in its own file under src/units/.
+   - The Dev planet must exercise every drone: each new drone's work is
+     added to data/bodies/dev-planet.toml.
+   - Life: plants first (L1e built, L1f panic next), then fauna; no
+     planet-wide doom meter, each species reacts only to its own losses,
+     most don't react; exodus rare; defences later; live captures worth
+     more than cooked, each recorded for a menagerie.
 
 ## How the work is done
 
@@ -39,6 +81,9 @@ Read this first, then ROADMAP.md (what's built and what's next) and README.md
 
 ## Design documents
 
+ROADMAP.md opens with a map of every document (docs, mockups, pages, data).
+In short:
+
 Snapshots are in `docs/design/` (pulled 10 November 2026; images and
 diagrams don't export). The originals are claude.ai docs in the
 DarkForestTheory project, opened by link:
@@ -58,6 +103,97 @@ DarkForestTheory project, opened by link:
   `docs/design/game-design-plan.md`),
   https://claude.ai/artifact/4Wfryd7cBArfBR7cx6SkCr
 
+## The unit platform and "500k cutters with X" (13 Nov)
+
+Agreed with Benjamin 13 Nov: we need performance *impacts* more than
+performance now. Every change is measured; no optimisation that isn't
+essential; each unit's code lives in its own file so its cost shows on its
+own.
+
+- **Unit files** (`src/units/`, modules of `swarm`): `cutter.rs` (events,
+  targeting, heat, wear), `hauler.rs`, `sapper.rs` (blast, rubble settling,
+  charges), `tunneler.rs`, `heatsink.rs`, `forester.rs` (walkers, bags),
+  `abductor.rs` (its hunt; it strides on the forester's code).
+  `units/platform.rs` holds what they share (the `Units` list, `Skills`,
+  the specialist director and once-a-second dispatch, ground helpers,
+  views, saves, hashes). The tick, flocks, the cutter/hauler director and
+  production stay in `swarm.rs`. New unit code goes in its unit's file;
+  anything two units need goes in the platform.
+- **The split changed nothing:** `samecheck` (src/bin/samecheck.rs) runs
+  fixed games (every unit at work, on and off screen, through a save; the
+  Dev planet added as the sixth) and prints fingerprints; identical before
+  and after. Run it around any refactor that should not change play.
+  Fingerprints at the end of 13 Nov (first column is the game):
+  living world economy `f55405267d09fc16`, on screen `69415c042d6aa981`,
+  lava world `2c106b7cc0ebf016`, 500k free `8e3e5151ba8f238e`, active
+  planetoid `452ca9b91f3f602a`, dev planet `6a0bf4415c84448e`.
+- **Per-unit timers:** `Sim::unit_prof`, named in `swarm::UNIT_NAMES`.
+- **The workflow:** `bench-units.bat` (`src/bin/unitbench.rs`) runs 500,000
+  cutters on the 35 km living world, zoomed out, 20 game min, for each stage
+  up to `perf/stage.txt`: 1 cutters + haulers, 2 + sappers, 3 + tunnelers,
+  4 + heat-sink bots, 5 + foresters and abductors. Each unit is designed
+  to what Benjamin wants, then its stage turns on. Every run appends a row
+  per stage to `perf/history.csv` (checked in: machine, commit,
+  fingerprint, ms per game second for each unit and the platform's parts)
+  and prints the change since the last run on that PC; the same
+  fingerprint means only speed changed. Specialists in the bench are kept
+  at the economy's `keep` counts for free (`Sim::free_units`), and the bays
+  of units not in the stage are removed.
+- **Stage 1 baseline (this PC):** 189 s real for 1,200 game s, ~200k
+  cutters working at the end; per game second: cutters 90 ms, sand and
+  heat 35, platform other 22, rock bodies 8, haulers 2, plant life 1.
+- **Loose bolts noticed so far (not fixed):** cutter events get dearer as
+  the swarm spreads (1.5 to 7 us each); sand and heat grows with the dug
+  area; the heat-sink and forester work scans run whenever their bays
+  exist; in stage 4 the bots found no open magma near the flocks of the
+  living world (the Dev planet has plenty); drone drawing zoomed far out costs ~8 ms a frame at
+  500k. A loaded save plays out a little differently from the same game
+  left running (samecheck shows it; it was so before 13 Nov). On the Dev
+  planet the heat-sink bots freeze nothing in the 5 minutes after a load
+  (frozen stays at its saved value): their work state may not survive the
+  save.
+- **Fixed 13 Nov:** each drone event scanned every hauler (`hauler_at`)
+  and every cut checked every hub (`work_near`); both indexed now (same
+  results), 500k for 20 game min went from 251 s to 166 s.
+
+### The Dev planet (13 Nov)
+
+`data/bodies/dev-planet.toml` (`run-dev-planet.bat`, or pick "dev-planet" in
+F1): a 5 km test world where every drone has work. **Benjamin's rule: every
+new drone gets its work added here.** Thin sediments over granite and gneiss
+(sappers), uranium shale and coal (charges), 40 small ore-ringed granite
+stocks close under the ground (tunnelers), 60-80 open lava pools with no
+crust (heat-sink bots), plant life (foresters), and a `[fauna]` section:
+herds of placeholder animals (abductors). `unitcheck -- dev-planet` shows it
+builds all five specialists; samecheck's sixth game ("dev planet, economy")
+shows each at work.
+
+- **Placeholder animals** (`src/fauna.rs`, a module of `swarm`): herds
+  (3 per km of circumference, 4-9 animals of 40-400 kg) graze and drift;
+  when a machine comes within 80 m (walker, sapper, bot, tunneler, working
+  flock) or one of the herd is snatched, the whole herd flees at 7 m/s for
+  25 s. They die if the ground is eaten 30 m from under them or turns to
+  liquid. A new herd wanders in every 20 s while there are fewer than at
+  the start, so they never run out. Saved (sim save version 14) and in the
+  state hash only on bodies that have them. Timed on their own
+  (`Sim::fauna_prof`, the bench's "animals" column). Drawn as block critters (`draw_animals` in
+  game/src/units.rs) that trot, with a white tail up while fleeing.
+- **Abductors** (`units/abductor.rs`): ordered while there are animals;
+  stride to the nearest herd no other abductor is after, run down the
+  nearest animal within 250 m at 10 m/s, snatch it within 12 m into a
+  stasis sac, and drop full sacs (2 t) for the couriers. Live catches are
+  credited at 2x their mass as flesh (`[units.abductor]` in economy.toml).
+  Their hunt has its own timer (`U_ABDUCTOR`).
+- **Cost on the Dev planet** (5 km, 20k free cutters, all five specialists,
+  20 game min, this PC; ms per game second): cutters 17.9, animals 12.7
+  (about 400 of them), sand and heat 8.6, platform other 3.1, rock bodies
+  2.3, foresters 1.8, sappers 1.0, heat-sink bots 1.0, plant life 0.6,
+  haulers 0.2, tunnelers 0.1, abductors under 0.05. **Loose bolt (not
+  fixed):** each animal looks for the ground three times a second
+  (`fauna_work`: `ground_at`, then `dry_ground` here and one step on; each
+  walks down from 64 m over the surface), and the first two repeat each
+  other.
+
 ## Where things stand (November 2026)
 
 Most recent work (12 Nov), built and passing the tests, waiting on a PC look:
@@ -76,7 +212,7 @@ Most recent work (12 Nov), built and passing the tests, waiting on a PC look:
     a 3 km lava world (no uranium): 72 sappers, 384 kg fused, 192k E.
   - **Conventional charges** (`[[units.sapper.charge]]`): only when no
     uranium can be had or fused, the sapper's bay casts a 5 kt charge
-    straight from the stockpile (src/specialists.rs, `cast_charge`; the
+    straight from the stockpile (src/units/sapper.rs, `cast_charge`; the
     sapper's recipe then drops its nuclear charge): RDX (1.6x TNT, 3,125 t,
     needs ~1,180 t of nitrogen), else aluminium- or magnesium-oxygen slurry
     (counted at TNT strength, 5,000 t). Cast only while the stockpile holds
@@ -106,11 +242,11 @@ Most recent work (12 Nov), built and passing the tests, waiting on a PC look:
   (game/src/units.rs `draw_tripod`, `gait_step`): shell, eye stalks, saw
   claws, rotor, bag; the abductor's head, eyes, fangs, whip palps and sac;
   the mockup's gait (planted feet, springy body). The body rides 50 m over
-  the tallest plant within 30 m (src/specialists.rs `walker_rise`), feet
+  the tallest plant within 30 m (src/units/forester.rs `walker_rise`), feet
   re-found on the ground every second. A full bag is dropped for couriers
   (drawn coming down for it); its contents are credited when they lift it.
 - **Sapper blast, ported one for one from the proving ground**
-  (src/specialists.rs `sapper_blast`): energy rays, cracks, pieces held
+  (src/units/sapper.rs `sapper_blast`): energy rays, cracks, pieces held
   together, molten heart, thrown rock, loose rubble and a plume out of the
   drill hole; goes off with the top of its blast 50 m down; keeps off spots
   other sappers are heading for; drill spoil spouts out and lands as rubble.
@@ -150,14 +286,14 @@ Most recent work (12 Nov), built and passing the tests, waiting on a PC look:
 Earlier (11 Nov), built and passing the tests, waiting on a PC look:
 
 - **Universal Drone Replicator** (11 Nov, testing stand-in for the meta
-  tree; `[units]` in data/economy.toml, src/specialists.rs,
+  tree; `[units]` in data/economy.toml, src/units/*.rs (was src/specialists.rs),
   game/src/units.rs, tests/specialists.rs; test with test-replicator.bat).
   Extra factory bays build the specialists designed in the foundry mockup's
   Units page, only where their skill has work (`Skills`; report for every
   body: `cargo run --release --bin unitcheck`): sappers and tunnelers
   everywhere, heat-sink bots where there is magma or molten metal/sulfur
   (and only once an open pool is found near a flock), foresters where plants
-  grow, abductors nowhere (no body has animals yet). Sappers: crawl down
+  grow, abductors where there are animals (the Dev planet, since 13 Nov). Sappers: crawl down
   cracks/caves or drill, go off deep (2 kt, 18 m radius: a cavity and cracked
   rock cutters take in half the time); anything that destroys one (another
   blast, magma, blast heat, falling rock) sets it off, so they chain. Their
@@ -241,6 +377,10 @@ Not yet redesigned: the fabricator and factory ("later").
 
 ## What's next
 
+See ROADMAP.md "Where we are (13 Nov)" for the reassessment and the proposed
+order (a PC-look session, the units stage by stage, then production, then
+life). The production plan below still stands for step 3 of that order.
+
 - **Production plan** (agreed with Benjamin 10 Nov; it refines the Swarm
   Production Design doc):
   - The swarm arrives as a fleet: a storage ship with refined elements, a
@@ -279,10 +419,63 @@ Not yet redesigned: the fabricator and factory ("later").
   radioactivity (technetium, polonium, astatine and francium are on no body
   until then).
 
-## Last session's report (12 November 2026)
+## Last session's report (13 November 2026)
 
 When Benjamin asks for a "handoff digestion", repeat this section to him
 as it stands.
+
+**What we did:** pushed and pulled between the two PCs, ran the first
+500k-cutter stress test, fixed the biggest slowdown it found, split every
+unit's code into its own file, built the "500k cutters with X" benchmark,
+and made the Dev planet with placeholder animals for the abductor.
+
+**500k stress test:** with 500,000 cutters the cost grew faster than the
+swarm: every drone event looked through every hauler, and every cut
+through every hub. Both are indexed now: 20 game minutes went from 251 s to
+166 s with exactly the same game.
+
+**Unit platform:** each unit's code is in its own file (src/units/:
+cutter, hauler, sapper, tunneler, heatsink, forester, abductor, plus
+platform.rs for what they share). A new tool, samecheck, proved the game
+plays exactly the same after the move.
+
+**"500k cutters with X":** bench-units.bat runs 500k cutters for 20 game
+minutes with the units designed so far, times each unit, and keeps every
+run in perf/history.csv so we see what each change costs. Stage 1 (cutters
++ haulers) baseline: 189 s real; per game second cutters 90 ms, sand and
+heat 35, the rest of the main loop 22, falling rock 8, haulers 2. The plan:
+design cutters and haulers to what you want, then add sappers, tunnelers,
+heat-sink bots, foresters and abductors one stage at a time.
+
+**Dev planet (run-dev-planet.bat):** a 5 km test world where every drone
+has work: hard rock and uranium shale (sappers), ore close under the ground
+(tunnelers), dozens of open lava pools (heat-sink bots), plants (foresters),
+and herds of placeholder animals (abductors). The animals are block
+critters that graze, and run with their white tail up when a machine comes
+within 80 m or one of the herd is snatched. New herds wander in so they
+never run out. Abductors stride to a herd, run an animal down and snatch it
+alive into a stasis sac; couriers carry full sacs up, worth twice their
+mass. In 30 game minutes: 35 blasts, 1,100 t of lava frozen, 9,900 t of
+plants, 430 m of shaft, 633 animals caught, 445 still roaming. Every new
+drone gets its work added to this planet.
+
+**Costs found (measured, not fixed):** cutter events get dearer as the swarm
+spreads; sand and heat grows with the dug area; the animals cost 12.7 ms a
+game second for about 400 of them (each looks for the ground three times a
+second), about 70% of what 20,000 cutters cost.
+
+**Roadmap:** ROADMAP.md now opens with a map of every document and a
+reassessment: what the last three days built, where it fits the plan, what
+was skipped (production steps 2-4, energy, plant panic, real animals, the
+tech trees), and a proposed order to confirm: a PC-look session, then the
+units stage by stage, then production, then life.
+
+**Tests:** full suite 104 passed, 2 failed, both on the new planet file
+(its generator fingerprint wasn't locked yet, and it switched plant life
+on in its own file, which no body does); both fixed and passing. Game
+builds. Committed and pushed.
+
+## Previous session's report (12 November 2026)
 
 **What we did:** plants now live and die, the forester became a sideways
 crab, walkers got procedural legs, the sapper's blast is ported one for
@@ -377,7 +570,7 @@ the eye; simplify the boom so it doesn't hitch. The blast's own maths was
 never the cost (about 20 ms); the stall was flying every thrown cell as a
 physics piece (often 1,000+ per blast) and then settling them. Now a blast
 on screen throws at most 200 pieces and blows at most 200 out of its plume
-(`THROW_MAX`, `PLUME_MAX` in specialists.rs, a fixed random share); the
+(`THROW_MAX`, `PLUME_MAX` in src/units/sapper.rs, a fixed random share); the
 rest lies as rubble where it broke. Watched everywhere at once
 (`simbench ... all`), 10 game min went from about 40 s to 28 s.
 

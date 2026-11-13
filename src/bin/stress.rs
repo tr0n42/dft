@@ -68,6 +68,7 @@ fn main() {
     let start = Instant::now();
     let (mut last_t, mut last_w) = (0.0, 0.0);
     let mut next = every;
+    let (mut ev0, mut se0) = (0u64, 0u64);
     // BOOST=n BOOST_AT=seconds: raise the free swarm to n then (as a player
     // turning the count up mid-game).
     let boost: Option<(u64, f64)> = env::<u64>("BOOST").map(|n| (n, env::<f64>("BOOST_AT").unwrap_or(0.0)));
@@ -92,6 +93,15 @@ fn main() {
             );
             let total: f64 = s.prof.iter().sum::<f64>().max(1e-9);
             println!("           time in: drone events {:.0}%, sandbox {:.0}%, rock bodies {:.0}%, per-second work {:.0}%", 100.0 * s.prof[0] / total, 100.0 * s.prof[1] / total, 100.0 * s.prof[2] / total, 100.0 * s.prof[3] / total);
+            {
+                let ev = s.counts[0] - ev0;
+                let se = s.counts[1] - se0;
+                ev0 = s.counts[0];
+                se0 = s.counts[1];
+                let f: Vec<String> = (0..12).map(|i| format!("{:.1}", s.prof2[i])).collect();
+                s.prof2 = [0.0; 12];
+                println!("           events {} ({:.2} us each), searches {} ({:.2} us each, {:.1} s); seconds: events {:.1}, sandbox {:.1}, bodies {:.1}, per-second {:.1} (building {:.1}, packet {:.1}, orbit {:.1}); finer {}", ev, s.prof[0] * 1e6 / ev.max(1) as f64, se, s.prof[4] * 1e6 / se.max(1) as f64, s.prof[4], s.prof[0], s.prof[1], s.prof[2], s.prof[3], s.prof[5], s.prof[6], s.prof[7], f.join(","));
+            }
             s.prof = [0.0; 8];
             let st = &s.sandbox.stats;
             println!("           flow fields: {} swept, {:.0} ms", s.sweeps, s.flow_s * 1000.0);

@@ -1,0 +1,2 @@
+date,machine,commit,stage,body,km,drones,game_s,real_s,fingerprint,note,cutters,haulers,sappers,tunnelers,heat-sink bots,foresters,abductors,sand and heat,rock bodies,life,platform other,animals
+2026-11-13 16:56,BKONEN-R16-W11,d9521e9+changes,1,living-world,35,500000,1200,189.1,eedd04ec8d2e5e28,units split into files,89.78,2.25,0.04,0.00,0.00,0.00,0.00,34.73,7.58,0.88,22.31

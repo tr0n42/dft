@@ -22,9 +22,31 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
-#[path = "specialists.rs"]
-mod specialists;
-pub use specialists::{Skills, UnitView};
+// The units: each in its own file under src/units/, on the platform
+// (units/platform.rs and this file).
+#[path = "units/platform.rs"]
+mod platform;
+#[path = "units/cutter.rs"]
+mod cutter;
+#[path = "units/hauler.rs"]
+mod hauler;
+#[path = "units/sapper.rs"]
+mod sapper;
+#[path = "units/tunneler.rs"]
+mod tunneler;
+#[path = "units/heatsink.rs"]
+mod heatsink;
+#[path = "units/forester.rs"]
+mod forester;
+#[path = "units/abductor.rs"]
+mod abductor;
+#[path = "fauna.rs"]
+mod fauna;
+pub use fauna::AnimalView;
+#[allow(unused_imports)]
+use {abductor::*, cutter::*, fauna::*, forester::*, heatsink::*, platform::*, sapper::*, tunneler::*};
+pub use hauler::{Hauler, HaulerState, HaulerView};
+pub use platform::{Skills, UnitView};
 
 /// A small, fast, deterministic hash for cell coordinates. The standard one is
 /// built to resist attacks, which costs time we don't need to spend here.
@@ -193,52 +215,6 @@ pub struct Hub {
     pub ring: Option<usize>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Phase {
-    Idle,
-    /// Flying out and cutting; on the event, the cell is taken. `from` is
-    /// where it set off; `lava` if it chose to swallow lava.
-    Outbound { cell: (i64, i64), from: (f64, f64), lava: bool },
-    /// Flying from `from` to its flock's hauler with a full hold.
-    Inbound { hub: usize, from: (f64, f64) },
-    /// At its flock with a full hold and no hauler there to take it.
-    Waiting,
-}
-
-#[derive(Debug, Clone)]
-struct Drone {
-    alive: bool,
-    home: usize,
-    phase: Phase,
-    life_left: f64,
-    trip_start: u64,
-    /// Where it last dug: it looks for its next cell near there.
-    last: Option<(i64, i64)>,
-    /// Searches in a row that found nothing: it waits longer after each.
-    fails: u8,
-    /// When the current flight leg began (also what the leg cost in energy).
-    leg_start: u64,
-    /// kg in the hold, and what it is worth credited.
-    hold: f64,
-    hold_cr: f64,
-    /// Energy carried (E).
-    tank: f64,
-    /// Its temperature inside (kelvin).
-    heat_k: f64,
-}
-
-/// What a hauler is doing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HaulerState {
-    /// Hovering over its flock, taking loads.
-    Working,
-    /// Flying up to the mother swarm, full.
-    Lifting,
-    Unloading,
-    /// Flying back down to its flock (or down for the first time).
-    Returning,
-}
-
 /// What a load is made of, roughly: up to six materials and their kg (the
 /// least of them dropped as others come), for drawing cargo in its colours.
 pub type Mix6 = [(crate::materials::MatId, f32); 6];
@@ -256,27 +232,6 @@ pub fn mix_add(mix: &mut Mix6, m: crate::materials::MatId, kg: f32) {
     if least < kg {
         mix[i] = (m, kg);
     }
-}
-
-/// A hauler: a big drone serving one flock (`site`, a landing point).
-#[derive(Debug, Clone)]
-pub struct Hauler {
-    pub site: usize,
-    pub state: HaulerState,
-    /// kg aboard, and what it is worth credited.
-    pub load: f64,
-    pub credited: f64,
-    /// The flight under way: from, to, and when it leaves and arrives (ticks).
-    pub from: (f64, f64),
-    pub to: (f64, f64),
-    pub t0: u64,
-    pub t1: u64,
-    pub life_left: f64,
-    pub alive: bool,
-    /// When it last lifted off for the mother swarm (tick), to time its trip.
-    pub lift_at: u64,
-    /// What its load is made of (for drawing).
-    pub mix: Mix6,
 }
 
 /// The mother swarm: one long cloud high over the ground, spreading both
@@ -362,31 +317,6 @@ pub enum Happening {
 fn ang_dist(a: f64, b: f64) -> f64 {
     let d = (a - b).rem_euclid(std::f64::consts::TAU);
     d.min(std::f64::consts::TAU - d)
-}
-
-/// A hauler as the screen needs it: it flies from `from` to `to` between
-/// game times t0 and t1 (easing in and out), and is `fill` full (0 to 1).
-#[derive(Debug, Clone, Copy)]
-pub struct HaulerView {
-    pub from: (f64, f64),
-    pub to: (f64, f64),
-    /// Its flying height (distance from the centre): see route_at.
-    pub cruise: f64,
-    pub t0: f64,
-    pub t1: f64,
-    pub fill: f32,
-    pub state: HaulerState,
-    /// What its load is made of, and which hauler it is (for drawing).
-    pub mix: Mix6,
-    pub id: u32,
-}
-
-impl HaulerView {
-    pub fn at(&self, t: f64) -> (f64, f64) {
-        let k = if self.t1 > self.t0 { ((t - self.t0) / (self.t1 - self.t0)).clamp(0.0, 1.0) } else { 1.0 };
-        let k = k * k * (3.0 - 2.0 * k);
-        route_at(self.from, self.to, self.cruise, k)
-    }
 }
 
 /// How high (distance from the centre) a hauler flies from `from` to `to`:
@@ -520,6 +450,16 @@ pub struct Sim {
     hub_dry: Vec<bool>,
     /// Bumped whenever a hub opens, dries up, ends or appears.
     hub_gen: u64,
+    /// Haulers by site (indices into `haulers`, ascending), so a drone finds
+    /// its flock's hauler without scanning every hauler. Rebuilt at the top
+    /// of a step when `haulers_moved`; while stale, lookups scan instead.
+    hauler_by_site: Vec<Vec<usize>>,
+    haulers_moved: bool,
+    /// Hubs by square of `search_m`, so `work_near` checks only the hubs
+    /// near a cell. Rebuilt when `hubs_moved` or the count changes.
+    hub_grid: HashMap<(i64, i64), Vec<usize>>,
+    hub_grid_n: usize,
+    hubs_moved: bool,
     /// Drones waiting for work because every hub was dry (each at its own hub).
     parked: Vec<u32>,
     /// The haulers, and per flock the cutters waiting to unload.
@@ -687,7 +627,11 @@ pub struct Sim {
     /// What this body offers the specialists, and the specialists out (see
     /// specialists.rs).
     pub skills: Skills,
-    units: specialists::Units,
+    units: platform::Units,
+    /// Placeholder animals (bodies with a [fauna] section: the Dev planet).
+    fauna: fauna::Fauna,
+    /// (Profiling) seconds spent on the animals.
+    pub fauna_prof: f64,
     /// Profiling (native builds): seconds spent in each part of a step, named
     /// in PROF_NAMES. The first four add up to the whole step; the rest are
     /// parts of those.
@@ -695,12 +639,18 @@ pub struct Sim {
     /// (Profiling) finer timings: break_free_big, break_free, bodies step,
     /// rock landed, sandbox step, sandbox changes applied, blast tick, the rest.
     pub prof2: [f64; 12],
+    /// (Profiling) seconds spent in each unit's own code (units/*.rs), named
+    /// in UNIT_NAMES, so each unit's cost shows on its own.
+    pub unit_prof: [f64; 7],
     /// How often things happened, named in COUNT_NAMES.
     pub counts: [u64; 6],
     /// Economy off (a test mode for the game): drones cost nothing and the
     /// swarm grows to this many, all simulated one by one; no purchases, no
     /// launch. None (the default) is the real game. Not saved or hashed.
     pub free_drones: Option<u64>,
+    /// (Benchmarks, with `free_drones`) specialists kept at these counts for
+    /// free: one launched a second while short (see src/bin/unitbench.rs).
+    pub free_units: Vec<(crate::production::Unit, u32)>,
     /// For a renderer keeping its own copy of every drone's flight leg: the
     /// drones whose leg changed since it last looked. None keeps no record.
     pub leg_track: Option<LegTrack>,
@@ -735,28 +685,6 @@ fn turn(n: u32) -> (f64, f64) {
         term_s *= -a * a / ((k2 + 1.0) * (k2 + 2.0));
     }
     (c, s)
-}
-
-/// One Tunneler and its shaft.
-#[derive(Debug, Clone)]
-struct Bore {
-    /// Drill head and heading (a unit vector).
-    x: f64,
-    y: f64,
-    hx: f64,
-    hy: f64,
-    /// The point it is steering toward.
-    aim: (f64, f64),
-    length: f64,
-    /// Drilling time banked toward the next metre.
-    progress_s: f64,
-    /// Boring now, or pulling out and moving until `resume_at`.
-    active: bool,
-    resume_at: u64,
-    /// Where its head was a second ago, and when it moved on (for the
-    /// screen; not saved).
-    prev: (f64, f64),
-    moved_at: u64,
 }
 
 /// cos and sin of an angle in degrees, from their power series (plain
@@ -828,6 +756,7 @@ impl Sim {
     /// Start a body with starting advantages bought with Seed Mass.
     pub fn with_perks(world: World, eco: Economy, perks: &[String]) -> Self {
         let mut sim = Self::blank(world, eco);
+        sim.spawn_fauna();
         // The fleet's storage ship brings refined elements to build from.
         if sim.prod.on() {
             for (s, kg) in &sim.eco.production.start_refined {
@@ -892,7 +821,7 @@ impl Sim {
         // The Universal Drone Replicator's bays: only for the specialists
         // this body has a use for.
         let skills = Skills::of(&world, eco.units.heatsink.min_freeze_k);
-        let mut units = specialists::Units::default();
+        let mut units = platform::Units::default();
         units.prepare(&world, eco.units.heatsink.min_freeze_k);
         let extra: Vec<crate::production::BaySpec> = if eco.units.universal_replicator { eco.units.bay.iter().filter(|b| skills.useful(b.unit)).cloned().collect() } else { Vec::new() };
         let prod = if eco.recipe.part.is_empty() { crate::production::Production::default() } else { crate::production::Production::new(&eco.production, &extra) };
@@ -929,6 +858,11 @@ impl Sim {
             hub_load: Vec::new(),
             hub_dry: Vec::new(),
             hub_gen: 0,
+            hauler_by_site: Vec::new(),
+            haulers_moved: true,
+            hub_grid: HashMap::new(),
+            hub_grid_n: usize::MAX,
+            hubs_moved: true,
             parked: Vec::new(),
             haulers: Vec::new(),
             site_wait: Vec::new(),
@@ -1033,10 +967,14 @@ impl Sim {
             tunnel_kg: 0.0,
             skills,
             units,
+            fauna: fauna::Fauna::default(),
+            fauna_prof: 0.0,
             prof: [0.0; 8],
             prof2: [0.0; 12],
+            unit_prof: [0.0; 7],
             counts: [0; 6],
             free_drones: None,
+            free_units: Vec::new(),
             leg_track: None,
             life,
             plumes: Vec::new(),
@@ -1475,225 +1413,6 @@ impl Sim {
     }
 
 
-    // ---- Tunnelers ----
-
-    /// Average extra worth of the solid rock around (x, y): the centre and
-    /// eight points 10 m out.
-    fn ore_smell(&self, x: f64, y: f64) -> f64 {
-        let (cx, cy) = (x.floor() as i64, y.floor() as i64);
-        let mut sum = 0.0;
-        for (dx, dy) in std::iter::once((0, 0)).chain(NOSE.iter().copied()) {
-            let mat = self.world.planet.mats.get(self.world.material(cx + dx * 10, cy + dy * 10));
-            if mat.state == State::Solid {
-                sum += (mat.multiplier - 1.0).max(0.0);
-            }
-        }
-        sum / 9.0
-    }
-
-    /// Where a shaft starting at (x, y) heading (hx, hy) should aim: the
-    /// richest-smelling point aim_depth_m ahead, within the allowed lean. A
-    /// swarm that can't judge value just goes straight down.
-    fn choose_aim(&self, t: &crate::economy::Tunneler, x: f64, y: f64, hx: f64, hy: f64) -> (f64, f64) {
-        let d = t.aim_depth_m;
-        let (c, s) = cos_sin_deg(t.max_deviation_deg);
-        let half_w = d * s / c;
-        let (bx, by) = (x + hx * d, y + hy * d);
-        let (px, py) = (-hy, hx);
-        let mut best = ((bx, by), 0.0);
-        for j in [1i32, -1, 2, -2, 3, -3, 4, -4] {
-            let off = half_w * j as f64 / 4.0;
-            let p = (bx + px * off, by + py * off);
-            let score = self.sense_value * self.ore_smell(p.0, p.1);
-            if score > best.1 + 1e-9 {
-                best = (p, score);
-            }
-        }
-        best.0
-    }
-
-    /// Put Tunneler i on a fresh spot on the surface, spread around the body
-    /// (a tunneler built as a unit: under a working flock).
-    fn start_bore(&mut self, i: usize, unit: bool, t: &crate::economy::Tunneler) {
-        let dir = if unit { self.unit_bore_start() } else { None };
-        let (ux, uy) = match dir {
-            Some(d) => d,
-            None => {
-                let n = self.ring_dir.len();
-                let mut stride = ((n as f64 * 0.38) as usize).max(1);
-                while gcd(stride, n) != 1 {
-                    stride += 1;
-                }
-                let k = self.next_tunnel_k;
-                self.next_tunnel_k = (k + stride) % n;
-                self.ring_dir[k]
-            }
-        };
-        let r = self.ground_radius(ux, uy, self.world.planet.max_radius + 1.0);
-        let (x, y, hx, hy) = (ux * r, uy * r, -ux, -uy);
-        let aim = self.choose_aim(t, x, y, hx, hy);
-        let tick = self.tick;
-        self.bores(unit)[i] = Bore { x, y, hx, hy, aim, length: 0.0, progress_s: 0.0, active: true, resume_at: 0, prev: (x, y), moved_at: tick };
-    }
-
-    /// The old Tunnelers, or the tunnelers built as units.
-    fn bores(&mut self, unit: bool) -> &mut Vec<Bore> {
-        if unit {
-            &mut self.units.bores
-        } else {
-            &mut self.tunnelers
-        }
-    }
-
-    /// Solid cells within the bore around (x, y), and whether lava is there.
-    fn bore_cells(&self, x: f64, y: f64, radius: f64) -> (Vec<(i64, i64)>, bool) {
-        let mut out = Vec::new();
-        let mut lava = false;
-        let r = radius.ceil() as i64 + 1;
-        let (cx, cy) = (x.floor() as i64, y.floor() as i64);
-        for yy in cy - r..=cy + r {
-            for xx in cx - r..=cx + r {
-                let (dx, dy) = (xx as f64 + 0.5 - x, yy as f64 + 0.5 - y);
-                if dx * dx + dy * dy > radius * radius {
-                    continue;
-                }
-                let m = self.world.material(xx, yy);
-                if m == VACUUM {
-                    continue;
-                }
-                if self.world.planet.mats.get(m).state == State::Liquid {
-                    lava = true;
-                }
-                out.push((xx, yy));
-            }
-        }
-        (out, lava)
-    }
-
-    /// One second of boring for every Tunneler: the old ones, and the
-    /// tunnelers built as units (their own, wider numbers).
-    fn tunnel_work(&mut self) {
-        if !self.tunnelers.is_empty() {
-            let t = self.eco.tunneler.clone();
-            self.bore_list(false, &t);
-        }
-        if !self.units.bores.is_empty() {
-            let t = self.unit_tunneler();
-            self.bore_list(true, &t);
-        }
-    }
-
-    fn bore_list(&mut self, as_unit: bool, t: &crate::economy::Tunneler) {
-        let (cos_max, _) = cos_sin_deg(t.max_deviation_deg);
-        let (_, turn) = cos_sin_deg(t.turn_deg_per_m);
-        let cargo = self.eco.harvester.cargo_kg * self.up_cached_cargo;
-        let power = t.drill_power * self.up("dig speed") * self.perk_dig;
-        for i in 0..self.bores(as_unit).len() {
-            let tick = self.tick;
-            {
-                let b = &mut self.bores(as_unit)[i];
-                b.prev = (b.x, b.y);
-                b.moved_at = tick;
-            }
-            if !self.bores(as_unit)[i].active {
-                if self.tick >= self.bores(as_unit)[i].resume_at {
-                    self.start_bore(i, as_unit, t);
-                }
-                continue;
-            }
-            if self.brownout() {
-                continue;
-            }
-            self.bores(as_unit)[i].progress_s += 1.0;
-            // Up to four metres a second in soft ground.
-            for _ in 0..4 {
-                let b = self.bores(as_unit)[i].clone();
-                // Steer a little toward the aim, but never lean too far from
-                // straight down.
-                let (dx, dy) = unit(b.aim.0 - b.x, b.aim.1 - b.y);
-                let (mut hx, mut hy) = unit(b.hx + turn * dx, b.hy + turn * dy);
-                let (rx, ry) = unit(-b.x, -b.y);
-                for _ in 0..8 {
-                    if hx * rx + hy * ry >= cos_max {
-                        break;
-                    }
-                    (hx, hy) = unit(hx + 0.25 * rx, hy + 0.25 * ry);
-                }
-                let (nx, ny) = (b.x + hx, b.y + hy);
-                let (cells, lava) = self.bore_cells(nx, ny, t.bore_m / 2.0);
-                let too_deep = (nx * nx + ny * ny).sqrt() < t.min_radius * self.world.planet.radius;
-                if lava || too_deep || b.length >= t.max_length_m {
-                    // Done: pull out and move on (it won't bore into lava).
-                    let resume = self.tick + self.ticks(t.relocate_s);
-                    let tb = &mut self.bores(as_unit)[i];
-                    tb.active = false;
-                    tb.resume_at = resume;
-                    self.tunnels_done += 1;
-                    break;
-                }
-                let (mut need_s, mut tonnes) = (0.0, 0.0);
-                for c in &cells {
-                    let mat = self.world.planet.mats.get(self.world.material(c.0, c.1));
-                    need_s += self.eco.harvester.dig_s_for(mat.hardness) * mat.density / cargo / power;
-                    tonnes += mat.density / 1000.0;
-                }
-                let need_e = tonnes * t.energy_per_tonne;
-                if b.progress_s < need_s || self.energy - need_e < 5.0 * self.upkeep() {
-                    break;
-                }
-                self.energy -= need_e;
-                for c in cells {
-                    let m = self.world.material(c.0, c.1);
-                    let mat = self.world.planet.mats.get(m);
-                    let (kg, mult) = (mat.density, mat.multiplier);
-                    self.world.mine_cell(c.0, c.1);
-                    self.undope(c, false);
-                    self.progress.remove(&c);
-                    self.open_cell(c);
-                    let credited = kg * mult * t.spoil_recovery;
-                    self.stock.add_composition(&self.world.planet.mats.elements, &self.world.planet.mats.get(m).composition, kg * t.spoil_recovery);
-                    self.mass += credited;
-                    self.delivered_credited += credited;
-                    self.tunnel_kg += kg;
-                    self.window_mined += kg;
-                }
-                // Crack the rock around the shaft.
-                let halo = t.bore_m / 2.0 + t.fracture_m;
-                let r = halo.ceil() as i64 + 1;
-                let (cx, cy) = (nx.floor() as i64, ny.floor() as i64);
-                for yy in cy - r..=cy + r {
-                    for xx in cx - r..=cx + r {
-                        let (ddx, ddy) = (xx as f64 + 0.5 - nx, yy as f64 + 0.5 - ny);
-                        if ddx * ddx + ddy * ddy <= halo * halo && self.world.material(xx, yy) != VACUUM {
-                            self.fractured.insert((xx, yy));
-                        }
-                    }
-                }
-                let tb = &mut self.bores(as_unit)[i];
-                tb.progress_s -= need_s;
-                tb.x = nx;
-                tb.y = ny;
-                tb.hx = hx;
-                tb.hy = hy;
-                tb.length += 1.0;
-                let length = tb.length;
-                self.tunnel_m += 1;
-                // Every so often, a staging point down the shaft: drones based
-                // there dig the cracked walls and the rock beyond.
-                if length as u64 % t.hub_every_m as u64 == 0 {
-                    self.hubs.push(Hub { x: nx, y: ny, kind: HubKind::Shaft, ring: None });
-                    self.hub_load.push(0);
-                    self.hub_dry.push(false);
-                    self.hub_gen += 1;
-                    self.site_wait.push(Vec::new());
-                    self.flock.push(FlockStats::default());
-                }
-            }
-            // Unspent drilling time doesn't pile up while waiting on energy.
-            let tb = &mut self.bores(as_unit)[i];
-            tb.progress_s = tb.progress_s.min(60.0);
-        }
-    }
 
     // ---- What can be dug ----
 
@@ -1764,37 +1483,6 @@ impl Sim {
             if v.is_empty() {
                 self.working.remove(&cell);
             }
-        }
-    }
-
-    /// A drone is wrecked: it leaves the swarm and falls as a body of scrap.
-    fn wreck_drone(&mut self, id: u32, at: (f64, f64), vel: (f64, f64)) {
-        let dr = &mut self.drones[id as usize];
-        if !dr.alive {
-            return;
-        }
-        dr.alive = false;
-        let home = dr.home;
-        let lost = std::mem::take(&mut dr.hold);
-        self.transit.take(lost, None);
-        self.mats_take(lost, false);
-        self.leg_changed(id);
-        self.hub_load[home] -= 1;
-        self.alive_count -= 1;
-        self.deaths += 1;
-        let _ = vel;
-        if let Some(c) = self.bodies.wreck(&mut self.world, at.0, at.1) {
-            self.scrap_landed(c);
-        }
-    }
-
-    /// Scrap came to rest at cell c: the sandbox may move it on, and the
-    /// cutters can eat it again.
-    fn scrap_landed(&mut self, c: (i64, i64)) {
-        self.sandbox.wake_around_filled(&self.world, c);
-        self.apply_sandbox(vec![Change { cell: c, from: VACUUM, to: self.world.material(c.0, c.1) }]);
-        if self.world.material(c.0, c.1) != VACUUM {
-            self.add_frontier(c);
         }
     }
 
@@ -2112,225 +1800,6 @@ impl Sim {
         }
     }
 
-    /// Pick the best cell to dig near (hx, hy), and reserve it. Searches outward
-    /// ring by ring; once something is found it looks a little further (further
-    /// with Scouts), weighing about CANDIDATES cells within a round reach.
-    /// `packet`: choosing for a packet, which cuts whole 64 m blocks and so stays
-    /// out of Tunneler shafts (a block cut there would leave a square cavern).
-    /// `peel`: charge for depth so the swarm eats the body from the outside in.
-    /// Drones working from a shaft don't: they hollow out round chambers.
-    /// `picky`: turn down cells that pay badly (if the swarm can judge effort).
-    /// The search behind `pick_target`, changing nothing: fills `cands` with
-    /// the cells weighed (cell, score, distance) and returns the round reach.
-    fn weigh(&self, hx: f64, hy: f64, reach_m: f64, packet: bool, peel: bool, picky: bool, field: Option<&FlowField>, cands: &mut Vec<((i64, i64), f64, f64)>) -> f64 {
-        let (bx, by) = ((hx as i64).div_euclid(BUCKET), (hy as i64).div_euclid(BUCKET));
-        let scouting = self.scouts > 0;
-        // Look no further than reach_m from where the search starts.
-        let max_ring = ((reach_m / BUCKET as f64) as i64 + 2).min(((2.0 * self.world.planet.max_radius) / BUCKET as f64) as i64 + 2);
-        let extra = if scouting { 1 + ((self.scouts as f64).sqrt() as i64 / 4).min(3) } else { 0 };
-        // Every cell weighed: (cell, score, distance).
-        cands.clear();
-        let any_cracked = !self.fractured.is_empty();
-        let mut found_at: Option<i64> = None;
-        // The search runs ring by ring (square rings of buckets) and then
-        // keeps only cells within a circle, so the swarm's reach is round.
-        let mut last_ring: Option<i64> = None;
-        let mut reach = f64::INFINITY;
-        // What each trip is judged by: credited kg per second of the round trip,
-        // as well as the swarm can tell. A blind swarm thinks every cell is
-        // average, which comes down to taking the nearest.
-        let speed = self.eco.harvester.speed * self.up("flight speed") * self.perk_speed;
-        let dig_mult = self.up("dig speed") * self.perk_dig;
-        let it = &self.eco.intelligence;
-        let (se, sv) = (self.sense_effort, self.sense_value);
-        let typ_dig = self.eco.harvester.dig_s_for(it.typical_hardness) / dig_mult;
-        let patience = if picky { it.patience * se } else { 0.0 };
-        // Scent of buried ore: Scouts smell further.
-        let far_nose = if scouting { sv } else { 0.0 };
-        let cargo = self.eco.harvester.cargo_kg * self.up_cached_cargo;
-        let typ_kg = it.typical_load_kg.min(cargo);
-        let hold = self.hold_cap();
-        let search_m = reach_m;
-        let mut weighed = 0usize;
-        for ring in 0..max_ring {
-            if last_ring.is_some_and(|l| ring > l) {
-                break;
-            }
-            for dy in -ring..=ring {
-                for dx in -ring..=ring {
-                    if dx.abs() != ring && dy.abs() != ring {
-                        continue;
-                    }
-                    let key = (bx + dx, by + dy);
-                    let Some(list) = self.buckets.get(&key) else { continue };
-                    let reserved = &self.reserved;
-                    for &(c, f) in list.iter() {
-                        // Cheapest test first: a round reach, not the square the
-                        // ring search covers.
-                        let (ddx, ddy) = (c.0 as f64 + 0.5 - hx, c.1 as f64 + 0.5 - hy);
-                        let dist = (ddx * ddx + ddy * ddy).sqrt();
-                        if dist > search_m {
-                            self.passed[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            continue;
-                        }
-
-                        let mat = self.world.planet.mats.get(f.mat);
-                        // (Liquids are drunk like anything else, seas and lava
-                        // included: reckless drones don't steer clear of heat.)
-                        // No more drones than the loads the cell has left (at most
-                        // four, one per face).
-                        let left = mat.density - self.progress.get(&c).copied().unwrap_or(0.0);
-                        let loads = ((left / hold).ceil() as u8).clamp(1, 4);
-                        if reserved.get(&c).copied().unwrap_or(0) >= loads {
-                            self.passed[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            continue;
-                        }
-                        // With the flock's field: the flight is the way
-                        // round through open space, and a cell it doesn't
-                        // reach can't be flown to at all.
-                        let fly = match field {
-                            Some(f) => match f.reach_m(c) {
-                                Some(d) => d.max(dist),
-                                None => {
-                                    self.passed[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    continue;
-                                }
-                            },
-                            None => dist,
-                        };
-                        // Effective distance: flight plus a charge for depth, so
-                        // the swarm peels the body from the outside in.
-                        let (cx, cy) = (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
-                        // Rock cracked by a Tunneler: open access (no depth
-                        // penalty) and quicker to cut.
-                        let loose = self.is_loose(c, f.mat);
-                        let cracked = loose || (any_cracked && self.fractured.contains(&c));
-                        if cracked && packet {
-                            continue;
-                        }
-                        let depth = if cracked || !peel { 0.0 } else { (self.world.planet.radius - (cx * cx + cy * cy).sqrt()).max(0.0) };
-                        let eff = fly + self.eco.seed_swarm.peel * depth;
-                        let true_dig = if loose { self.eco.harvester.loose_s } else { self.eco.harvester.dig_s_for(mat.hardness) / dig_mult * if cracked { self.eco.tunneler.fracture_dig } else { 1.0 } };
-                        let est_dig = se * true_dig + (1.0 - se) * typ_dig;
-                        let est_kg = se * left.min(hold) + (1.0 - se) * typ_kg;
-                        // Worth: the cell's own multiplier, plus the smell of richer
-                        // rock behind it, which draws tunnels toward buried pockets.
-                        let est_mult = sv * mat.multiplier + (1.0 - sv) + it.scent_weight * (sv * f.near as f64 + far_nose * f.far as f64);
-                        let travel = 2.0 * eff / speed;
-                        let score = est_kg * est_mult / (travel + est_dig);
-                        // A drone that can judge effort won't take a cell that pays
-                        // much worse than ordinary rock would (hard ore it can't
-                        // cut well yet stays standing as terrain).
-                        if score < patience * typ_kg / (travel + typ_dig) {
-                            self.passed[3].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            continue;
-                        }
-                        cands.push((c, score, dist));
-                        self.passed[4].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        weighed += 1;
-                    }
-                }
-            }
-            if !cands.is_empty() && found_at.is_none() {
-                found_at = Some(ring);
-            }
-            // Enough weighed, or a little further looked once something was
-            // found (further with Scouts): stop. Keep only cells inside the
-            // circle these rings fully cover, so the reach is round.
-            if weighed >= CANDIDATES || found_at.is_some_and(|f| ring >= f + extra) {
-                last_ring = Some(ring);
-                reach = ((ring - 1).max(0) * BUCKET) as f64;
-            }
-        }
-        reach
-    }
-
-    /// The best of the cells weighed: within the round reach if any is, else
-    /// the best of all.
-    fn choose(cands: &[((i64, i64), f64, f64)], reach: f64) -> Option<(i64, i64)> {
-        let pick = |within: bool| {
-            let mut best: Option<((i64, i64), f64)> = None;
-            for &(c, score, dist) in cands {
-                if within && dist > reach || score == f64::NEG_INFINITY {
-                    continue;
-                }
-                if best.map_or(true, |(bc, bs)| score > bs || (score == bs && c < bc)) {
-                    best = Some((c, score));
-                }
-            }
-            best
-        };
-        pick(true).or_else(|| pick(false)).map(|b| b.0)
-    }
-
-    /// Whether a drone at `from` can fly straight to cell c: no more than
-    /// LOS_SOLID metres of solid ground in the way (it slips round a bump or
-    /// a ridge; liquids it swims through), not a wall of rock.
-    fn clear_line(&self, from: (f64, f64), c: (i64, i64)) -> bool {
-        let to = (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
-        let (dx, dy) = (to.0 - from.0, to.1 - from.1);
-        let len = (dx * dx + dy * dy).sqrt();
-        if len < 1.5 {
-            return true;
-        }
-        let steps = ((len - 1.2) / 0.7).ceil().max(1.0) as usize;
-        let mut rd = self.world.reader();
-        let mats = &self.world.planet.mats;
-        let mut last = (i64::MIN, i64::MIN);
-        let mut solid = 0;
-        for i in 0..steps {
-            let t = i as f64 * 0.7 / len;
-            let p = ((from.0 + dx * t).floor() as i64, (from.1 + dy * t).floor() as i64);
-            if p == last || p == c {
-                continue;
-            }
-            last = p;
-            let m = rd.get(p.0, p.1);
-            if m != VACUUM && matches!(mats.get(m).state, State::Solid | State::Powder) {
-                solid += 1;
-                if solid > LOS_SOLID {
-                    return false;
-                }
-            }
-        }
-        true
-    }
-
-    /// The best cell to cut from (hx, hy), reserved. `home`: the flock it
-    /// searches from its hauler for (its field gives the real flights);
-    /// None for a short hop from a cell just cut, or the packet.
-    fn pick_target(&mut self, hx: f64, hy: f64, reach_m: f64, packet: bool, peel: bool, picky: bool, home: Option<usize>) -> Option<(i64, i64)> {
-        let mut cands = std::mem::take(&mut self.cands);
-        let field = home.and_then(|h| self.field_for(h, (hx, hy)));
-        let reach = self.weigh(hx, hy, reach_m, packet, peel, picky, field.as_deref(), &mut cands);
-        let mut best = Self::choose(&cands, reach);
-        // Without a field (a short hop from the cell just cut), drones fly
-        // straight: only to a cell with little rock in the way. (Not for the
-        // packet, which isn't flown cell by cell, nor from a shaft, whose
-        // drones work the rock a Tunneler has cracked all round it.)
-        if !packet && peel && field.is_none() {
-            let mut tries = 0;
-            while let Some(c) = best {
-                if self.clear_line((hx, hy), c) {
-                    break;
-                }
-                tries += 1;
-                cands.retain(|x| x.0 != c);
-                best = if tries < LOS_TRIES { Self::choose(&cands, reach) } else { None };
-            }
-        }
-        self.counts[3] += cands.len() as u64;
-        self.cands = cands;
-        let c = best?;
-        if self.world.material(c.0, c.1) == VACUUM {
-            // Taken by a packet since it was found: drop it and look again.
-            self.remove_face(c);
-            return self.pick_target(hx, hy, reach_m, packet, peel, picky, home);
-        }
-        *self.reserved.entry(c).or_insert(0) += 1;
-        Some(c)
-    }
-
     fn nearest_hub(&self, x: f64, y: f64) -> usize {
         let mut best = (0, f64::MAX);
         for (i, h) in self.hubs.iter().enumerate() {
@@ -2342,122 +1811,6 @@ impl Sim {
         best.0
     }
 
-    // ---- Drones ----
-
-    fn spawn_harvester(&mut self) {
-        if self.free_drones.is_none() && self.individuals() >= self.eco.individual_cap {
-            self.packet += 1;
-            self.harvesters_built += 1;
-            return;
-        }
-        let id = self.drones.len() as u32;
-        let home = self.orbit_hub;
-        self.hub_load[home] += 1;
-        // Made in the mother swarm, it drops to its flock.
-        let from = self.rendezvous(home);
-        let to = self.site_pos(home);
-        let fall = self.drop_s(dist2(from, to).sqrt());
-        self.on_trip_count += 1;
-        self.drones.push(Drone {
-            alive: true,
-            home,
-            phase: Phase::Inbound { hub: home, from },
-            life_left: self.eco.harvester.life_s * self.up("drone lifespan"),
-            trip_start: self.tick,
-            leg_start: self.tick,
-            last: None,
-            fails: 0,
-            hold: 0.0,
-            hold_cr: 0.0,
-            tank: self.eco.harvester.tank_e,
-            heat_k: 290.0,
-        });
-        self.harvesters_built += 1;
-        self.alive_count += 1;
-        self.counts[4] += 1;
-        self.leg_changed(id);
-        self.events.push(Reverse((self.tick + self.ticks(fall) + (id as u64 % 10), id)));
-    }
-
-    /// Seconds for a new cutter to drop `dist` metres from the mother swarm:
-    /// at flight speed, but never longer than DROP_S (it falls, from high up).
-    fn drop_s(&self, dist: f64) -> f64 {
-        (dist / self.cutter_speed()).min(DROP_S)
-    }
-
-    fn individuals(&self) -> u32 {
-        self.alive_count
-    }
-
-    pub fn harvesters_alive(&self) -> u64 {
-        self.alive_count as u64 + self.packet
-    }
-
-    fn cutter_speed(&self) -> f64 {
-        self.eco.harvester.speed * self.up("flight speed") * self.perk_speed
-    }
-
-    fn hold_cap(&self) -> f64 {
-        self.eco.harvester.hold_kg * self.up_cached_cargo
-    }
-
-    /// Seconds to cut `kg` of material `m` at cell c.
-    fn cut_s(&self, c: (i64, i64), m: MatId, kg: f64) -> f64 {
-        if self.is_loose(c, m) {
-            // Loose debris: picked up, not cut.
-            let d = self.world.planet.mats.get(m).density.max(1.0);
-            return self.eco.harvester.loose_s * (kg / d).max(0.05);
-        }
-        let per_load = self.dig_s(m) * if self.fractured.contains(&c) { self.eco.tunneler.fracture_dig } else { 1.0 };
-        per_load * (kg / self.eco.harvester.cargo_kg).max(0.05) / self.cold_factor(c, m)
-    }
-
-    /// Whether cell c (holding m) is loose debris.
-    fn is_loose(&self, c: (i64, i64), m: MatId) -> bool {
-        self.loose_mat.get(m as usize).copied().unwrap_or(false) || (!self.loose.is_empty() && self.loose.contains(&c))
-    }
-
-    /// Cold ground: how much faster a cutter works it (and the same, how
-    /// much quicker it wears), 1 at cold_ref_k and above.
-    fn cold_factor(&self, c: (i64, i64), m: MatId) -> f64 {
-        if m == VACUUM {
-            return 1.0;
-        }
-        let h = &self.eco.harvester;
-        let t = self.sandbox.temp(&self.world, c, m);
-        1.0 + h.cold_gain * ((h.cold_ref_k - t) / h.cold_ref_k.max(1.0)).clamp(0.0, 1.0)
-    }
-
-    /// The hottest ground a cutter at cell c touches (kelvin): the cell and
-    /// its four neighbours.
-    fn contact_k(&self, c: (i64, i64)) -> f64 {
-        let mut t = f64::NEG_INFINITY;
-        for d in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)] {
-            let n = (c.0 + d.0, c.1 + d.1);
-            let m = self.world.material(n.0, n.1);
-            if m != VACUUM {
-                t = t.max(self.sandbox.temp(&self.world, n, m));
-            }
-        }
-        if t.is_finite() { t } else { self.world.planet.space_k }
-    }
-
-    /// A drone spent `secs` at temperature `env` (in contact with it, or in
-    /// open space): its heat moves toward env through its heat sink, and
-    /// while hot it wears. True if it melted.
-    fn heat_drone(&mut self, id: u32, secs: f64, env: f64, contact: bool) -> bool {
-        let h = self.eco.harvester.clone();
-        let d = &mut self.drones[id as usize];
-        let t0 = d.heat_k;
-        let g = if contact { h.contact_sink } else { h.heat_sink };
-        let k = (-secs.max(0.0) * g / h.heat_capacity_kg.max(1.0)).exp();
-        let t1 = env + (t0 - env) * k;
-        d.heat_k = t1;
-        // Wear for the time spent hot (the average of start and end).
-        let over = (0.5 * (t0 + t1) - h.damage_k).max(0.0);
-        d.life_left -= h.heat_wear * over / 100.0 * secs;
-        t0.max(t1) > h.melt_k
-    }
 
     /// How dangerous a hauler's spot is: cells of flowing lava (any liquid
     /// hot enough to harm a drone) in the cloud around it (14 m), or lying
@@ -2542,6 +1895,7 @@ impl Sim {
             let Some((p, _)) = best else { continue };
             self.hubs[h].x = p.0;
             self.hubs[h].y = p.1;
+            self.hubs_moved = true;
             self.site_moves += 1;
             // Its working haulers fly over (arriving, they take the waiting
             // cutters' loads as usual).
@@ -2570,467 +1924,34 @@ impl Sim {
         }
     }
 
-    /// One second for the cutters waiting at their flocks: each sits
-    /// somewhere in the loose cloud about its hauler (3 to 12 m out, as it is
-    /// drawn), and whatever is there heats or cools it. Lava pouring over the
-    /// cloud melts the drones caught in it, reckless as ever.
-    fn waiting_heat(&mut self) {
-        let space_k = self.world.planet.space_k;
-        let sec = self.tick / self.ticks(1.0).max(1);
-        for site in 0..self.site_wait.len() {
-            if self.site_wait[site].is_empty() {
-                continue;
-            }
-            let (hx, hy) = self.site_pos(site);
-            let ids = self.site_wait[site].clone();
-            let mut lost = false;
-            for id in ids {
-                let d = &self.drones[id as usize];
-                if !d.alive || d.home != site || d.phase != Phase::Waiting {
-                    continue;
-                }
-                // Where in the cloud this second (a fresh spot each second,
-                // as the cloud turns).
-                let h = hash(id as u64, sec as i64, site as i64, 0x7A17);
-                let u = crate::noise::unit(h);
-                let a = crate::noise::unit(h ^ 0x9E37) * std::f64::consts::TAU;
-                let r = 3.0 + 9.0 * u * u;
-                let c = ((hx + a.cos() * r).floor() as i64, (hy + a.sin() * r * 0.8).floor() as i64);
-                let m = self.world.material(c.0, c.1);
-                let melted = if m == VACUUM {
-                    self.heat_drone(id, 1.0, space_k, false)
-                } else {
-                    let t = self.contact_k(c);
-                    self.heat_drone(id, 1.0, t, true)
-                };
-                if melted {
-                    self.burned += 1;
-                    self.happen(Happening::Losses, (c.0 as f64 + 0.5, c.1 as f64 + 0.5));
-                    self.wreck_drone(id, (c.0 as f64 + 0.5, c.1 as f64 + 0.5), (0.0, 0.0));
-                    lost = true;
-                }
-            }
-            if lost {
-                let drones = &self.drones;
-                self.site_wait[site].retain(|&id| drones[id as usize].alive);
-            }
-        }
-    }
-
-    /// A sip of molten (or any) material `m` at `t_cell`, `kg` of it, freezes
-    /// inside the drone: its heat (and the heat of freezing) goes into the
-    /// drone. True if that melts it.
-    fn swallow_heat(&mut self, id: u32, m: MatId, t_cell: f64, kg: f64) -> bool {
-        let latent = if self.world.planet.mats.get(m).state == State::Liquid { self.world.planet.mats.phases[m as usize].down.iter().flatten().next().map_or(0.0, |c| c.latent_k) } else { 0.0 };
-        let h = &self.eco.harvester;
-        let d = &mut self.drones[id as usize];
-        let hot = t_cell + latent;
-        if hot > d.heat_k {
-            d.heat_k += kg * (hot - d.heat_k) / (h.heat_capacity_kg + kg);
-        }
-        d.heat_k > h.melt_k
-    }
-
-    /// kg the next cut at cell c would take, for a drone with `space` left.
-    fn cut_kg(&self, c: (i64, i64), space: f64) -> f64 {
-        let m = self.world.material(c.0, c.1);
-        if m == VACUUM {
-            return 0.0;
-        }
-        let mat = self.world.planet.mats.get(m);
-        let left = mat.density - self.progress.get(&c).copied().unwrap_or(0.0);
-        // Molten stuff is drunk in sips.
-        let space = if mat.state == State::Liquid && self.sandbox.temp(&self.world, c, m) > self.eco.harvester.damage_k { space.min(self.eco.harvester.sip_kg) } else { space };
-        left.min(space).max(0.0)
-    }
-
-    /// A drone spent `secs` working: pay for it from its tank, burning cargo
-    /// to top the tank back up. False if it ran dry.
-    fn spend(&mut self, id: u32, secs: f64) -> bool {
-        let per_kg = self.eco.seed_swarm.processing_energy_per_tonne / 1000.0;
-        let (upkeep, tank_max) = (self.eco.harvester.upkeep, self.eco.harvester.tank_e);
-        let d = &mut self.drones[id as usize];
-        d.tank -= upkeep * secs;
-        if d.tank < tank_max && d.hold > 0.0 && per_kg > 0.0 {
-            let kg = ((tank_max - d.tank) / per_kg).min(d.hold);
-            let worth = if d.hold > 0.0 { d.hold_cr / d.hold } else { 1.0 };
-            d.hold -= kg;
-            d.hold_cr = (d.hold_cr - kg * worth).max(0.0);
-            d.tank += kg * per_kg;
-            self.fuel_kg += kg;
-        }
-        d.tank > -1e-9
-    }
-
-    /// A drone out working is lost where it is.
-    fn lose_on_trip(&mut self, id: u32, at: (f64, f64)) {
-        self.happen(Happening::Losses, at);
-        self.on_trip_count -= 1;
-        self.wreck_drone(id, at, (0.0, 0.0));
-    }
-
     /// Where a drone on its way somewhere is at this moment (roughly: where
     /// it set off from, for a loss).
     fn site_pos(&self, h: usize) -> (f64, f64) {
         (self.hubs[h].x, self.hubs[h].y)
     }
 
-    /// A working hauler at site h with the most room, if any.
-    fn hauler_at(&self, h: usize) -> Option<usize> {
-        let mut best: Option<(usize, f64)> = None;
-        for (i, hl) in self.haulers.iter().enumerate() {
-            if hl.alive && hl.site == h && hl.state == HaulerState::Working && best.is_none_or(|(_, l)| hl.load < l) {
-                best = Some((i, hl.load));
+    /// Bring the hauler and hub indexes up to date (once a step, if needed).
+    fn reindex(&mut self) {
+        if self.haulers_moved {
+            for v in self.hauler_by_site.iter_mut() {
+                v.clear();
             }
+            for (i, hl) in self.haulers.iter().enumerate() {
+                if self.hauler_by_site.len() <= hl.site {
+                    self.hauler_by_site.resize(hl.site + 1, Vec::new());
+                }
+                self.hauler_by_site[hl.site].push(i);
+            }
+            self.haulers_moved = false;
         }
-        best.map(|b| b.0)
-    }
-
-    /// Hand a drone's hold to hauler k.
-    fn unload_into(&mut self, id: u32, k: usize) {
-        let d = &mut self.drones[id as usize];
-        let (kg, cr) = (d.hold, d.hold_cr);
-        d.hold = 0.0;
-        d.hold_cr = 0.0;
-        self.haulers[k].load += kg;
-        self.haulers[k].credited += cr;
-        self.window_delivered += kg;
-        // Its cargo, made of what its flock has been cutting.
-        let home = self.drones[id as usize].home;
-        if let Some(fm) = self.flock_mix.get(home).copied() {
-            let total: f32 = fm.iter().map(|e| e.1).sum();
-            if total > 0.0 {
-                for (m, w) in fm {
-                    if w > 0.0 {
-                        mix_add(&mut self.haulers[k].mix, m, kg as f32 * w / total);
-                    }
-                }
+        if self.hubs_moved || self.hub_grid_n != self.hubs.len() {
+            let b = self.eco.harvester.search_m.max(1.0);
+            self.hub_grid.clear();
+            for (h, hub) in self.hubs.iter().enumerate() {
+                self.hub_grid.entry(((hub.x / b).floor() as i64, (hub.y / b).floor() as i64)).or_default().push(h);
             }
-        }
-        let site = self.haulers[k].site;
-        if let Some(f) = self.flock.get_mut(site) {
-            f.filled += kg;
-        }
-    }
-
-    /// Fly a drone with a full hold from `from` to its flock's hauler.
-    fn head_home(&mut self, id: u32, from: (f64, f64)) {
-        let home = self.drones[id as usize].home;
-        let to = self.site_pos(home);
-        let straight = ((to.0 - from.0).powi(2) + (to.1 - from.1).powi(2)).sqrt();
-        // The way back round through open space, if the field knows it.
-        let dist = self.field_for(home, to).and_then(|f| f.dist_m(from.0, from.1).or_else(|| f.reach_m((from.0.floor() as i64, from.1.floor() as i64)))).map_or(straight, |d| d.max(straight));
-        self.avg_haul = self.avg_haul * 0.999 + dist * 0.001;
-        let due = self.tick + self.ticks(dist / self.cutter_speed());
-        let dr = &mut self.drones[id as usize];
-        dr.leg_start = self.tick;
-        dr.phase = Phase::Inbound { hub: home, from };
-        self.events.push(Reverse((due, id)));
-    }
-
-    /// Send a drone from `from` to cut cell c (already reserved).
-    fn go_cut(&mut self, id: u32, c: (i64, i64), from: (f64, f64), home: Option<usize>) {
-        let m = self.world.material(c.0, c.1);
-        let space = self.hold_cap() - self.drones[id as usize].hold;
-        let kg = self.cut_kg(c, space);
-        let (dx, dy) = (c.0 as f64 + 0.5 - from.0, c.1 as f64 + 0.5 - from.1);
-        let straight = (dx * dx + dy * dy).sqrt();
-        // From the hauler, the way round through open space.
-        let way = home.and_then(|h| self.field_for(h, from)).and_then(|f| f.reach_m(c)).map_or(straight, |d| d.max(straight));
-        let fly = way / self.cutter_speed();
-        let dig = self.cut_s(c, m, kg);
-        let lava = self.world.planet.mats.get(m).state == State::Liquid && self.sandbox.temp(&self.world, c, m) > self.eco.harvester.damage_k;
-        let dr = &mut self.drones[id as usize];
-        dr.phase = Phase::Outbound { cell: c, from, lava };
-        dr.leg_start = self.tick;
-        self.working.entry(c).or_default().push(id);
-        let due = self.tick + self.ticks(fly + dig);
-        self.events.push(Reverse((due, id)));
-    }
-
-    fn on_event(&mut self, id: u32) {
-        let d = self.drones[id as usize].clone();
-        if !d.alive {
-            return;
-        }
-        let secs = (self.tick - d.leg_start.min(self.tick)) as f64 * self.eco.tick_s;
-        match d.phase {
-            Phase::Idle | Phase::Waiting => {
-                let (hx, hy) = self.site_pos(d.home);
-                // Too hot to go out again: it rests by its hauler until its
-                // heat sink has brought it down to where heat stops wearing it.
-                // (On a world whose own air is hotter than that, as cool as
-                // the air will let it get.)
-                let h = &self.eco.harvester;
-                let env = self.world.planet.space_k;
-                let cool_to = h.damage_k.max(env + 50.0);
-                if d.heat_k > cool_to + 1.0 && d.phase == Phase::Idle {
-                    let tau = h.heat_capacity_kg / h.heat_sink.max(1e-9);
-                    let rest = (tau * ((d.heat_k - env) / (cool_to - env).max(1.0)).ln()).clamp(1.0, 600.0);
-                    self.heat_drone(id, rest, env, false);
-                    self.drones[id as usize].leg_start = self.tick;
-                    self.events.push(Reverse((self.tick + self.ticks(rest), id)));
-                    return;
-                }
-                // Back from a load (or loaded with nowhere to put it).
-                if d.hold >= 0.9 * self.hold_cap() {
-                    if let Some(k) = self.hauler_at(d.home) {
-                        self.unload_into(id, k);
-                    } else {
-                        self.drones[id as usize].phase = Phase::Waiting;
-                        self.site_wait[d.home].push(id);
-                        return;
-                    }
-                }
-                if self.brownout() {
-                    self.events.push(Reverse((self.tick + self.ticks(1.0), id)));
-                    return;
-                }
-                // Landing points sink with the ground, so searching from home
-                // stays cheap and keeps each drone working its own patch.
-                let from_shaft = self.hubs[d.home].kind == HubKind::Shaft;
-                // Picky first: leave rock that pays badly while better is near.
-                // If nothing better is near, take what there is rather than idle.
-                // (Not at a hub already known to have nothing free.)
-                let found = if self.hub_dry[d.home] {
-                    None
-                } else {
-                    let ts = clock();
-                    let reach = self.eco.harvester.search_m;
-                    let found = match self.pick_target(hx, hy, reach, false, !from_shaft, true, Some(d.home)) {
-                        Some(c) => Some(c),
-                        None if self.sense_effort > 0.0 => self.pick_target(hx, hy, reach, false, !from_shaft, false, Some(d.home)),
-                        None => None,
-                    };
-                    self.prof[4] += clock() - ts;
-                    self.counts[1] += 1;
-                    if found.is_none() {
-                        self.counts[2] += 1;
-                        self.hub_dry[d.home] = true;
-                        self.hub_gen += 1;
-                        self.flock[d.home].dry += 1.0;
-                    }
-                    found
-                };
-                let Some(cell) = found else {
-                    // Nothing free for it here: it joins the pool resting in
-                    // the mother swarm, and the director sends it wherever
-                    // there is work (see `allocate`).
-                    self.pool_drone(id);
-                    return;
-                };
-                self.drones[id as usize].fails = 0;
-                self.drones[id as usize].trip_start = self.tick;
-                self.on_trip_count += 1;
-                self.go_cut(id, cell, (hx, hy), Some(d.home));
-            }
-            Phase::Outbound { cell, from, lava } => {
-                self.unwork(cell, id);
-                if let Some(n) = self.reserved.get_mut(&cell) {
-                    *n -= 1;
-                    if *n == 0 {
-                        self.reserved.remove(&cell);
-                    }
-                }
-                self.work_near(cell);
-                let (cx, cy) = (cell.0 as f64 + 0.5, cell.1 as f64 + 0.5);
-                let (ux, uy) = (from.0 - cx, from.1 - cy);
-                let l = (ux * ux + uy * uy).sqrt().max(1e-9);
-                let beside = (cx + ux / l * 1.5, cy + uy / l * 1.5);
-                let _ = lava;
-                // Cut what fits in the hold. A cell may take several cuts; it
-                // is booked as mined when the last is taken.
-                let m = self.world.material(cell.0, cell.1);
-                let space = self.hold_cap() - d.hold;
-                let kg = self.cut_kg(cell, space);
-                // How hot it is here (before the cell is taken), and how cold.
-                let space_k = self.world.planet.space_k;
-                let t_cell = if m != VACUUM { self.sandbox.temp(&self.world, cell, m) } else { space_k };
-                let t_touch = self.contact_k(cell);
-                let molten = m != VACUUM && self.world.planet.mats.get(m).state == State::Liquid;
-                let cold = self.cold_factor(cell, m);
-                if kg > 0.0 {
-                    let mult = self.world.planet.mats.get(m).multiplier;
-                    let done = self.progress.get(&cell).copied().unwrap_or(0.0);
-                    let density = self.world.planet.mats.get(m).density;
-                    if done + kg >= density - 1e-9 {
-                        self.progress.remove(&cell);
-                        self.world.mine_cell(cell.0, cell.1);
-                        self.undope(cell, true);
-                        self.open_cell(cell);
-                    } else {
-                        self.progress.insert(cell, done + kg);
-                    }
-                    if mult >= 2.0 && self.happenings.len() < 200 {
-                        self.happenings.push((Happening::RichOre, cx, cy));
-                    }
-                    self.transit.add_composition(&self.world.planet.mats.elements, &self.world.planet.mats.get(m).composition, kg);
-                    self.mats_add(m, kg);
-                    {
-                        let home = d.home;
-                        if self.flock_mix.len() <= home {
-                            self.flock_mix.resize(home + 1, Default::default());
-                        }
-                        // (Remembering the last couple of hundred tonnes.)
-                        let fm = &mut self.flock_mix[home];
-                        let keep = (1.0 - kg as f32 / 200_000.0).max(0.0);
-                        for e in fm.iter_mut() {
-                            e.1 *= keep;
-                        }
-                        mix_add(fm, m, kg as f32);
-                    }
-                    let dr = &mut self.drones[id as usize];
-                    dr.hold += kg;
-                    dr.hold_cr += kg * mult;
-                    self.window_mined += kg;
-                    let dig = self.cut_s(cell, m, kg);
-                    let f = &mut self.flock[d.home];
-                    f.sx += cx * kg;
-                    f.sy += cy * kg;
-                    f.w += kg;
-                    f.kg += kg;
-                    f.dig_s += dig;
-                } else if m == VACUUM {
-                    self.progress.remove(&cell);
-                }
-                // Pay for the flight and the cutting it actually did (a cell
-                // emptied by another drone meanwhile costs only the flight);
-                // out of energy, it's lost.
-                let _ = secs;
-                let fly = dist2(from, (cx, cy)).sqrt() / self.cutter_speed();
-                let paid = fly + if kg > 0.0 { self.cut_s(cell, m, kg) } else { 0.0 };
-                if !self.spend(id, paid) {
-                    self.starved += 1;
-                    self.lose_on_trip(id, beside);
-                    return;
-                }
-                // Heat: cooling in flight, then pressed against the ground it
-                // cuts (lava or glowing rock beside it heats it fast), then
-                // whatever molten it drank freezing inside it. Too hot: it
-                // melts where it works. Cold ground wore it quicker.
-                let dig_s = paid - fly;
-                let melted = self.heat_drone(id, fly, space_k, false) | self.heat_drone(id, dig_s, t_touch, true) | (kg > 0.0 && molten && self.swallow_heat(id, m, t_cell, kg));
-                self.drones[id as usize].life_left -= dig_s * (cold - 1.0);
-                if molten && kg > 0.0 && t_cell > self.eco.harvester.damage_k {
-                    self.lava_swallowed += 1;
-                }
-                if melted {
-                    self.burned += 1;
-                    self.lose_on_trip(id, beside);
-                    return;
-                }
-                self.drones[id as usize].last = Some(cell);
-                // Room left: the next cell close by, if there is one (unless
-                // it's close to melting: then it heads home, cooling on the
-                // way; short of that, reckless, it carries on hot).
-                let hot = self.drones[id as usize].heat_k > self.eco.harvester.melt_k - 200.0;
-                if self.drones[id as usize].hold < 0.9 * self.hold_cap() && !self.hub_dry[d.home] && !hot {
-                    let reach = self.eco.harvester.chain_m;
-                    let next = self.pick_target(cx, cy, reach, false, true, true, None).or_else(|| if self.sense_effort > 0.0 { self.pick_target(cx, cy, reach, false, true, false, None) } else { None });
-                    if let Some(c) = next {
-                        self.go_cut(id, c, (cx, cy), None);
-                        return;
-                    }
-                }
-                let at = (cx, cy);
-                if dist2(at, self.site_pos(d.home)) > self.eco.refiner.spacing_m * self.eco.refiner.spacing_m {
-                    self.last_far_cell = Some(cell);
-                }
-                self.head_home(id, at);
-            }
-            Phase::Inbound { hub, from } => {
-                let _ = from;
-                // A new cutter dropping from the mother swarm comes down on
-                // the mother's energy, not its own (it set off when its trip
-                // began; any other flight home sets off later).
-                let dropped = d.trip_start == d.leg_start && d.hold <= 0.0;
-                // (Flying home, its heat sink cools it toward space.)
-                if !dropped {
-                    let space_k = self.world.planet.space_k;
-                    self.heat_drone(id, secs, space_k, false);
-                }
-                if !dropped && !self.spend(id, secs) {
-                    self.starved += 1;
-                    let at = self.site_pos(hub);
-                    self.lose_on_trip(id, at);
-                    return;
-                }
-                self.on_trip_count -= 1;
-                let worked = (self.tick - d.trip_start) as f64 * self.eco.tick_s;
-                let dr = &mut self.drones[id as usize];
-                dr.life_left -= worked;
-                dr.phase = Phase::Idle;
-                if self.drones[id as usize].life_left <= 0.0 {
-                    // Worn out at the hauler: its load goes in first, and then
-                    // the drone itself, as scrap for the mother swarm to make
-                    // new drones from (rather than a heap growing under the
-                    // hauler, hundreds a minute with a big swarm).
-                    let recycled = if let Some(k) = self.hauler_at(hub) {
-                        self.unload_into(id, k);
-                        let kg = self.eco.harvester.mass_cost;
-                        if let Ok(scrap) = self.world.planet.mats.id("drone-scrap") {
-                            self.transit.add_composition(&self.world.planet.mats.elements, &self.world.planet.mats.get(scrap).composition, kg);
-                            self.mats_add(scrap, kg);
-                        }
-                        self.haulers[k].load += kg;
-                        self.haulers[k].credited += kg;
-                        self.recycled += 1;
-                        true
-                    } else {
-                        false
-                    };
-                    let dr = &mut self.drones[id as usize];
-                    dr.alive = false;
-                    self.leg_changed(id);
-                    self.hub_load[d.home] -= 1;
-                    self.alive_count -= 1;
-                    self.deaths += 1;
-                    // Worn out: it shuts down and falls where it is, as scrap
-                    // (no explosion: there are far too many of these).
-                    if !recycled {
-                        let at = self.site_pos(hub);
-                        if let Some(c) = self.bodies.wreck(&mut self.world, at.0, at.1) {
-                            self.scrap_landed(c);
-                        }
-                    }
-                    return;
-                }
-                if self.drones[id as usize].hold <= 0.0 {
-                    // Nothing to unload (just dropped from the mother swarm).
-                } else if let Some(k) = self.hauler_at(hub) {
-                    self.unload_into(id, k);
-                } else if let Some(other) = self.nearest_working_site(hub) {
-                    // No hauler here: take it to the nearest flock that has one.
-                    self.hub_load[d.home] -= 1;
-                    self.hub_load[other] += 1;
-                    self.drones[id as usize].home = other;
-                    self.on_trip_count += 1;
-                    let here = self.site_pos(hub);
-                    self.head_home(id, here);
-                    return;
-                } else {
-                    self.drones[id as usize].phase = Phase::Waiting;
-                    self.site_wait[hub].push(id);
-                    return;
-                }
-                // Share the work: a drone from a crowded landing point moves to
-                // the least busy one.
-                let old_home = self.drones[id as usize].home;
-                let n = self.hub_load.len() as f64;
-                let mean = self.alive_count as f64 / n;
-                if self.hub_load[old_home] as f64 > 1.25 * mean {
-                    let mut best = old_home;
-                    for i in 0..self.hub_load.len() {
-                        if self.hub_load[i] < self.hub_load[best] && !self.flock[i].dead && !self.wet_hubs.contains(&i) && self.hubs[i].kind == HubKind::Seed {
-                            best = i;
-                        }
-                    }
-                    self.hub_load[old_home] -= 1;
-                    self.hub_load[best] += 1;
-                    self.drones[id as usize].home = best;
-                }
-                self.events.push(Reverse((self.tick, id)));
-            }
+            self.hub_grid_n = self.hubs.len();
+            self.hubs_moved = false;
         }
     }
 
@@ -3117,25 +2038,6 @@ impl Sim {
         moved
     }
 
-    /// Blow up a hauler that isn't needed any more.
-    fn retire_hauler(&mut self, k: usize) {
-        let (top, tick) = (self.world.planet.max_radius, self.tick);
-        let lost = std::mem::take(&mut self.haulers[k].load);
-        self.transit.take(lost, None);
-        self.mats_take(lost, false);
-        let hl = &mut self.haulers[k];
-        hl.alive = false;
-        let at = if hl.state == HaulerState::Working {
-            (self.hubs[hl.site].x, self.hubs[hl.site].y)
-        } else {
-            let t = if hl.t1 > hl.t0 { (tick.saturating_sub(hl.t0) as f64 / (hl.t1 - hl.t0) as f64).clamp(0.0, 1.0) } else { 1.0 };
-            route_at(hl.from, hl.to, route_cruise(hl.from, hl.to, top), t * t * (3.0 - 2.0 * t))
-        };
-        self.haulers_retired += 1;
-        let n = (self.eco.hauler.mass_cost / 100.0).round() as u32;
-        self.explode(at, n.clamp(1, 40), 12.0);
-    }
-
     /// The flocks talk among themselves every few seconds:
     /// - each flock's hauler drifts to hover over where its cutters work;
     /// - a flock grown too big splits, the new one going to cover fresh
@@ -3167,6 +2069,7 @@ impl Sim {
                 if self.world.material(nx.floor() as i64, ny.floor() as i64) == VACUUM && self.site_danger((nx, ny)) == 0 {
                     self.hubs[h].x = nx;
                     self.hubs[h].y = ny;
+                    self.hubs_moved = true;
                 }
             }
             let empty = self.active(h) == 0;
@@ -3220,10 +2123,12 @@ impl Sim {
                 }
                 if have < self.eco.hauler.max_per_flock && self.haulers[k].state != HaulerState::Working {
                     self.haulers[k].site = b;
+                    self.haulers_moved = true;
                     have += 1;
                 } else if have < self.eco.hauler.max_per_flock && self.haulers[k].load > 0.0 {
                     // A loaded one lifts off to unload, then serves the other flock.
                     self.haulers[k].site = b;
+                    self.haulers_moved = true;
                     have += 1;
                 } else {
                     self.retire_hauler(k);
@@ -3315,6 +2220,7 @@ impl Sim {
             }
         }
         self.haulers.retain(|hl| hl.alive);
+        self.haulers_moved = true;
     }
 
     /// Flocks working now.
@@ -3322,36 +2228,12 @@ impl Sim {
         self.flock.iter().zip(&self.hubs).filter(|(f, h)| !f.dead && h.kind == HubKind::Seed).count()
     }
 
-    // ---- Haulers ----
 
     /// Where the mother swarm is now: high over the ground, circling with the orbit.
     pub fn mother_pos(&self) -> (f64, f64) {
         let a = std::f64::consts::FRAC_PI_2 + std::f64::consts::TAU * self.time() / self.eco.seed_swarm.orbit_period_s;
         let r = self.world.planet.max_radius + self.eco.hauler.mother_alt_m;
         (a.cos() * r, a.sin() * r)
-    }
-
-    /// Where a hauler from flock h unloads: the nearest point of the mother
-    /// swarm (it takes loads anywhere along its length).
-    pub fn rendezvous(&self, h: usize) -> (f64, f64) {
-        let (x, y) = self.site_pos(h);
-        // Straight up if the mother swarm is overhead, else its nearer end.
-        let a = y.atan2(x);
-        let m = self.mother;
-        let a = if ang_dist(a, m.centre) <= m.half {
-            a
-        } else if ang_dist(a, m.centre + m.half) <= ang_dist(a, m.centre - m.half) {
-            m.centre + m.half
-        } else {
-            m.centre - m.half
-        };
-        let r = self.mother_radius();
-        (a.cos() * r, a.sin() * r)
-    }
-
-    /// Length (m) of a hauler's way from `a` to `b` (up, round, down).
-    fn hauler_way(&self, a: (f64, f64), b: (f64, f64)) -> f64 {
-        route_len(a, b, route_cruise(a, b, self.world.planet.max_radius))
     }
 
     fn mats_add(&mut self, m: crate::materials::MatId, kg: f64) {
@@ -3406,36 +2288,6 @@ impl Sim {
         (0..POOL_OPEN / 4).all(|_| p.build(&mut s, els, r, &r.harvester).is_some())
     }
 
-    /// Pay for a hauler (economy on): its energy, and its parts from the
-    /// parts stock, any it is short of made at once from the stockpile (or
-    /// its mass, with no recipe). Returns whether it could.
-    fn pay_hauler(&mut self) -> bool {
-        // With a factory, it is paid for when its bay starts on it: here,
-        // only whether the queue has room.
-        if self.factory() {
-            let room = self.eco.production.hauler_orders_per_bay as usize * self.prod.bays_of(crate::production::Unit::Hauler);
-            return self.prod.queued(crate::production::Unit::Hauler) < room;
-        }
-        let (e, m) = (self.eco.hauler.energy_cost, self.eco.hauler.mass_cost);
-        if self.energy - e < 5.0 * self.upkeep() {
-            return false;
-        }
-        if self.eco.recipe.hauler.parts.is_empty() {
-            if self.mass < m {
-                return false;
-            }
-            self.mass -= m;
-            self.spent_mass += m;
-        } else {
-            match self.parts.build(&mut self.stock, &self.world.planet.mats.elements, &self.eco.recipe, &self.eco.recipe.hauler) {
-                Some(kg) => self.stock_spent += kg,
-                None => return false,
-            }
-        }
-        self.energy -= e;
-        true
-    }
-
     /// Pay for a cutter, as `pay_hauler`; `energy` is what it costs now.
     fn pay_cutter(&mut self, energy: f64) -> bool {
         let m = self.eco.harvester.mass_cost;
@@ -3458,163 +2310,10 @@ impl Sim {
         true
     }
 
-    /// A hauler for flock h: ordered from the factory (it comes when built),
-    /// or straight away with no factory.
-    fn send_hauler(&mut self, h: usize) {
-        if self.factory() {
-            self.prod.orders.push_back(crate::production::Order::Hauler(h));
-        } else {
-            self.launch_hauler(h);
-        }
-    }
-
     /// Units are built in the factory, over time (the economy on, with a
     /// factory in the economy).
     pub fn factory(&self) -> bool {
         self.prod.on() && self.free_drones.is_none()
-    }
-
-    /// A new hauler leaves the mother swarm for flock h.
-    fn launch_hauler(&mut self, h: usize) {
-        let from = self.rendezvous(h);
-        let to = self.site_pos(h);
-        let t1 = self.tick + self.ticks(self.hauler_way(from, to) / self.eco.hauler.speed);
-        // The seed swarm sets down with its first hauler already in place.
-        let state = if self.tick == 0 { HaulerState::Working } else { HaulerState::Returning };
-        let t1 = if self.tick == 0 { 0 } else { t1 };
-        self.haulers.push(Hauler { site: h, state, load: 0.0, credited: 0.0, from, to, t0: self.tick, t1, life_left: self.eco.hauler.life_s, alive: true, lift_at: 0, mix: Default::default() });
-    }
-
-    /// One second of hauler work: lift off when full, unload, come back;
-    /// wear out; and send more haulers where cutters are left waiting.
-    fn hauler_work(&mut self) {
-        let dt = self.ticks(1.0) as f64 * self.eco.tick_s;
-        // (What was brought lately fades: a few minutes' worth.)
-        let fade = (-dt / 240.0).exp();
-        for r in self.recent_mats.iter_mut() {
-            *r *= fade;
-        }
-        let spec = self.eco.hauler.clone();
-        let cap = spec.capacity_kg * self.up_cached_cargo;
-        let mut arrived = Vec::new();
-        for k in 0..self.haulers.len() {
-            if !self.haulers[k].alive {
-                continue;
-            }
-            let site = self.haulers[k].site;
-            if self.flock.get(site).is_some_and(|f| f.dead) && matches!(self.haulers[k].state, HaulerState::Working | HaulerState::Returning) {
-                // Its flock is gone: nothing left for it to do.
-                self.retire_hauler(k);
-                continue;
-            }
-            let here = self.site_pos(site);
-            let hot_here = self.contact_k((here.0.floor() as i64, here.1.floor() as i64)) > self.eco.harvester.melt_k;
-            let now = self.tick;
-            let mother = self.rendezvous(site);
-            let top = self.world.planet.max_radius;
-            let hl = &mut self.haulers[k];
-            hl.life_left -= dt;
-            match hl.state {
-                HaulerState::Working => {
-                    hl.from = here;
-                    hl.to = here;
-                    // Lava (or anything hotter than it can stand) over its
-                    // spot: it melts where it stands, cargo and all.
-                    if hot_here {
-                        hl.life_left = 0.0;
-                    }
-                    let stayed = (now - hl.t1) as f64 * self.eco.tick_s;
-                    if hl.load >= cap || (hl.load > 0.0 && stayed >= spec.max_stay_s) {
-                        if self.happenings.len() < 400 {
-                            self.happenings.push((Happening::HaulerLift, here.0, here.1));
-                        }
-                        hl.state = HaulerState::Lifting;
-                        hl.lift_at = now;
-                        hl.from = here;
-                        hl.to = mother;
-                        hl.t0 = now;
-                        hl.t1 = now + ((route_len(here, mother, route_cruise(here, mother, top)) / spec.speed) / self.eco.tick_s).ceil() as u64;
-                    }
-                }
-                HaulerState::Lifting if now >= hl.t1 => {
-                    let (kg, cr) = (hl.load, hl.credited);
-                    hl.mix = Default::default();
-                    self.transit.take(kg, Some(&mut self.stock));
-                    self.mats_take(kg, true);
-                    let hl = &mut self.haulers[k];
-                    hl.load = 0.0;
-                    hl.credited = 0.0;
-                    hl.state = HaulerState::Unloading;
-                    hl.from = hl.to;
-                    hl.t0 = now;
-                    hl.t1 = now + (spec.unload_s / self.eco.tick_s).ceil() as u64;
-                    // Delivered to the mother swarm.
-                    self.energy += kg / 1000.0 * self.eco.seed_swarm.processing_energy_per_tonne * self.up("processing yield");
-                    self.mass += cr;
-                    self.delivered_credited += cr;
-                    // A share goes into the mother swarm itself, so it spreads.
-                    if self.mother.half < std::f64::consts::PI {
-                        let g = cr * self.eco.seed_swarm.mother_growth_share;
-                        self.mass -= g;
-                        self.spent_mass += g;
-                        self.mother.grown_kg += g;
-                    }
-                }
-                HaulerState::Unloading if now >= hl.t1 => {
-                    hl.state = HaulerState::Returning;
-                    hl.to = here;
-                    hl.t0 = now;
-                    hl.t1 = now + ((route_len(hl.from, here, route_cruise(hl.from, here, top)) / spec.speed) / self.eco.tick_s).ceil() as u64;
-                }
-                HaulerState::Returning if now >= hl.t1 => {
-                    if hl.lift_at > 0 {
-                        let trip = (now - hl.lift_at) as f64 * self.eco.tick_s;
-                        if let Some(f) = self.flock.get_mut(site) {
-                            f.trip_s = if f.trip_s <= 0.0 { trip } else { f.trip_s * 0.7 + trip * 0.3 };
-                        }
-                        hl.lift_at = 0;
-                    }
-                    hl.state = HaulerState::Working;
-                    hl.from = here;
-                    hl.to = here;
-                    hl.t1 = now;
-                    arrived.push((k, site));
-                }
-                _ => {}
-            }
-            if self.haulers[k].life_left <= 0.0 {
-                // Broken down: it falls where it is, with whatever it carried.
-                let hl = &mut self.haulers[k];
-                hl.alive = false;
-                let lost = std::mem::take(&mut hl.load);
-                self.transit.take(lost, None);
-                self.mats_take(lost, false);
-                let hl = &mut self.haulers[k];
-                let t = if hl.t1 > hl.t0 { ((now - hl.t0) as f64 / (hl.t1 - hl.t0) as f64).clamp(0.0, 1.0) } else { 1.0 };
-                let at = route_at(hl.from, hl.to, route_cruise(hl.from, hl.to, top), t * t * (3.0 - 2.0 * t));
-                self.haulers_lost += 1;
-                // Worn out: it self-destructs where it is, cargo and all.
-                let n = (self.eco.hauler.mass_cost / 100.0).round() as u32;
-                self.explode(at, n.clamp(1, 40), 12.0);
-            }
-        }
-        // Cutters waiting where a hauler just arrived unload and go back to work.
-        for (k, site) in arrived {
-            if !self.haulers[k].alive {
-                continue;
-            }
-            for (i, id) in std::mem::take(&mut self.site_wait[site]).into_iter().enumerate() {
-                if self.drones[id as usize].alive && self.drones[id as usize].home == site && self.drones[id as usize].phase == Phase::Waiting {
-                    self.unload_into(id, k);
-                    self.drones[id as usize].phase = Phase::Idle;
-                    self.leg_changed(id);
-                    // (Back to work over a few seconds, not all in one step.)
-                    self.events.push(Reverse((self.tick + (i as u64 % 30), id)));
-                }
-            }
-        }
-        self.haulers.retain(|h| h.alive);
-        self.direct();
     }
 
     /// The flow field for flock h's searches and flights from `at` (its
@@ -4110,20 +2809,6 @@ impl Sim {
         [self.stock.total(), self.transit.total, self.parts.kg(r) + in_bays, cutters, haulers, self.mother.grown_kg]
     }
 
-    /// Every hauler, for drawing.
-    pub fn hauler_views(&self) -> Vec<HaulerView> {
-        let cap = self.eco.hauler.capacity_kg * self.up_cached_cargo;
-        self.haulers
-            .iter()
-            .enumerate()
-            .filter(|(_, h)| h.alive)
-            .map(|(k, h)| {
-                let (from, to) = if h.state == HaulerState::Working { let p = self.site_pos(h.site); (p, p) } else { (h.from, h.to) };
-                HaulerView { from, to, cruise: route_cruise(from, to, self.world.planet.max_radius), t0: h.t0 as f64 * self.eco.tick_s, t1: h.t1 as f64 * self.eco.tick_s, fill: (h.load / cap).min(1.0) as f32, state: h.state, mix: h.mix, id: k as u32 }
-            })
-            .collect()
-    }
-
     /// Free work may have appeared at cell c (a new face, or a reservation
     /// given up): hubs within reach of it that were dry may search again,
     /// and if any hub can reach it, a couple of waiting drones wake (they go
@@ -4131,17 +2816,31 @@ impl Sim {
     fn work_near(&mut self, c: (i64, i64)) {
         let (cx, cy) = (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
         let reach = self.eco.harvester.search_m;
-        let mut reachable = false;
-        for h in 0..self.hubs.len() {
-            let (dx, dy) = (self.hubs[h].x - cx, self.hubs[h].y - cy);
-            if dx * dx + dy * dy > reach * reach {
-                continue;
+        let wet = |s: &mut Self, h: usize| {
+            let (dx, dy) = (s.hubs[h].x - cx, s.hubs[h].y - cy);
+            if dx * dx + dy * dy <= reach * reach {
+                s.hub_dry[h] = false;
+                s.hub_gen += 1;
             }
-            reachable = true;
-            self.hub_dry[h] = false;
-            self.hub_gen += 1;
+        };
+        if self.hubs_moved || self.hub_grid_n != self.hubs.len() {
+            for h in 0..self.hubs.len() {
+                wet(self, h);
+            }
+        } else {
+            // Squares are `search_m` wide: every hub in reach is in the 3x3 round the cell.
+            let b = reach.max(1.0);
+            let (gx, gy) = ((cx / b).floor() as i64, (cy / b).floor() as i64);
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    let n = self.hub_grid.get(&(gx + dx, gy + dy)).map_or(0, |v| v.len());
+                    for k in 0..n {
+                        let h = self.hub_grid[&(gx + dx, gy + dy)][k];
+                        wet(self, h);
+                    }
+                }
+            }
         }
-        let _ = reachable;
     }
 
     /// Every hub may search again and every waiting drone wakes (after
@@ -4171,6 +2870,13 @@ impl Sim {
             let n = target.saturating_sub(self.harvesters_alive()).min((target / 100).max(10));
             for _ in 0..n {
                 self.spawn_harvester();
+            }
+            // Specialists for the benchmarks: one more a second while short.
+            for k in 0..self.free_units.len() {
+                let (u, n) = self.free_units[k];
+                if (self.units.count(u) as u32) < n {
+                    self.launch_special(u);
+                }
             }
             // Never short of energy, so nothing browns out.
             self.energy = self.energy.max(1e12);
@@ -4774,6 +3480,7 @@ impl Sim {
 
     pub fn step(&mut self) {
         let t0 = clock();
+        self.reindex();
         // Drone events due this tick, in (tick, id) order.
         while let Some(id) = self.events.pop_due(self.tick) {
             self.counts[0] += 1;
@@ -4781,6 +3488,7 @@ impl Sim {
             self.leg_changed(id);
         }
         let t1 = clock();
+        self.unit_prof[U_CUTTER] += t1 - t0;
         // Sunlight: every few seconds, wake the bare ground the Sun is on
         // that it could thaw or boil (it then warms in the sandbox).
         self.sandbox.time_s = self.time();
@@ -4796,8 +3504,10 @@ impl Sim {
         }
         let q2 = clock();
         self.throw_ejecta();
+        let qb = clock();
         self.blast_tick();
         let q3 = clock();
+        self.unit_prof[U_SAPPER] += q3 - qb;
         self.prof2[4] += q1 - q0;
         self.prof2[5] += q2 - q1;
         self.prof2[6] += q3 - q2;
@@ -4833,8 +3543,10 @@ impl Sim {
         if self.tick % self.ticks(1.0) == 0 {
             let t4 = clock();
             self.packet_work();
+            let qt = clock();
             self.tunnel_work();
             let qs = clock();
+            self.unit_prof[U_TUNNELER] += qs - qt;
             self.specialists_work();
             self.prof2[11] += clock() - qs;
             if let Some(l) = &mut self.life {
@@ -4852,7 +3564,13 @@ impl Sim {
                 l.work(&mut self.world, &mut self.sandbox, self.tick, self.eco.tick_s, &busy);
                 self.prof2[10] += clock() - q;
             }
+            // Animals (part of the step's other work; timed on their own).
+            let q = clock();
+            self.fauna_work();
+            self.fauna_prof += clock() - q;
+            let qh = clock();
             self.hauler_work();
+            self.unit_prof[U_HAULER] += clock() - qh;
             self.site_safety();
             self.waiting_heat();
             let tf = clock();
@@ -4972,6 +3690,7 @@ impl Sim {
             mix(b.y.to_bits());
         }
         self.units_hash(&mut mix);
+        self.fauna_hash(&mut mix);
         for l in &self.levels {
             mix(*l as u64);
         }
@@ -5255,12 +3974,25 @@ impl Leg {
 /// What each `Sim::prof` entry measures.
 pub const PROF_NAMES: [&str; 8] = ["drone events", "sand and heat", "rock bodies", "per-second work", "events: work search", "per-second: building", "per-second: packet", "per-second: orbit and landing"];
 /// What each `Sim::counts` entry counts.
+/// The unit files, in the order of `Sim::unit_prof`. (Cutters: their
+/// events, hauler hand-overs included. Sappers: their work and blasts.
+/// Abductors stride on the foresters' code (timed there); their hunts are
+/// timed on their own.)
+pub const UNIT_NAMES: [&str; 7] = ["cutters", "haulers", "sappers", "tunnelers", "heat-sink bots", "foresters", "abductors"];
+pub const U_CUTTER: usize = 0;
+pub const U_HAULER: usize = 1;
+pub const U_SAPPER: usize = 2;
+pub const U_TUNNELER: usize = 3;
+pub const U_HEATSINK: usize = 4;
+pub const U_FORESTER: usize = 5;
+pub const U_ABDUCTOR: usize = 6;
+
 pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches finding nothing", "cells weighed", "drones built", "dead drones kept"];
 
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 13; // 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
+const SIM_VERSION: u32 = 14; // 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -5495,6 +4227,7 @@ impl Sim {
             l.write(o);
         }
         self.write_charges(o);
+        self.write_fauna(o);
     }
 
     /// Rebuild a game from what `write_save` wrote, on the same body, with
@@ -5612,6 +4345,7 @@ impl Sim {
             if site >= nh {
                 return Err(bad("a hauler's flock"));
             }
+            s.haulers_moved = true;
             s.haulers.push(Hauler { site, state, load: v[0], credited: v[1], from: (v[2], v[3]), to: (v[4], v[5]), t0, t1, life_left: v[6], alive: true, lift_at: 0, mix: Default::default() });
         }
         s.starved = r.u64()?;
@@ -5736,6 +4470,9 @@ impl Sim {
             for sp in s.units.sappers.iter_mut() {
                 sp.fissile = f;
             }
+        }
+        if version >= 14 {
+            s.read_fauna(r)?;
         }
         s.sandbox.time_s = s.time();
         s.legs_all_changed();

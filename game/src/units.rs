@@ -1429,3 +1429,58 @@ fn draw_crab(pen: &mut Pen, un: &UnitView, st: &mut Tripod, by: f32, legs: &[Vec
         }
     }
 }
+
+// ---- Placeholder animals (the Dev planet's herds, dft_sim fauna.rs) ----
+
+/// Draw every animal in view: a block body sized by its weight, a head, two
+/// legs that trot while it moves, and a white tail raised while it flees.
+/// Placeholder art until Fauna L1 gives them real bodies.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_animals(animals: &[dft_sim::swarm::AnimalView], now: f64, real_t: f64, v: &View, bounds: [f64; 4], cell_px: f32, pos: &mut Vec<[f32; 3]>, col: &mut Vec<[f32; 4]>) {
+    let [l, b, r, t] = bounds;
+    let tt = real_t as f32;
+    for an in animals {
+        let (x, y) = an.at(now);
+        if x < l - 10.0 || x > r + 10.0 || y < b - 10.0 || y > t + 10.0 {
+            continue;
+        }
+        let p = v.to_screen(x, y);
+        let up_angle = (y.atan2(x) - std::f64::consts::FRAC_PI_2) as f32;
+        let mut pen = Pen { pos: &mut *pos, col: &mut *col, p, half: cell_px * 0.5, angle: up_angle };
+        let f = if an.facing >= 0.0 { 1i32 } else { -1 };
+        // Size by weight: 40 kg is 2 blocks long, 400 kg 5 long and 2 high.
+        let long = (2.0 + an.kg / 120.0).round().clamp(2.0, 5.0) as i32;
+        let high = if an.kg > 220.0 { 2 } else { 1 };
+        let hide = |u: i32, w: i32| {
+            let k = 0.36 + 0.08 * shade(an.id, u, w);
+            lin(k * 1.25, k * 0.95, k * 0.62)
+        };
+        let moving = an.from != an.to;
+        let trot = if moving { ((tt * if an.fleeing { 9.0 } else { 3.0 } + an.id as f32).sin() > 0.0) as i32 } else { 0 };
+        // Body over its legs; u runs from its tail (u0) to its nose.
+        let u0 = -long / 2;
+        for i in 0..long {
+            for w in 1..=high {
+                let u = (u0 + i) * f;
+                pen.block(u as f32, w as f32, hide(u, w));
+            }
+        }
+        // Head, a block up at the front, with a dark eye block for big ones.
+        let nose = (u0 + long) * f;
+        pen.block(nose as f32, (high + 1) as f32, hide(nose, high + 1));
+        if high > 1 {
+            pen.block(nose as f32, high as f32, hide(nose, high));
+        }
+        // Legs: back and front, one block, stepping in turn as it moves.
+        let back = (u0 + trot) * f;
+        let front = (u0 + long - 1 - trot) * f;
+        let dark = lin(0.2, 0.15, 0.1);
+        pen.block(back as f32, 0.0, dark);
+        pen.block(front as f32, 0.0, dark);
+        // Panic: the white tail goes up.
+        if an.fleeing {
+            let tail = (u0 - 1) * f;
+            pen.block(tail as f32, (high + 1) as f32, lin(0.95, 0.95, 0.92));
+        }
+    }
+}
