@@ -497,6 +497,8 @@ pub struct Sim {
     pub last_room: u64,
     /// kg taken out of the stockpile to build with, all told.
     pub stock_spent: f64,
+    /// What the refinery's fuser has made.
+    pub fuser: crate::fuser::Fuser,
     pub delivered_credited: f64,
     pub spent_mass: f64,
     pub recovered_mass: f64,
@@ -669,11 +671,14 @@ pub struct Sim {
     /// slopes, and melt runs sideways into cracks (the proving ground's
     /// settling), a cell or two a tick.
     settling: CellSet,
+    /// Loose cells out of sight that would settle: they wait, and settle
+    /// once the view comes over them (as sand does).
+    settle_wait: CellSet,
     /// Broken rock in the air on its way out of a plume, thrown a little at
     /// a time: (tick, from, material, velocity).
     plume_out: std::collections::VecDeque<(u64, (f64, f64), MatId, (f64, f64))>,
     /// Sappers caught in a blast, going off a moment later: (tick, where).
-    chain: Vec<(u64, (f64, f64))>,
+    chain: Vec<(u64, (f64, f64), f64)>,
     next_tunnel_k: usize,
     /// Metres of shaft bored, shafts finished, and kg the drills cut.
     pub tunnel_m: u64,
@@ -687,6 +692,9 @@ pub struct Sim {
     /// in PROF_NAMES. The first four add up to the whole step; the rest are
     /// parts of those.
     pub prof: [f64; 8],
+    /// (Profiling) finer timings: break_free_big, break_free, bodies step,
+    /// rock landed, sandbox step, sandbox changes applied, blast tick, the rest.
+    pub prof2: [f64; 12],
     /// How often things happened, named in COUNT_NAMES.
     pub counts: [u64; 6],
     /// Economy off (a test mode for the game): drones cost nothing and the
@@ -900,6 +908,7 @@ impl Sim {
             collected_mats: vec![0.0; world.planet.mats.len()],
             last_room: 0,
             stock_spent: 0.0,
+            fuser: crate::fuser::Fuser::default(),
             world,
             energy: eco.seed_swarm.start_energy,
             eco,
@@ -1015,6 +1024,7 @@ impl Sim {
             loose_mat,
             melt: Default::default(),
             settling: CellSet::default(),
+            settle_wait: CellSet::default(),
             plume_out: Default::default(),
             chain: Vec::new(),
             next_tunnel_k: 0,
@@ -1024,6 +1034,7 @@ impl Sim {
             skills,
             units,
             prof: [0.0; 8],
+            prof2: [0.0; 12],
             counts: [0; 6],
             free_drones: None,
             leg_track: None,
@@ -1364,6 +1375,7 @@ impl Sim {
                     continue;
                 }
                 let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
+                self.undope(c, false);
                 self.progress.remove(&c);
                 self.open_cell(c);
                 // Out from the blast and up, faster near its heart.
@@ -1635,6 +1647,7 @@ impl Sim {
                     let mat = self.world.planet.mats.get(m);
                     let (kg, mult) = (mat.density, mat.multiplier);
                     self.world.mine_cell(c.0, c.1);
+                    self.undope(c, false);
                     self.progress.remove(&c);
                     self.open_cell(c);
                     let credited = kg * mult * t.spoil_recovery;
@@ -1789,6 +1802,7 @@ impl Sim {
     /// the dig face, cells that landed join it, and fast rock wrecks drones
     /// working where it passes.
     fn body_tick(&mut self) {
+        let q0 = clock();
         // (Every step: it works through a steady allowance in small pieces.)
         {
             let lifted = self.bodies.break_free_big(&mut self.world);
@@ -1798,6 +1812,7 @@ impl Sim {
                 self.open_cell(c);
             }
         }
+        let q1 = clock();
         // (Every step, so the work comes in small pieces.)
         {
             let lifted = self.bodies.break_free(&mut self.world);
@@ -1807,7 +1822,12 @@ impl Sim {
                 self.open_cell(c);
             }
         }
+        let q2 = clock();
         let ev = self.bodies.step(&mut self.world);
+        let q3 = clock();
+        self.prof2[0] += q1 - q0;
+        self.prof2[1] += q2 - q1;
+        self.prof2[2] += q3 - q2;
         for c in ev.lifted {
             self.progress.remove(&c);
             self.reserved.remove(&c);
@@ -1826,6 +1846,7 @@ impl Sim {
             self.sandbox.wake_around_filled(&self.world, c);
             self.apply_sandbox(vec![Change { cell: c, from: VACUUM, to: m }]);
         }
+        self.prof2[3] += clock() - q3;
         // The drone hovers on the open side of the cell it cuts: crushed if
         // falling rock passes right beside that cell.
         if !ev.crushing.is_empty() {
@@ -2835,6 +2856,7 @@ impl Sim {
                     if done + kg >= density - 1e-9 {
                         self.progress.remove(&cell);
                         self.world.mine_cell(cell.0, cell.1);
+                        self.undope(cell, true);
                         self.open_cell(cell);
                     } else {
                         self.progress.insert(cell, done + kg);
@@ -4270,6 +4292,10 @@ impl Sim {
     /// bays finish units and start on the next orders.
     fn production_work(&mut self) {
         let dt = self.ticks(1.0) as f64 * self.eco.tick_s;
+        // The fuser tops up what nothing else can make (uranium), from
+        // energy above the reserve.
+        let available = self.energy - 5.0 * self.upkeep();
+        self.energy -= self.fuser.work(&self.eco.fuser, &self.world.planet.mats.elements, &mut self.stock, dt, available);
         self.fabricate(dt);
         // Orders for flocks gone since are dropped.
         let flock = &self.flock;
@@ -4342,7 +4368,7 @@ impl Sim {
             if q == 0 {
                 continue;
             }
-            let c = r.counts(r.of(u));
+            let c = r.counts(&self.recipe_now(u));
             for i in 0..n {
                 sp_free[i] += q.min(free(u)) * c[i];
                 sp_all[i] += q * c[i];
@@ -4464,10 +4490,15 @@ impl Sim {
         if self.energy - energy - held <= 5.0 * self.upkeep() {
             return false;
         }
-        let r = &self.eco.recipe;
-        if !self.parts.claim(r, r.of(unit)) {
+        let rec = self.recipe_now(unit);
+        if !self.parts.can_claim(&self.eco.recipe, &rec) {
             return false;
         }
+        // A sapper's charge: conventional ones are cast now, from the stockpile.
+        if unit == Unit::Sapper && !self.cast_charge() {
+            return false;
+        }
+        self.parts.claim(&self.eco.recipe, &rec);
         self.energy -= energy;
         let order = self.prod.orders.remove(k).expect("found above");
         self.prod.bays[b].job = Some(Job { order, left_s: self.prod.bays[b].build_s });
@@ -4757,12 +4788,19 @@ impl Sim {
             self.sun_wake();
         }
         // The sandbox: falling sand, heat and reactions.
+        let q0 = clock();
         let changes = self.sandbox.step(&mut self.world);
+        let q1 = clock();
         if !changes.is_empty() {
             self.apply_sandbox(changes);
         }
+        let q2 = clock();
         self.throw_ejecta();
         self.blast_tick();
+        let q3 = clock();
+        self.prof2[4] += q1 - q0;
+        self.prof2[5] += q2 - q1;
+        self.prof2[6] += q3 - q2;
         let t2 = clock();
         self.body_tick();
         let t3 = clock();
@@ -4796,7 +4834,9 @@ impl Sim {
             let t4 = clock();
             self.packet_work();
             self.tunnel_work();
+            let qs = clock();
             self.specialists_work();
+            self.prof2[11] += clock() - qs;
             if let Some(l) = &mut self.life {
                 // Drones still cutting in or round a square (cells reserved
                 // for them within a square's width of it).
@@ -4808,7 +4848,9 @@ impl Sim {
                     }
                     ((sy - 1) * s..(sy + 2) * s).any(|y| ((sx - 1) * s..(sx + 2) * s).any(|x| reserved.contains_key(&(x, y))))
                 };
+                let q = clock();
                 l.work(&mut self.world, &mut self.sandbox, self.tick, self.eco.tick_s, &busy);
+                self.prof2[10] += clock() - q;
             }
             self.hauler_work();
             self.site_safety();
@@ -5068,9 +5110,28 @@ impl Sim {
 
     /// Where loose matter moves and rock is cut free (see sandbox::Attention):
     /// the game sets it to what's on screen. None, everywhere, is the default.
+    /// (Profiling) loose cells (rubble, melt, debris) and cells still settling.
+    pub fn loose_count(&self) -> (usize, usize) {
+        (self.loose.len(), self.settling.len())
+    }
+
+    /// (Profiling) the sandbox's running totals and its queues (see
+    /// `Sandbox::load`).
+    pub fn sand_load(&self) -> (crate::sandbox::Stats, [usize; 5]) {
+        (self.sandbox.stats.clone(), self.sandbox.load())
+    }
+
     pub fn set_attention(&mut self, a: crate::sandbox::Attention) {
         self.sandbox.set_attention(a);
         self.bodies.set_attention(a);
+        // Rubble that waited out of sight settles once it is in view.
+        if !self.settle_wait.is_empty() && a != Some(None) {
+            let now: Vec<(i64, i64)> = self.settle_wait.iter().copied().filter(|&c| crate::sandbox::in_attention(a, c)).collect();
+            for c in now {
+                self.settle_wait.remove(&c);
+                self.settling.insert(c);
+            }
+        }
     }
 
     /// Cutters waiting at their flock for a hauler.
@@ -5199,7 +5260,7 @@ pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches f
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 12; // 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
+const SIM_VERSION: u32 = 13; // 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -5433,6 +5494,7 @@ impl Sim {
         if let Some(l) = &self.life {
             l.write(o);
         }
+        self.write_charges(o);
     }
 
     /// Rebuild a game from what `write_save` wrote, on the same body, with
@@ -5665,6 +5727,14 @@ impl Sim {
                     Some(l) => l.read(r)?,
                     None => return Err("this save has a life cycle but the body has no life".into()),
                 }
+            }
+        }
+        if version >= 13 {
+            s.read_charges(r)?;
+        } else {
+            let f = s.fissile_per_charge();
+            for sp in s.units.sappers.iter_mut() {
+                sp.fissile = f;
             }
         }
         s.sandbox.time_s = s.time();

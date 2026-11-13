@@ -54,7 +54,8 @@ fn offset(c: &SwayCell, along: f64, t: f64) -> (f64, f64) {
     }
 }
 
-pub fn draw(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>, shown: Res<Shown>, view: Res<View>, time: Res<Time>, mut handle: Local<Option<Handle<Mesh>>>) {
+pub fn draw(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>, shown: Res<Shown>, view: Res<View>, time: Res<Time>, mut handle: Local<Option<Handle<Mesh>>>, mut perf: ResMut<crate::log::Perf>) {
+    let _timed = crate::log::Timed::new(&mut perf, crate::log::P_SWAY);
     let h = handle.get_or_insert_with(|| {
         let h = meshes.add(empty());
         commands.spawn((Mesh2d(h.clone()), MeshMaterial2d(materials.add(ColorMaterial::default())), Transform::from_xyz(0.0, 0.0, Z), NoFrustumCulling));

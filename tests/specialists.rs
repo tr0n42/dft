@@ -105,3 +105,60 @@ fn specialists_survive_a_save() {
     assert_eq!(l.specialist_totals().0, s.specialist_totals().0);
     assert_eq!(l.prod.built, s.prod.built);
 }
+
+/// The refinery's fuser: on a lava world, which holds no uranium, it fuses
+/// more once the fleet's is spent (mostly from iron and calcium), so
+/// sappers keep coming past the fleet's 25 charges; and every nuclear blast
+/// leaves some unreacted uranium in its rubble for the cutters.
+#[test]
+fn the_fuser_keeps_sappers_coming() {
+    let mut s = Sim::new(World::new(body("lava-world", 3.0)), eco());
+    assert!(s.prod.bays_of(Unit::Sapper) > 0);
+    watch(&mut s, 2400);
+    let made: f64 = s.fuser.made.iter().sum();
+    assert!(made > 0.0, "the fuser made something");
+    assert!(s.prod.built[Unit::Sapper.index()] > 25, "more sappers than the fleet's 25 charges");
+    let (_, _, doped, _) = s.charge_totals();
+    assert!(doped > 0.0, "uranium left in the rubble");
+    // And it survives a save.
+    let mut w = dft_sim::save::W::default();
+    s.write_save(&mut w);
+    let planet = s.world.planet.clone();
+    let l = Sim::read_save(&mut dft_sim::save::R(&w.0, 0), planet, eco()).unwrap();
+    assert_eq!(l.fuser.made, s.fuser.made);
+    assert_eq!(l.charge_totals(), s.charge_totals());
+}
+
+/// With no uranium and no fuser, sappers get conventional charges: the same
+/// 5 kt, from thousands of tonnes of explosive.
+#[test]
+fn conventional_charges_without_uranium() {
+    let mut e = eco();
+    e.fuser.fuse.clear();
+    e.production.start_refined.remove("U");
+    let mut s = Sim::new(World::new(body("lava-world", 3.0)), e);
+    watch(&mut s, 2400);
+    let (n, kg, doped, _) = s.charge_totals();
+    assert!(n > 0, "conventional charges were cast");
+    assert!(kg >= n as f64 * 3.0e6, "{kg} kg for {n} charges");
+    assert_eq!(doped, 0.0, "no uranium, none left in rubble");
+    assert!(s.specialist_totals().0 > 0, "and they went off");
+}
+
+fn watch(s: &mut Sim, until: u64) {
+    let els = s.world.planet.mats.elements.clone();
+    for t in (300..=until).step_by(300) {
+        s.run(t as f64);
+        let kg = |e: &str| s.stock.refined[els.index(e).unwrap()];
+        println!(
+            "  t {t:>5} s: refined t: U {:.3}, Fe {:.0}, Ca {:.0}, Al {:.0}, Mg {:.0}, O {:.0}, N {:.0} · energy {:.0} · sappers built {}, blasts {}",
+            kg("U") / 1000.0, kg("Fe") / 1000.0, kg("Ca") / 1000.0, kg("Al") / 1000.0, kg("Mg") / 1000.0, kg("O") / 1000.0, kg("N") / 1000.0,
+            s.energy,
+            s.prod.built[Unit::Sapper.index()],
+            s.specialist_totals().0
+        );
+        for l in s.charge_lines() {
+            println!("   {l}");
+        }
+    }
+}

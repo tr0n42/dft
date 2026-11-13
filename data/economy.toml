@@ -252,6 +252,34 @@ crawl_speed = 9
 drill_speed = 3.5
 arm_s = 2.5
 spoil_recovery = 0.2
+kt_per_kg_fissioned = 17     # a 5 kt blast fissions about 0.3 kg of the charge's 8 kg of uranium...
+unreacted_doped = 0.5        # ...and half of the rest is left through the rubble for the cutters (about 3.9 kg)
+charge_keep_back = 1.0       # a conventional charge is cast only while the stockpile holds as much again after
+# Conventional charges, best first: only when no uranium can be had or fused.
+# As much as gives the same 5 kt; the sapper looks the same.
+[[units.sapper.charge]]
+name = "RDX"                 # C3H6N6O6, the standard military high explosive
+re = 1.6                     # 1.6 kg of TNT per kg: 3,125 t for 5 kt
+make = [
+  { name = "carbon", kg = 0.1622, of = [{ el = "C" }] },
+  { name = "hydrogen", kg = 0.0272, of = [{ el = "H" }] },
+  { name = "nitrogen", kg = 0.3784, of = [{ el = "N" }] },
+  { name = "oxygen", kg = 0.4322, of = [{ el = "O" }] },
+]
+[[units.sapper.charge]]
+name = "aluminium-oxygen slurry"   # aluminium powder in liquid oxygen: no nitrogen needed
+re = 1.0                     # counted at TNT strength: 5,000 t for 5 kt
+make = [
+  { name = "aluminium", kg = 0.5293, of = [{ el = "Al" }] },
+  { name = "oxygen", kg = 0.4707, of = [{ el = "O" }] },
+]
+[[units.sapper.charge]]
+name = "magnesium-oxygen slurry"
+re = 1.0
+make = [
+  { name = "magnesium", kg = 0.6030, of = [{ el = "Mg" }] },
+  { name = "oxygen", kg = 0.3970, of = [{ el = "O" }] },
+]
 
 [units.tunneler]
 energy_cost = 5000
@@ -293,6 +321,39 @@ courier_speed = 60           # ...plus its distance from the mother swarm at thi
 [units.abductor]
 energy_cost = 3000
 keep = 2
+
+# ---- The fuser (a refinery module) ----
+# Fuses two atoms into one heavier one: their atomic numbers add up (iron 26
+# + iron 26 = tellurium 52). Mass is kept: kg in = kg out, the two taken in
+# the ratio of their atomic masses. It keeps each element in `keep` topped
+# up in the refined stockpile. Any pair that makes uranium (92) has a heavy
+# partner, and every heavy element is rare, so when a partner is short it
+# is fused first from common atoms (one step down). Of the ways to make
+# something it takes the one the stockpile can make the most of. Energy
+# isn't an economy yet, so for now this is near-endless uranium.
+[fuser]
+kg_per_s = 0.5               # kg of uranium a second (the steps before it on top): a sapper's 8 kg charge in 16 s
+energy_per_kg = 250          # E per kg fused, every step: about 4,000 E a charge from iron and calcium
+spare_energy = 2000          # only from energy above this (and the swarm's reserve): haulers and cutters come first
+keep = { U = 16 }            # uranium kept in stock: two charges
+fuse = [
+  # Uranium (92):
+  { make = "U", from = ["Te", "Zr"] },   # 52 + 40: from iron and calcium alone (below)
+  { make = "U", from = ["Xe", "Sr"] },   # 54 + 38
+  { make = "U", from = ["Ba", "Kr"] },   # 56 + 36: barium is the commonest heavy element
+  { make = "U", from = ["Pb", "Ne"] },   # 82 + 10: lead
+  { make = "U", from = ["Ta", "K"] },    # 73 + 19
+  { make = "U", from = ["Hf", "Ca"] },   # 72 + 20
+  # Partners, from common atoms:
+  { make = "Te", from = ["Fe", "Fe"] },  # 26 + 26
+  { make = "Zr", from = ["Ca", "Ca"] },  # 20 + 20
+  { make = "Xe", from = ["Fe", "Ni"] },  # 26 + 28
+  { make = "Sr", from = ["K", "K"] },    # 19 + 19
+  { make = "Sr", from = ["Si", "Cr"] },  # 14 + 24
+  { make = "Kr", from = ["Ca", "S"] },   # 20 + 16
+  { make = "Ne", from = ["N", "Li"] },   # 7 + 3
+  { make = "Ne", from = ["C", "Be"] },   # 6 + 4
+]
 
 # ---- What cutters and haulers are made of (economy on) ----
 # Every element delivered to the mother swarm goes into its stockpile.

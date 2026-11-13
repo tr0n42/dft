@@ -13,6 +13,7 @@ pub mod elements;
 pub mod flora;
 pub mod life;
 pub mod flow;
+pub mod fuser;
 pub mod recipes;
 pub mod geology;
 pub mod glamour;

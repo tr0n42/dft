@@ -413,6 +413,10 @@ pub struct Economy {
     /// The Universal Drone Replicator and the specialists it builds.
     #[serde(default)]
     pub units: UnitsSpec,
+    /// The refinery's fuser: two atoms into one heavier (uranium for
+    /// sappers' charges).
+    #[serde(default)]
+    pub fuser: crate::fuser::FuserSpec,
 }
 
 /// `[units]`: the Universal Drone Replicator, a testing stand-in for the
@@ -460,6 +464,43 @@ pub struct SapperSpec {
     pub arm_s: f64,
     /// Share of what it drills through that is kept (the rest is spoil).
     pub spoil_recovery: f64,
+    /// Kilotonnes from each kilogram of uranium that fissions: most of a
+    /// charge's uranium doesn't react.
+    #[serde(default = "kt_per_kg")]
+    pub kt_per_kg_fissioned: f64,
+    /// Share of the unreacted uranium left in the rubble (the rest is lost).
+    #[serde(default)]
+    pub unreacted_doped: f64,
+    /// Conventional charges, best first: with no uranium to be had or
+    /// fused, a sapper is built with the first the stockpile can make, as
+    /// much of it as gives the same yield.
+    #[serde(default)]
+    pub charge: Vec<ConventionalCharge>,
+    /// A conventional charge is cast only while the stockpile would still
+    /// hold this many more of it after.
+    #[serde(default)]
+    pub charge_keep_back: f64,
+}
+
+fn kt_per_kg() -> f64 {
+    17.0
+}
+
+/// A conventional explosive for a sapper's charge.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConventionalCharge {
+    pub name: String,
+    /// Kilograms of TNT one kilogram of it is worth (relative effectiveness).
+    pub re: f64,
+    /// What one kilogram of it is made of.
+    pub make: Vec<crate::recipes::Component>,
+}
+
+impl ConventionalCharge {
+    /// Kilograms of it for a yield of `kt` kilotonnes.
+    pub fn kg_for(&self, kt: f64) -> f64 {
+        kt * 1e6 / self.re.max(1e-9)
+    }
 }
 
 /// A tunneler as a ground unit: the arthropod drill, much wider than the

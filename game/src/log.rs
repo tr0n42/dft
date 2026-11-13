@@ -29,7 +29,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// The game's own systems, timed every frame.
-pub const PARTS: [&str; 7] = ["tile changes", "tile requests", "tile results", "tile placing", "drones", "dev panel", "fog"];
+pub const PARTS: [&str; 9] = ["tile changes", "tile requests", "tile results", "tile placing", "drones", "dev panel", "fog", "lights and effects", "plant sway"];
 pub const P_CHANGES: usize = 0;
 pub const P_REQUEST: usize = 1;
 pub const P_COLLECT: usize = 2;
@@ -37,6 +37,8 @@ pub const P_PLACE: usize = 3;
 pub const P_DRONES: usize = 4;
 pub const P_PANEL: usize = 5;
 pub const P_FOG: usize = 6;
+pub const P_LIGHTS: usize = 7;
+pub const P_SWAY: usize = 8;
 
 /// A frame slower than this is logged as an event.
 const SLOW_FRAME_S: f64 = 0.05;
@@ -66,6 +68,21 @@ pub struct Perf {
 impl Perf {
     pub fn add(&mut self, part: usize, since: Instant) {
         self.frame[part] += since.elapsed().as_secs_f64();
+    }
+}
+
+/// Times a system from here to wherever it returns: `let _t = Timed::new(&mut perf, P_...)`.
+pub struct Timed<'a>(&'a mut Perf, usize, Instant);
+
+impl<'a> Timed<'a> {
+    pub fn new(perf: &'a mut Perf, part: usize) -> Self {
+        Timed(perf, part, Instant::now())
+    }
+}
+
+impl Drop for Timed<'_> {
+    fn drop(&mut self) {
+        self.0.add(self.1, self.2);
     }
 }
 

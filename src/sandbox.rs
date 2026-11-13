@@ -435,7 +435,8 @@ impl Sandbox {
         }
     }
 
-    fn sees(&self, c: Cell) -> bool {
+    /// Whether cell `c` is where things are simulated in full (on screen).
+    pub fn sees(&self, c: Cell) -> bool {
         in_attention(self.attention, c)
     }
 
@@ -476,6 +477,12 @@ impl Sandbox {
 
     /// Something hot touches cell c (an explosion, a spark): it is at least
     /// `k` kelvin now, and wakes (what burns may catch).
+    /// (Profiling) cells waiting in each queue (next, warm, slow, far), and
+    /// cells off the body's temperature.
+    pub fn load(&self) -> [usize; 5] {
+        [self.next.len(), self.warm.len(), self.slow.len(), self.far.len(), self.temps.len()]
+    }
+
     pub fn heat_cell(&mut self, world: &World, c: Cell, k: f64) {
         let m = world.material(c.0, c.1);
         if m == VACUUM {

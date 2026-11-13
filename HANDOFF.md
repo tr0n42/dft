@@ -62,6 +62,33 @@ DarkForestTheory project, opened by link:
 
 Most recent work (12 Nov), built and passing the tests, waiting on a PC look:
 
+- **Sappers' charges (12 Nov, second session; test-fuser.bat).** Benjamin's
+  answer to the uranium question:
+  - **The fuser** (src/fuser.rs, `[fuser]` in data/economy.toml), a refinery
+    module: fuses two atoms into one heavier one (atomic numbers add up,
+    checked at load in a test; kg in = kg out; 250 E a kg, only from energy
+    above the reserve plus `spare_energy`). It keeps 16 kg of refined
+    uranium in stock. Any pair that makes uranium has a rare heavy partner,
+    so short partners are fused first, one step down: Fe+Fe=Te, Ca+Ca=Zr,
+    then Te+Zr=U (also Xe+Sr, Ba+Kr, Pb+Ne, Ta+K, Hf+Ca, with Fe+Ni=Xe,
+    K+K/Si+Cr=Sr, Ca+S=Kr, N+Li/C+Be=Ne). It takes whichever route the
+    stockpile can make the most of; in practice iron and calcium. 40 min on
+    a 3 km lava world (no uranium): 72 sappers, 384 kg fused, 192k E.
+  - **Conventional charges** (`[[units.sapper.charge]]`): only when no
+    uranium can be had or fused, the sapper's bay casts a 5 kt charge
+    straight from the stockpile (src/specialists.rs, `cast_charge`; the
+    sapper's recipe then drops its nuclear charge): RDX (1.6x TNT, 3,125 t,
+    needs ~1,180 t of nitrogen), else aluminium- or magnesium-oxygen slurry
+    (counted at TNT strength, 5,000 t). Cast only while the stockpile holds
+    as much again after (`charge_keep_back`). Same blast, same look.
+  - **Uranium in rubble:** a 5 kt blast fissions ~0.3 kg (17 kt/kg); half
+    the unreacted rest (`unreacted_doped`) is spread through the blast's
+    rubble that stays put (`Units::dope`, moved as rubble settles); a
+    cutter taking a doped cell carries its uranium up. Lost if the plume,
+    a tunneler or a forester takes the cell.
+  - F1: "sapper charges now", "uranium left in rubble", "fuser" lines.
+    Save version 13 (12 still loads).
+
 - **Plant life cycle (L1e, src/life.rs; tests/life.rs; test-life.bat).**
   Felled living tissue wilts to deadwood and leaf litter, which rot to
   humus. Where living plants are taken away, the 8 m square is remembered;
@@ -118,7 +145,7 @@ Most recent work (12 Nov), built and passing the tests, waiting on a PC look:
   1 m light map near the camera in stepped bands; lights from the tripods'
   eyes and lasers, explosions, melt, the sapper's drill and blink. Also
   sparks, smoke and dust, and plume dust columns.
-- Save version 12 (the world save 6).
+- Save version 13 since the sappers' charges (the world save 6).
 
 Earlier (11 Nov), built and passing the tests, waiting on a PC look:
 
@@ -312,6 +339,57 @@ and drill sparks light the blocks around them in stepped bands.
 **Tests:** full suite 99 passed, 0 failed. Game builds. Everything is
 committed; not yet pushed.
 
-**Open questions:** uranium for sappers (bigger allowance or plutonium?);
-then plant panic (species-by-species losses; most species don't react;
+**Later the same day (second PC): sappers' charges.** Uranium no longer
+runs out. A fuser in the refinery fuses two atoms into one heavier one; it
+makes uranium from iron and calcium (iron + iron = tellurium, calcium +
+calcium = zirconium, the two = uranium), at a high energy cost. Where no
+uranium can be had or made, a sapper gets a conventional 5 kt charge instead,
+cast from 3,125 t of RDX or 5,000 t of aluminium-oxygen slurry, looking the
+same. Every nuclear blast leaves about 3.9 kg of unreacted uranium in its
+rubble for the cutters. Test with test-fuser.bat (a lava world, no uranium
+of its own; the F1 panel's "sapper charges", "uranium left in rubble" and
+"fuser" lines). In 40 min on a lava world: 72 sappers instead of 25, 384 kg
+of uranium fused. With the fuser off, conventional charges are slow to come
+(only one in 40 min: it waits for about 5,300 t of refined aluminium).
+Full suite: 106 passed, 0 failed. Not committed yet.
+
+**Later still: the slowdown.** Benjamin noticed the game eating far more
+CPU. Measured (same 5 km living world run to 30 game min as fast as it
+goes): before the 12 Nov commit 8 s, after it 22 s, with the fuser 25 s.
+The cost was the specialists' new work done in full even off screen: sapper
+blasts (thrown rock and the plume, then rubble settling cell by cell; the
+molten heart's heat), and the foresters' first plant scan building the
+ground of 256 places round the body at once (a 1.7 s stall). Benjamin's
+rule now (memory): off screen can almost always be approximated. Fixed:
+out of sight a blast's heart goes straight to glass and nothing is thrown
+or blown out (it lies as rubble where it broke); rubble out of sight waits
+and settles when the view comes over it (`settle_wait`); falling chunks and
+thrown rock land at once when zoomed out too (bodies.rs); the plant scan
+looks at 8 of its 256 directions per scan (plus over every flock). Now 13 s
+in the game (10 s headless). `cargo run --release --bin simbench` times the
+sim alone with features switched off (VERBOSE=1 for per-2-minute stage and
+finer timings, `Sim::prof2`); the game log now also times lights and plant
+sway. Still to look at: drawing drones got about 10x dearer per drone
+since 11 Nov (about 2 ms a frame at 1,000 drones, 3.8 ms at 3,000).
+
+**Last: blasts on screen.** Benjamin: the sim must keep going, at least to
+the eye; simplify the boom so it doesn't hitch. The blast's own maths was
+never the cost (about 20 ms); the stall was flying every thrown cell as a
+physics piece (often 1,000+ per blast) and then settling them. Now a blast
+on screen throws at most 200 pieces and blows at most 200 out of its plume
+(`THROW_MAX`, `PLUME_MAX` in specialists.rs, a fixed random share); the
+rest lies as rubble where it broke. Watched everywhere at once
+(`simbench ... all`), 10 game min went from about 40 s to 28 s.
+
+**On "500k drones used to cost 150 ms".** Measured per drone, the drones
+themselves are no dearer: about 0.5 microseconds per drone per game second
+(1,200 drones, 0.6 ms per game second; 500k would be about 250 ms, about
+what it was). What is new is fixed cost that doesn't scale with drones:
+the specialists, life, falling sand and heat, and fires. Zoomed out it is
+now about 4 to 6 ms per game second in all (`simbench`, VERBOSE shows a
+new "specialists" timer, `prof2[11]`). Next, if the game still feels slow:
+run the game with a big swarm and read the log's stage timings to see which
+of those it is in that case, and look at the drone-drawing cost above.
+
+**Open questions:** plant panic (species-by-species losses; most species don't react;
 exodus rare, about one living world in three).

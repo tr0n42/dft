@@ -218,7 +218,9 @@ fn draw(
     run: Option<Res<crate::Run>>,
     mut bits: Local<Vec<Bit>>,
     mut plumes: Local<Vec<(f64, f64, f32, f32)>>,
+    mut perf: ResMut<crate::log::Perf>,
 ) {
+    let _timed = crate::log::Timed::new(&mut perf, crate::log::P_LIGHTS);
     let Some(h) = handles else {
         let bits_h = meshes.add(empty());
         let light_h = meshes.add(empty());

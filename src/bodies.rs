@@ -612,8 +612,8 @@ impl Bodies {
         while i < self.drops.len() {
             let d = self.drops[i];
             let c0 = (d.p.0.floor() as i64, d.p.1.floor() as i64);
-            // Out of sight (the view moved away): down at once where it would land.
-            if !crate::sandbox::in_attention(self.attention, c0) && self.attention != Some(None) {
+            // Out of sight (the view moved away, or zoomed out): down at once where it would land.
+            if !crate::sandbox::in_attention(self.attention, c0) {
                 self.drops.swap_remove(i);
                 if let Some(t) = land_thrown(w, d.p, d.m, d.v) {
                     ev.landed.push((t, d.m));
@@ -1380,11 +1380,10 @@ impl Bodies {
             return ev;
         }
         // Out of sight, a body isn't tumbled through the air step by step:
-        // it is set down at once on the ground below it. (Zoomed out, with
-        // nowhere looked at closely, the ones already in the air carry on
-        // falling: they are still on screen, only small.)
+        // it is set down at once on the ground below it. (Zoomed out too,
+        // with nowhere looked at closely: too small to see tumble.)
         let mut i = 0;
-        while i < self.loose.len() && self.attention != Some(None) {
+        while i < self.loose.len() {
             let l = &self.loose[i];
             let f = &self.frames[&l.frame];
             let t = f.phys.bodies[l.handle].translation();

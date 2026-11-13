@@ -125,6 +125,8 @@ pub struct Sapper {
     /// and that ground's height (distance from the centre).
     want: f64,
     ground_r: f64,
+    /// Kilograms of uranium in its charge (0: a conventional charge).
+    pub(super) fissile: f64,
 }
 
 /// What a heat-sink bot is doing.
@@ -231,6 +233,12 @@ pub struct Bag {
     due: u64,
 }
 
+/// At most this many cells of a blast on screen are thrown as flying
+/// pieces, and at most this many blown out of its plume; the rest lies as
+/// rubble. (Flying thousands of pieces stalled the sim for a blast on view.)
+const THROW_MAX: usize = 200;
+const PLUME_MAX: usize = 200;
+
 /// Seconds a bag is seen rising with its couriers after they lift it.
 const BAG_RISE_S: f64 = 3.0;
 
@@ -278,6 +286,11 @@ pub struct Units {
     /// stands of plants (direction, cells of plant there), found lately.
     molten: Vec<(i64, i64)>,
     flora: Vec<(f64, u32)>,
+    /// Plant cells last found in each of the scan's directions round the
+    /// body, and the next direction to look at (a share each scan: the
+    /// first look at a place builds its ground, which is slow).
+    flora_dirs: Vec<u32>,
+    flora_cursor: usize,
     /// For each material: a hot liquid (and what it freezes to); a plant.
     freeze_to: Vec<Option<MatId>>,
     is_flora: Vec<bool>,
@@ -293,6 +306,17 @@ pub struct Units {
     /// Sappers destroyed (by a blast, magma, heat or falling rock), each of
     /// which went off.
     pub destroyed: u64,
+    /// The uranium in each sapper's charge being built, in bay order (0: a
+    /// conventional charge).
+    pub(super) charges: std::collections::VecDeque<f64>,
+    /// Conventional charges cast, and kilograms of explosive in them.
+    pub conventional: u64,
+    pub explosive_kg: f64,
+    /// Unreacted uranium left in the rubble (kg), by cell, and all told;
+    /// and how much of it cutters have brought back.
+    pub(super) dope: CellMap<f64>,
+    pub doped_kg: f64,
+    pub undoped_kg: f64,
 }
 
 /// A specialist as the screen needs it: it moves from `from` to `to`
@@ -513,7 +537,7 @@ impl Sim {
     /// The parts one `u` lacks that the refined stockpile can't make now.
     pub fn missing_parts(&self, u: Unit) -> Vec<String> {
         let r = &self.eco.recipe;
-        let need = r.counts(r.of(u));
+        let need = r.counts(&self.recipe_now(u));
         let els = &self.world.planet.mats.elements;
         need.iter()
             .enumerate()
@@ -550,12 +574,16 @@ impl Sim {
                 self.scan_molten();
             }
             if self.prod.bays_of(Unit::Forester) > 0 {
+                let q = clock();
                 self.scan_flora();
+                self.prof2[8] += clock() - q;
             }
         }
         self.sappers_work();
         self.bots_work();
+        let q = clock();
         self.walkers_work();
+        self.prof2[9] += clock() - q;
         // Melt cools to glass.
         while let Some(&(due, c)) = self.melt.front() {
             if due > self.tick {
@@ -591,6 +619,8 @@ impl Sim {
     }
 
     fn launch_sapper(&mut self) {
+        // Its charge, as cast when its bay started it.
+        let fissile = self.units.charges.pop_front().unwrap_or_else(|| self.fissile_per_charge());
         let Some(site) = self.sapper_site() else { return };
         let (hx, hy) = self.site_pos(site);
         let a = hy.atan2(hx);
@@ -600,7 +630,7 @@ impl Sim {
         let id = self.units.new_id();
         let sp = &self.eco.units.sapper;
         let r = sp.radius_m_per_cbrt_kt * sp.yield_kt.max(0.0).cbrt();
-        self.units.sappers.push(Sapper { id, state: SapState::Fly, pos: start, prev: start, moved_at: self.tick, goal, path: Vec::new(), along: 0.0, drilled: 0.0, armed_s: 0.0, want: r + sp.bury_m, ground_r: g });
+        self.units.sappers.push(Sapper { id, state: SapState::Fly, pos: start, prev: start, moved_at: self.tick, goal, path: Vec::new(), along: 0.0, drilled: 0.0, armed_s: 0.0, want: r + sp.bury_m, ground_r: g, fissile });
     }
 
     /// From where it landed, its way down: the deepest open cell it can
@@ -666,7 +696,7 @@ impl Sim {
             // rock, or touched by magma or a blast's heat.
             if s.state != SapState::Fly && s.armed_s >= 0.0 && !(s.state == SapState::Arm && s.armed_s >= sp.arm_s) && self.sapper_destroyed(s.pos) {
                 self.units.destroyed += 1;
-                blasts.push(s.pos);
+                blasts.push((s.pos, s.fissile));
                 s.armed_s = -1.0;
                 self.units.sappers[k] = s;
                 continue;
@@ -720,6 +750,7 @@ impl Sim {
                         for (k, o) in [-1.0, 0.0, 1.0].into_iter().enumerate() {
                             let q = cell_of((next.0 + side.0 * o, next.1 + side.1 * o));
                             let Some(m) = self.world.lift_cell(q.0, q.1) else { continue };
+                            self.undope(q, false);
                             self.progress.remove(&q);
                             self.reserved.remove(&q);
                             self.open_cell(q);
@@ -749,7 +780,7 @@ impl Sim {
                 SapState::Arm => {
                     s.armed_s += 1.0;
                     if s.armed_s >= sp.arm_s {
-                        blasts.push(s.pos);
+                        blasts.push((s.pos, s.fissile));
                         s.armed_s = -1.0;
                     }
                 }
@@ -757,8 +788,8 @@ impl Sim {
             self.units.sappers[k] = s;
         }
         self.units.sappers.retain(|s| s.armed_s >= 0.0);
-        for at in blasts {
-            self.sapper_blast(at, sp.yield_kt);
+        for (at, fissile) in blasts {
+            self.sapper_blast(at, sp.yield_kt, fissile);
         }
     }
 
@@ -800,14 +831,14 @@ impl Sim {
                 // Gone from the field; it goes off a moment later.
                 s.armed_s = -1.0;
                 self.units.destroyed += 1;
-                caught.push((s.id, s.pos));
+                caught.push((s.id, s.pos, s.fissile));
             }
         }
         self.units.sappers.retain(|s| s.armed_s >= 0.0);
-        for (id, pos) in caught {
+        for (id, pos, fissile) in caught {
             let d = 0.12 + 0.1 * crate::noise::unit(hash(self.tick, id as i64, 0, 0xC4A1));
             let due = self.tick + self.ticks(d);
-            self.chain.push((due, pos));
+            self.chain.push((due, pos, fissile));
         }
     }
 
@@ -820,8 +851,8 @@ impl Sim {
             let (now, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.chain).into_iter().partition(|c| c.0 <= tick);
             self.chain = later;
             let y = self.eco.units.sapper.yield_kt;
-            for (_, at) in now {
-                self.sapper_blast(at, y);
+            for (_, at, fissile) in now {
+                self.sapper_blast(at, y, fissile);
             }
         }
         while let Some(&(due, from, m, vel)) = self.plume_out.front() {
@@ -837,7 +868,9 @@ impl Sim {
             }
         }
         if !self.settling.is_empty() {
+            let q0 = clock();
             self.settle();
+            self.prof2[1] += 0.0 * q0;
         }
     }
 
@@ -862,6 +895,11 @@ impl Sim {
             }
             let look = self.world.look(c.0, c.1);
             if look == Look::GLASS {
+                continue;
+            }
+            // Out of sight it waits, and settles once the view comes over it.
+            if !self.sandbox.sees(c) {
+                self.settle_wait.insert(c);
                 continue;
             }
             let melt = look == Look::MELT;
@@ -900,6 +938,9 @@ impl Sim {
             moves += 1;
             self.loose.remove(&c);
             self.loose.insert(n);
+            if let Some(u) = self.units.dope.remove(&c) {
+                self.units.dope.insert(n, u);
+            }
             self.progress.remove(&c);
             self.reserved.remove(&c);
             self.sandbox.wake_around(c);
@@ -940,7 +981,15 @@ impl Sim {
     ///   drive a share of the rubble up it and out of the top;
     /// - sappers caught in it go off too.
     /// Rubble, melt and thrown rock are loose: cutters pick them up quickly.
-    pub fn sapper_blast(&mut self, at: (f64, f64), yield_kt: f64) {
+    /// `fissile`: kilograms of uranium in its charge (0: conventional);
+    /// what didn't react is partly left in the rubble.
+    pub fn sapper_blast(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64) {
+        let q0 = clock();
+        self.sapper_blast_inner(at, yield_kt, fissile);
+        self.prof2[7] += clock() - q0;
+    }
+
+    fn sapper_blast_inner(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64) {
         let sp = &self.eco.units.sapper;
         let r = sp.radius_m_per_cbrt_kt * yield_kt.max(0.0).cbrt();
         self.booms.push(Boom { x: at.0, y: at.1, size_m: (2.2 * r) as f32, buried: true });
@@ -949,6 +998,13 @@ impl Sim {
         self.happen(Happening::Explosion, at);
         let c0 = cell_of(at);
         let blast = hash(self.tick, c0.0, c0.1, 0x5A99);
+        // Out of sight (no part of it on screen) it is approximated: the
+        // heart goes straight to glass, and nothing is thrown or blown out of
+        // a plume (it all lies as rubble where it broke).
+        let seen = {
+            let k = (r * 2.4).ceil() as i64;
+            [(0, 0), (k, k), (k, -k), (-k, k), (-k, -k), (k, 0), (-k, 0), (0, k), (0, -k)].iter().any(|d| self.sandbox.sees((c0.0 + d.0, c0.1 + d.1)))
+        };
         let up = unit_of(at);
         let hard = |s: &Self, m: MatId| (s.world.planet.mats.get(m).hardness as f64 / 10.0).clamp(0.05, 0.95);
         // The rays.
@@ -1025,6 +1081,7 @@ impl Sim {
         };
         let mut rubble: Vec<(i64, i64)> = Vec::new();
         let mut thrown = 0u64;
+        let mut fling: Vec<((i64, i64), f64, f64)> = Vec::new();
         let power = (0.6 + yield_kt.max(0.0).cbrt() * 0.4).min(3.0);
         for &c in &order {
             let Some(&(e, d)) = broken.get(&c) else { continue };
@@ -1050,6 +1107,12 @@ impl Sim {
             }
             // The heart melts.
             if d < r * 0.3 * (1.15 - 0.4 * h) {
+                if !seen {
+                    // (Out of sight: cooled to glass already.)
+                    self.loose.insert(c);
+                    self.world.set_look(c.0, c.1, Look::GLASS);
+                    continue;
+                }
                 self.sandbox.heat_cell(&self.world, c, MELT_K);
                 self.loose.insert(c);
                 self.settling.insert(c);
@@ -1058,8 +1121,34 @@ impl Sim {
                 self.melt.push_back((self.tick + cool, c));
                 continue;
             }
-            if e > 0.35 + 0.35 * h {
-                // Thrown clear, out from the blast.
+            if seen && e > 0.35 + 0.35 * h {
+                fling.push((c, e, h));
+            } else {
+                // Left loose where it was: baked near the heart.
+                self.loose.insert(c);
+                self.settling.insert(c);
+                self.world.set_look(c.0, c.1, if d < r * 0.6 { Look::BAKED } else { Look::RUBBLE });
+                rubble.push(c);
+            }
+        }
+        // Thrown clear, out from the blast: at most THROW_MAX cells fly as
+        // pieces (a random share, the same every run); the rest of what
+        // would have flown stays as rubble, so a blast on screen never
+        // stalls the sim flying thousands of pieces.
+        if fling.len() > THROW_MAX {
+            fling.sort_unstable_by_key(|&(c, _, _)| hash(blast, c.0, c.1, 0x7E40));
+            for &(c, e, _) in &fling[THROW_MAX..] {
+                let d = broken.get(&c).map(|b| b.1).unwrap_or(r);
+                let _ = e;
+                self.loose.insert(c);
+                self.settling.insert(c);
+                self.world.set_look(c.0, c.1, if d < r * 0.6 { Look::BAKED } else { Look::RUBBLE });
+                rubble.push(c);
+            }
+            fling.truncate(THROW_MAX);
+        }
+        for (c, e, h) in fling {
+            {
                 let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
                 self.progress.remove(&c);
                 self.reserved.remove(&c);
@@ -1076,21 +1165,15 @@ impl Sim {
                     self.settling.insert(t);
                     self.scrap_landed(t);
                 }
-            } else {
-                // Left loose where it was: baked near the heart.
-                self.loose.insert(c);
-                self.settling.insert(c);
-                self.world.set_look(c.0, c.1, if d < r * 0.6 { Look::BAKED } else { Look::RUBBLE });
-                rubble.push(c);
             }
         }
         let _ = thrown;
         self.units.cracked += cracked + broken.len() as u64;
         // The plume: most blasts find a way up.
-        if crate::noise::unit(hash(blast, 0, 0, 77)) < 0.9 && !rubble.is_empty() {
+        if seen && crate::noise::unit(hash(blast, 0, 0, 77)) < 0.9 && !rubble.is_empty() {
             if let Some(mouth) = self.way_up(c0, r) {
                 let share = 0.35 + 0.25 * crate::noise::unit(hash(blast, 0, 0, 7));
-                let take = ((rubble.len() as f64 * share).round() as usize).min(rubble.len());
+                let take = ((rubble.len() as f64 * share).round() as usize).min(rubble.len()).min(PLUME_MAX);
                 // A random share of the rubble, the same every run.
                 let mut pick: Vec<(u64, (i64, i64))> = rubble.iter().map(|&c| (hash(blast, c.0, c.1, 13), c)).collect();
                 pick.sort_unstable();
@@ -1118,6 +1201,17 @@ impl Sim {
                     self.plume_out.push_back((at, from, m, (side.0 * vx + mu.0 * vy, side.1 * vx + mu.1 * vy)));
                 }
             }
+        }
+        // Unreacted uranium: a share is left through the rubble still here.
+        let sp = &self.eco.units.sapper;
+        let unreacted = (fissile - yield_kt / sp.kt_per_kg_fissioned.max(1e-9)).max(0.0) * sp.unreacted_doped.clamp(0.0, 1.0);
+        let here: Vec<(i64, i64)> = rubble.iter().copied().filter(|c| self.loose.contains(c)).collect();
+        if unreacted > 0.0 && !here.is_empty() {
+            let each = unreacted / here.len() as f64;
+            for c in here {
+                *self.units.dope.entry(c).or_insert(0.0) += each;
+            }
+            self.units.doped_kg += unreacted;
         }
         // Sappers caught in it go off too, a moment later.
         self.sappers_caught(at, r * 0.9);
@@ -1352,14 +1446,24 @@ impl Sim {
     /// Stands of plants round the body: 256 directions, and round each
     /// working flock, counting plant cells over the ground.
     fn scan_flora(&mut self) {
-        let mut out = Vec::new();
-        let n = 256;
-        let mut dirs: Vec<f64> = (0..n).map(|i| std::f64::consts::TAU * i as f64 / n as f64).collect();
+        const DIRS: usize = 256;
+        const PER_SCAN: usize = 8;
+        let dir = |i: usize| std::f64::consts::TAU * i as f64 / DIRS as f64;
+        if self.units.flora_dirs.len() != DIRS {
+            self.units.flora_dirs = vec![0; DIRS];
+            self.units.flora_cursor = 0;
+        }
+        // A share of the directions round the body each scan, in turn.
+        for _ in 0..PER_SCAN {
+            let i = self.units.flora_cursor;
+            self.units.flora_cursor = (i + 1) % DIRS;
+            self.units.flora_dirs[i] = self.flora_near(dir(i), 0.0);
+        }
+        let mut out: Vec<(f64, u32)> = self.units.flora_dirs.iter().enumerate().filter(|&(_, &k)| k > 0).map(|(i, &k)| (dir(i), k)).collect();
+        // And over every flock, every scan.
         for i in self.live_sites() {
             let (x, y) = self.site_pos(i);
-            dirs.push(y.atan2(x));
-        }
-        for a in dirs {
+            let a = y.atan2(x);
             let k = self.flora_near(a, 0.0);
             if k > 0 {
                 out.push((a, k));
@@ -1692,6 +1796,7 @@ impl Sim {
                 let kg = self.world.planet.mats.get(m).density;
                 // Into its bag: credited once couriers carry the bag up.
                 self.world.mine_cell(q.0, q.1);
+                self.undope(q, false);
                 self.progress.remove(&q);
                 self.reserved.remove(&q);
                 self.open_cell(q);
@@ -1876,6 +1981,7 @@ impl Sim {
         if self.prod.bays_of(Unit::Forester) > 0 {
             v.push(format!("  stands of plants found: {}", u.flora.len()));
         }
+        v.extend(self.charge_lines());
         v
     }
 
@@ -2047,7 +2153,7 @@ impl Sim {
             for _ in 0..r.u32()? {
                 path.push(get_cell(r)?);
             }
-            u.sappers.push(Sapper { id, state, pos: (f[0], f[1]), prev: (f[0], f[1]), moved_at: tick, goal: (f[2], f[3]), path, along: f[4], drilled: f[5], armed_s: f[6], want: f[7], ground_r: f[8] });
+            u.sappers.push(Sapper { id, state, pos: (f[0], f[1]), prev: (f[0], f[1]), moved_at: tick, goal: (f[2], f[3]), path, along: f[4], drilled: f[5], armed_s: f[6], want: f[7], ground_r: f[8], fissile: 0.0 });
         }
         for _ in 0..r.u32()? {
             let id = r.u32()?;
@@ -2106,5 +2212,186 @@ impl Sim {
             mix(b.x.to_bits());
             mix(b.y.to_bits());
         }
+    }
+}
+
+// ---- Sappers' charges: nuclear, or conventional when no uranium can be had ----
+
+impl Sim {
+    /// Kilograms of uranium in one nuclear charge (its strict "fissile"
+    /// components).
+    pub(super) fn fissile_per_charge(&self) -> f64 {
+        let r = &self.eco.recipe;
+        let Some(p) = r.index("nuclear-charge") else { return 0.0 };
+        r.part[p].make.iter().filter(|c| !c.of.is_empty() && c.of.iter().all(|ch| ch.el == "U")).map(|c| c.kg).sum()
+    }
+
+    /// Whether a sapper can have a nuclear charge: one in stock, the
+    /// stockpile can make one, or the fuser can make the uranium for one.
+    fn nuclear_ok(&self) -> bool {
+        let r = &self.eco.recipe;
+        let Some(p) = r.index("nuclear-charge") else { return true };
+        if self.parts.n[p] > 0 {
+            return true;
+        }
+        let els = &self.world.planet.mats.elements;
+        let comps: Vec<(&crate::recipes::Component, f64)> = r.part[p].make.iter().map(|c| (c, c.kg)).collect();
+        if self.stock.plan_refined(els, &comps).is_some() {
+            return true;
+        }
+        let f = &self.eco.fuser;
+        let Some(u) = els.index("U") else { return false };
+        if f.fuse.is_empty() {
+            return false;
+        }
+        let need = self.fissile_per_charge();
+        let can = self.stock.refined[u] + f.makeable(els, &self.stock.refined, u, crate::fuser::DEPTH).0;
+        // (Three steps of fusing at most, for every kilogram.)
+        let energy = self.energy - 5.0 * self.upkeep() - f.spare_energy;
+        can >= need && energy >= 3.0 * need * f.energy_per_kg
+    }
+
+    /// The conventional charge a sapper would be built with now: none while
+    /// a nuclear one can be had, else the first the stockpile can cast (with
+    /// `charge_keep_back` as much again left over). None too when none can be.
+    pub(super) fn sapper_charge(&self) -> Option<usize> {
+        if self.nuclear_ok() {
+            return None;
+        }
+        let sp = &self.eco.units.sapper;
+        let els = &self.world.planet.mats.elements;
+        sp.charge.iter().position(|ch| {
+            let kg = ch.kg_for(sp.yield_kt) * (1.0 + sp.charge_keep_back.max(0.0));
+            let comps: Vec<(&crate::recipes::Component, f64)> = ch.make.iter().map(|c| (c, c.kg * kg)).collect();
+            self.stock.plan_refined(els, &comps).is_some()
+        })
+    }
+
+    /// What one `u` takes from the parts stock now: a sapper with a
+    /// conventional charge has no nuclear charge.
+    pub(super) fn recipe_now(&self, u: Unit) -> crate::recipes::Recipe {
+        let mut rec = self.eco.recipe.of(u).clone();
+        if u == Unit::Sapper && self.sapper_charge().is_some() {
+            rec.parts.retain(|n| n.part != "nuclear-charge");
+        }
+        rec
+    }
+
+    /// A sapper's bay starts it: cast its conventional charge straight from
+    /// the stockpile, or note its nuclear one. False (nothing taken) if the
+    /// charge can't be cast after all.
+    pub(super) fn cast_charge(&mut self) -> bool {
+        match self.sapper_charge() {
+            None => {
+                let f = self.fissile_per_charge();
+                self.units.charges.push_back(f);
+                true
+            }
+            Some(i) => {
+                let sp = &self.eco.units.sapper;
+                let ch = &sp.charge[i];
+                let kg = ch.kg_for(sp.yield_kt);
+                let comps: Vec<(&crate::recipes::Component, f64)> = ch.make.iter().map(|c| (c, c.kg * kg)).collect();
+                let Some(take) = self.stock.plan_refined(&self.world.planet.mats.elements, &comps) else { return false };
+                let name = ch.name.clone();
+                let spent = self.stock.take(&take);
+                self.stock_spent += spent;
+                self.units.conventional += 1;
+                self.units.explosive_kg += spent;
+                self.units.charges.push_back(0.0);
+                self.director_log_push(format!("no uranium: a sapper gets a {:.0} t {name} charge", spent / 1000.0));
+                true
+            }
+        }
+    }
+
+    /// A cell is taken whole: unreacted uranium left in it goes with it
+    /// (`carried`: into the cutter's load, else lost).
+    pub(super) fn undope(&mut self, c: (i64, i64), carried: bool) {
+        if self.units.dope.is_empty() {
+            return;
+        }
+        let Some(u) = self.units.dope.remove(&c) else { return };
+        if !carried {
+            return;
+        }
+        if let Some(i) = self.world.planet.mats.elements.index("U") {
+            self.transit.kg[i] += u;
+            self.transit.total += u;
+            self.units.undoped_kg += u;
+        }
+    }
+
+    /// Sappers' charges so far: conventional charges cast, kg of explosive
+    /// in them, kg of unreacted uranium left in rubble, kg of it brought back.
+    pub fn charge_totals(&self) -> (u64, f64, f64, f64) {
+        let u = &self.units;
+        (u.conventional, u.explosive_kg, u.doped_kg, u.undoped_kg)
+    }
+
+    /// Charges and the fuser, for the F1 panel.
+    pub fn charge_lines(&self) -> Vec<String> {
+        let u = &self.units;
+        let mut v = Vec::new();
+        if self.prod.bays_of(Unit::Sapper) > 0 {
+            let now = match self.sapper_charge() {
+                Some(i) => {
+                    let sp = &self.eco.units.sapper;
+                    let ch = &sp.charge[i];
+                    format!("conventional ({}, {:.0} t)", ch.name, ch.kg_for(sp.yield_kt) / 1000.0)
+                }
+                None if self.nuclear_ok() => "nuclear".to_string(),
+                None => "none yet (no uranium, not enough for a conventional one)".to_string(),
+            };
+            v.push(format!(
+                "  sapper charges now: {now} · conventional cast {} ({:.0} t of explosive) · uranium left in rubble {:.1} kg, brought back {:.1} kg",
+                u.conventional,
+                u.explosive_kg / 1000.0,
+                u.doped_kg,
+                u.undoped_kg
+            ));
+        }
+        v.extend(self.fuser.lines(&self.eco.fuser));
+        v
+    }
+
+    /// Saves (version 13): the fuser, sappers' charges, uranium in rubble.
+    pub(super) fn write_charges(&self, o: &mut crate::save::W) {
+        o.f64s(&self.fuser.made);
+        o.f64(self.fuser.energy);
+        let u = &self.units;
+        o.f64s(&u.sappers.iter().map(|s| s.fissile).collect::<Vec<_>>());
+        o.f64s(&u.charges.iter().copied().collect::<Vec<_>>());
+        o.u64(u.conventional);
+        o.f64(u.explosive_kg);
+        o.f64(u.doped_kg);
+        o.f64(u.undoped_kg);
+        let mut dope: Vec<((i64, i64), f64)> = u.dope.iter().map(|(c, k)| (*c, *k)).collect();
+        dope.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        o.u32(dope.len() as u32);
+        for (c, k) in dope {
+            put_cell(o, c);
+            o.f64(k);
+        }
+    }
+
+    pub(super) fn read_charges(&mut self, r: &mut crate::save::R) -> Result<(), String> {
+        self.fuser.made = r.f64s()?;
+        self.fuser.energy = r.f64()?;
+        let fissile = r.f64s()?;
+        for (s, f) in self.units.sappers.iter_mut().zip(fissile) {
+            s.fissile = f;
+        }
+        self.units.charges = r.f64s()?.into_iter().collect();
+        self.units.conventional = r.u64()?;
+        self.units.explosive_kg = r.f64()?;
+        self.units.doped_kg = r.f64()?;
+        self.units.undoped_kg = r.f64()?;
+        for _ in 0..r.u32()? {
+            let c = get_cell(r)?;
+            let k = r.f64()?;
+            self.units.dope.insert(c, k);
+        }
+        Ok(())
     }
 }

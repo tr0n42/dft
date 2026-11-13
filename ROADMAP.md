@@ -16,9 +16,16 @@ them, Benjamin's look and tuning. Abductors wait for animals. Premium units
 (magma diver, seer, beam relay, deep hauler, core lance) come later through
 the per-run tech tree.
 
-**Open from 11 Nov:** uranium runs out after 25 sapper charges (fleet's
-200 kg; mined traces rarely make another 8 kg): a bigger allowance, or
-plutonium bred in a reactor? Fauna (a life layer for abductors).
+**Sappers' uranium, settled 12 Nov (built, tests pass, waiting on a PC look:
+test-fuser.bat):** the refinery's fuser (src/fuser.rs, `[fuser]` in
+data/economy.toml) fuses two atoms into one heavier (atomic numbers add up,
+kg in = kg out, 250 E a kg) to keep 16 kg of uranium in stock, making short
+partners first from common atoms (Fe+Fe=Te, Ca+Ca=Zr, Te+Zr=U). With no
+uranium to be had or fused, a sapper gets a conventional 5 kt charge cast
+from the stockpile (`[[units.sapper.charge]]`: RDX 3,125 t, else aluminium
+or magnesium + oxygen slurry 5,000 t). A nuclear blast leaves half its
+unreacted uranium (~3.9 kg) in its rubble; cutters bring it back. Open:
+fauna (a life layer for abductors).
 
 **Life, agreed 12 Nov:** finish plants first (L1e life cycle: built; L1f
 panic next), then carry it to animals (Fauna L1, simple wildlife; research

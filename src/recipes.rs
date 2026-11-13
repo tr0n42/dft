@@ -190,6 +190,11 @@ impl Parts {
         Some(kg)
     }
 
+    /// Whether one `unit`'s parts are all in the stock.
+    pub fn can_claim(&self, r: &Recipes, unit: &Recipe) -> bool {
+        r.counts(unit).iter().zip(&self.n).all(|(k, h)| k <= h)
+    }
+
     /// Take one `unit`'s parts out of the stock, if they are all there.
     pub fn claim(&mut self, r: &Recipes, unit: &Recipe) -> bool {
         let need = r.counts(unit);
