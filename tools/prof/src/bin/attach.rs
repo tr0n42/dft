@@ -131,7 +131,7 @@ fn main() {
     };
     let proc_ = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid) };
     unsafe {
-        SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+        SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES);
         // (SYMPATH: where the program's .pdb files are, if not found.)
         let path = std::env::var("SYMPATH").ok().map(|p| std::ffi::CString::new(p).unwrap());
         if SymInitialize(proc_, path.as_ref().map_or(std::ptr::null(), |p| p.as_ptr() as *const u8), 1) == 0 {
@@ -220,7 +220,33 @@ fn main() {
                 }
             }
         }
-        for (title, m) in [("inclusive", &incl), ("self", &selff)] {
+        // Lines in the program's own code (LINES=part of a function name):
+        // the innermost frame inside a function whose name has it.
+        let want = std::env::var("LINES").unwrap_or_default();
+        let mut lines: HashMap<String, u64> = HashMap::new();
+        if !want.is_empty() {
+            for s in st {
+                for (i, &pc) in s.iter().enumerate() {
+                    let pc = if i == 0 { pc } else { pc.saturating_sub(1) };
+                    if func(pc).contains(&want) {
+                        let mut l: IMAGEHLP_LINE64 = unsafe { std::mem::zeroed() };
+                        l.SizeOfStruct = std::mem::size_of::<IMAGEHLP_LINE64>() as u32;
+                        let mut d = 0u32;
+                        let at = unsafe {
+                            if SymGetLineFromAddr64(proc_, pc, &mut d, &mut l) != 0 && !l.FileName.is_null() {
+                                let f = std::ffi::CStr::from_ptr(l.FileName as *const i8).to_string_lossy().to_string();
+                                format!("{}:{}", f.rsplit(['/', std::path::MAIN_SEPARATOR]).next().unwrap_or(""), l.LineNumber)
+                            } else {
+                                "?".into()
+                            }
+                        };
+                        *lines.entry(at).or_default() += 1;
+                        break;
+                    }
+                }
+            }
+        }
+        for (title, m) in [("inclusive", &incl), ("self", &selff), ("lines", &lines)] {
             let mut v: Vec<(&String, &u64)> = m.iter().collect();
             v.sort_by(|a, b| b.1.cmp(a.1));
             println!("  -- {title} (share of its busy samples)");

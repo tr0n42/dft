@@ -164,6 +164,8 @@ const HAULER: [&str; 9] = [
     "  VV    VV  ",
 ];
 const HAULER_W: usize = 12;
+/// A hauler under this many pixels across is drawn as one mark.
+const HAULER_MARK_PX: f32 = 8.0;
 /// A hauler's tentacles, squid-like, hanging from its belly between the
 /// thrust vents: which column each grows from, and whether it is one of the
 /// two long feeding arms (longer, swaying more, a light at the tip) or one
@@ -885,6 +887,19 @@ fn draw(
             let a = y.atan2(x);
             let angle = (a - std::f64::consts::FRAC_PI_2) as f32;
             let lamp = crate::lights::Lights::pulse(real_t, a);
+            // Too small to see its blocks (under HAULER_MARK_PX across): one
+            // dark mark with a lit edge, not its hull, hold and tentacles
+            // block by block (a couple of hundred blocks each, for every
+            // hauler in view: most of a zoomed-out frame).
+            if cell_px * (HAULER_W as f32) < HAULER_MARK_PX {
+                let h = (0.5 * cell_px * HAULER_W as f32).max(1.5);
+                let lit = Color::srgb(lc[0] * lamp, lc[1] * lamp, lc[2] * lamp).to_linear();
+                square(pos, p.x, p.y, h + 0.5);
+                col.extend_from_slice(&[[lit.red, lit.green, lit.blue, 1.0]; 6]);
+                square(pos, p.x, p.y, h);
+                col.extend_from_slice(&[[0.012, 0.014, 0.014, 1.0]; 6]);
+                continue;
+            }
             // The hold: cells filled from the bottom row up, in the colours
             // of what it carries.
             let mix: crate::cargo::Mix = hl.mix.iter().filter(|e| e.1 > 0.0).map(|e| (body.0.mats.get(e.0).colour, e.1 as f64)).collect();

@@ -50,6 +50,11 @@ const REBUILD_UNDER_S: f64 = 1.0;
 /// Tiles just off screen (built ahead so panning shows no pop) are rebuilt
 /// less often while the ground under them keeps changing.
 const REBUILD_AHEAD_S: f64 = 0.5;
+/// Zoomed out past this many metres a pixel, those waits grow with the zoom
+/// (twice as long at twice this, and so on), up to REBUILD_ZOOM_MAX times:
+/// a tile's change is a pixel or less there.
+const REBUILD_ZOOM_MPP: f64 = 4.0;
+const REBUILD_ZOOM_MAX: f64 = 20.0;
 /// The atmosphere's floor is a smooth surface over the ground as it stood,
 /// sunk by how much matter is missing beneath it: the depth eaten in each
 /// direction (from the published heights), averaged over this far either
@@ -899,6 +904,11 @@ fn request(mut tiles: ResMut<Tiles>, view: Res<View>, body: Res<crate::Body>, ru
     }
     let frame = tiles.frame;
     let now = time.elapsed_secs_f64();
+    // Zoomed out, a changed tile waits longer for its rebuild (see
+    // REBUILD_ZOOM_MPP): with cutters busy all over, every tile in view was
+    // rebuilt ten times a second, each one reading the world under its lock,
+    // which slowed the simulation by a third.
+    let zoomed_out = (view.mpp / REBUILD_ZOOM_MPP).clamp(1.0, REBUILD_ZOOM_MAX);
     let mut missing = 0;
     // What to build: tiles never built come first (a gap on screen), then
     // rebuilds of tiles already showing a picture (the ground changed).
@@ -916,7 +926,7 @@ fn request(mut tiles: ResMut<Tiles>, view: Res<View>, body: Res<crate::Body>, ru
                     s.away = true;
                 }
                 s.seen = frame;
-                let wait = if k.under { REBUILD_UNDER_S } else if ahead { REBUILD_AHEAD_S } else { REBUILD_S };
+                let wait = (if k.under { REBUILD_UNDER_S } else if ahead { REBUILD_AHEAD_S } else { REBUILD_S }) * zoomed_out;
                 let due = s.task.is_none() && s.stale && now - s.built_at >= wait;
                 if !k.under && !ahead && (matches!(s.shown, Shown::Pending) || s.task.is_some() || s.stale) {
                     missing += 1;

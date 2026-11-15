@@ -292,14 +292,48 @@ impl Shared {
     }
 }
 
+/// The simulation's own helper threads, at most.
+const SIM_HELPERS: usize = 8;
+
 /// Start the simulation thread.
+/// The simulation's thread runs above normal priority (Windows): the game's
+/// speed is the simulation's, and zoomed out the tile builders and drawing
+/// keep most of the other cores busy, which slowed it by a third.
+fn above_normal() {
+    #[cfg(windows)]
+    {
+        unsafe extern "system" {
+            fn GetCurrentThread() -> isize;
+            fn SetThreadPriority(thread: isize, priority: i32) -> i32;
+        }
+        const THREAD_PRIORITY_ABOVE_NORMAL: i32 = 1;
+        unsafe {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+        }
+    }
+}
+
 pub fn start(mut sim: Sim, control: Control) -> Arc<Shared> {
     sim.world.track = Some(Default::default());
     sim.leg_track = Some(Default::default());
     let mirror = Mirror { origin: sim.world.leaf_corner(0, 0), leaves: Default::default(), looks: Default::default() };
     let shared = Arc::new(Shared { sim: Mutex::new(sim), mirror: parking_lot::RwLock::new(mirror), readers: AtomicUsize::new(0), out: Mutex::new(Out::default()), control: Mutex::new(control), blasts: Mutex::new(Vec::new()) });
     let s = shared.clone();
-    std::thread::Builder::new().name("simulation".into()).spawn(move || run(&s)).expect("start the simulation thread");
+    std::thread::Builder::new()
+        .name("simulation".into())
+        .spawn(move || {
+            above_normal();
+            // Its own helper threads for the work it does side by side
+            // (heat, flow fields, searches), above normal too: on the
+            // shared ones it queued behind the drawing, and zoomed out
+            // (drawing busiest) the waits slowed it by a third.
+            let n = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(2, SIM_HELPERS);
+            match rayon::ThreadPoolBuilder::new().num_threads(n).thread_name(|i| format!("simulation helper {i}")).start_handler(|_| above_normal()).build() {
+                Ok(pool) => pool.install(|| run(&s)),
+                Err(_) => run(&s),
+            }
+        })
+        .expect("start the simulation thread");
     shared
 }
 

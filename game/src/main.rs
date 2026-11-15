@@ -386,10 +386,25 @@ fn main() {
         app.insert_resource(saves::Restoring(Some(r)));
     }
     app
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(window),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(window),
+                    ..default()
+                })
+                // Two hardware threads fewer than the machine has for the
+                // game's own pools, and at most three building tiles: the
+                // simulation (and its helpers) gets a core of its own
+                // rather than sharing one with a busy tile builder, which
+                // zoomed out had it running a third slower.
+                .set(bevy::app::TaskPoolPlugin {
+                    task_pool_options: bevy::app::TaskPoolOptions {
+                        max_total_threads: std::thread::available_parallelism().map_or(4, |n| n.get()).saturating_sub(2).max(4),
+                        async_compute: bevy::app::TaskPoolThreadAssignmentPolicy { min_threads: 1, max_threads: 3, percent: 0.25, on_thread_spawn: None, on_thread_destroy: None },
+                        ..default()
+                    },
+                }),
+        )
         .insert_resource(ClearColor(Color::srgb_u8(6, 7, 12)))
         .insert_resource(Body(planet, Arc::new(source)))
         .insert_resource(Run(run))
