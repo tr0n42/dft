@@ -188,7 +188,16 @@ fn main() {
             // pixel) over where the swarm landed, from zoomed out.
             if let Some(at) = std::env::var("FARSWITCH").ok().and_then(|v| v.parse::<f64>().ok()) {
                 if from >= at && s.far.view.is_some_and(|v| v.1 > 2.0) {
-                    let (x, y) = s.mother_pos_now();
+                    // (FARTARGET=busy: over the far sector with the most cutters,
+                    // as the game's camera script goes.)
+                    let (x, y) = if std::env::var("FARTARGET").is_ok() {
+                        let f = s.far_sectors();
+                        let (a, l, _) = f.iter().copied().max_by_key(|x| x.2).unwrap_or((0.0, 0.0, 0));
+                        let r = l.min(s.world.planet.max_radius) + 20.0;
+                        (a.cos() * r, a.sin() * r)
+                    } else {
+                        s.mother_pos_now()
+                    };
                     let (x, y) = (x as i64, y as i64);
                     s.set_view(Some(([x - 1600, x + 1600, y - 900, y + 900], 2.0)));
                     s.set_focus(Some(Some([x - 3200, x + 3200, y - 1800, y + 1800])));

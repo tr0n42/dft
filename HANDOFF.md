@@ -810,6 +810,7 @@ shot):**
 |---|---|---|---|---|
 | Living world, 1.5M | 10x, 50 fps | 9.5x | 9.3-10x, 60 fps | 7.2x |
 | Earth, ~240M | 10x, 60 fps | 9.9x, 57 fps | 10x, 47-55 fps | 10x, 52 fps |
+| 4x Earth, ~960M | 10x, 56 fps | 8.8x | 10x | 10x |
 
 Zoomed out the sim spends 2-7 ms a game second. At mid zoom on the living
 world 133k cutters come down (19 sectors on and around the screen) and it
@@ -882,10 +883,57 @@ life). The production plan below still stands for step 3 of that order.
   radioactivity (technetium, polonium, astatine and francium are on no body
   until then).
 
-## Last session's report (14 to 15 November 2026)
+## Last session's report (15 November 2026)
 
 When Benjamin asks for a "handoff digestion", repeat this section to him
 as it stands.
+
+**The ask:** not fixed drone counts but a planet covered in working drones
+at 15x (the game will be capped at 10x; the rest is room for what's still
+to come), on every body up to 4x Earth; the mother swarm arriving over the
+highest ground; haulers speeding up on long trips (about 1.5x a flat trip
+at most); and how many drones it takes to cover an Earth. Later: predict
+where the camera goes, smooth the zoom, and look at screenshots so eaten
+ground reads as dug, not chopped.
+
+**Coverage:** about 6 cutters per metre of surface at work (measured on the
+living world). Dev planet 190k, living world 1.3M, Earth 240M, 4x Earth
+960M. Earth when the swarm could cover it: still about 240 million, as it
+will have eaten only 150 m to 2.5 km off a 6,371 km radius by then.
+
+**The far field (see "Covering a planet" above):** away from the camera,
+and only once there are more cutters than the sim can fly one by one at
+15x, whole 1 km stretches of surface are worked as a count of cutters
+eating the ground from the top down: highest ground first, ramps between
+stretches, pitted so it reads as dug. What the camera shows is always
+real flocks; stretches come back as flocks as the camera arrives.
+
+**Speeds now (game, asked for 10x):**
+- Living world covered (1.5M): 10x zoomed out, mid zoom and close up; a
+  fast pan along the surface dips to about 8x.
+- Earth covered (~240M): 10x and 50-60 fps in every shot, panning included.
+- 4x Earth (~960M): 10x zoomed out, close up and panning; 8.8x at mid zoom
+  while the sectors there come down. (Its giant craters, 46 km deep bowls,
+  needed the generator's crater-aware ground height for landing spots.)
+- Headless, everything off camera: living world 28-43x, Earth 43x, 4x
+  Earth 23-26x. Before today the living world with 1.35M working ran at
+  about 1x and Earth couldn't be covered at all.
+- Small worlds under the budget (the dev planet with its usual swarm) play
+  exactly as before: nothing goes far.
+
+**Also:** mother swarm over the highest ground (Earth size, 10 game
+minutes: 13k -> 53k cutters at work), long hauls capped at 1.5x, the
+wheel's zoom glides and the sim gets ready where the view is heading, and
+on Earth the game went from 0.4 to 60 fps zoomed out.
+
+**Open:** the economy grows the swarm far too slowly to cover anything big
+(living world: 11k cutters after 4 game hours, 11 Mt unused in the
+stockpile): flocks open one at a time. A design question.
+
+**Tests:** full suite 112 passed, 0 failed, 3 ignored (as before), with 3
+new far-field tests. Commits ea57dd1 onward; not pushed.
+
+## Previous session's report (14 to 15 November 2026)
 
 **What we did (14 Nov, with Benjamin):** the fleet commander for haulers
 (drop-off points, calls, relief), cutters following moved points and
@@ -916,56 +964,3 @@ speed pass" above for every change and number. In short:
 
 **Tests:** full suite 109 passed, 0 failed, 3 ignored (the two old tutorial timing tests and one other kept off as before). Game builds. Commits 1f3a0dc to the last of the night; not
 pushed (the safety check blocked pushing; Benjamin can push).
-
-## Previous session's report (13 November 2026)
-
-**What we did:** pushed and pulled between the two PCs, ran the first
-500k-cutter stress test, fixed the biggest slowdown it found, split every
-unit's code into its own file, built the "500k cutters with X" benchmark,
-and made the Dev planet with placeholder animals for the abductor.
-
-**500k stress test:** with 500,000 cutters the cost grew faster than the
-swarm: every drone event looked through every hauler, and every cut
-through every hub. Both are indexed now: 20 game minutes went from 251 s to
-166 s with exactly the same game.
-
-**Unit platform:** each unit's code is in its own file (src/units/:
-cutter, hauler, sapper, tunneler, heatsink, forester, abductor, plus
-platform.rs for what they share). A new tool, samecheck, proved the game
-plays exactly the same after the move.
-
-**"500k cutters with X":** bench-units.bat runs 500k cutters for 20 game
-minutes with the units designed so far, times each unit, and keeps every
-run in perf/history.csv so we see what each change costs. Stage 1 (cutters
-+ haulers) baseline: 189 s real; per game second cutters 90 ms, sand and
-heat 35, the rest of the main loop 22, falling rock 8, haulers 2. The plan:
-design cutters and haulers to what you want, then add sappers, tunnelers,
-heat-sink bots, foresters and abductors one stage at a time.
-
-**Dev planet (run-dev-planet.bat):** a 5 km test world where every drone
-has work: hard rock and uranium shale (sappers), ore close under the ground
-(tunnelers), dozens of open lava pools (heat-sink bots), plants (foresters),
-and herds of placeholder animals (abductors). The animals are block
-critters that graze, and run with their white tail up when a machine comes
-within 80 m or one of the herd is snatched. New herds wander in so they
-never run out. Abductors stride to a herd, run an animal down and snatch it
-alive into a stasis sac; couriers carry full sacs up, worth twice their
-mass. In 30 game minutes: 35 blasts, 1,100 t of lava frozen, 9,900 t of
-plants, 430 m of shaft, 633 animals caught, 445 still roaming. Every new
-drone gets its work added to this planet.
-
-**Costs found (measured, not fixed):** cutter events get dearer as the swarm
-spreads; sand and heat grows with the dug area; the animals cost 12.7 ms a
-game second for about 400 of them (each looks for the ground three times a
-second), about 70% of what 20,000 cutters cost.
-
-**Roadmap:** ROADMAP.md now opens with a map of every document and a
-reassessment: what the last three days built, where it fits the plan, what
-was skipped (production steps 2-4, energy, plant panic, real animals, the
-tech trees), and a proposed order to confirm: a PC-look session, then the
-units stage by stage, then production, then life.
-
-**Tests:** full suite 104 passed, 2 failed, both on the new planet file
-(its generator fingerprint wasn't locked yet, and it switched plant life
-on in its own file, which no body does); both fixed and passing. Game
-builds. Committed and pushed.

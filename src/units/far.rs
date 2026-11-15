@@ -125,7 +125,7 @@ impl Sim {
     /// Over where the mother swarm arrived (for a camera to start at).
     pub fn mother_pos_now(&self) -> (f64, f64) {
         let a = self.mother.centre;
-        let r = self.world.planet.surface_radius(a.cos(), a.sin());
+        let r = self.world.planet.ground_hint(a.cos(), a.sin());
         (a.cos() * r, a.sin() * r)
     }
 
@@ -179,7 +179,7 @@ impl Sim {
             let a = a0 + (a1 - a0) * (j as f64 + 0.5) / SAMPLES as f64;
             let (ux, uy) = (a.cos(), a.sin());
             let lvl = self.world.far.levels[k] as f64;
-            let guess = self.world.planet.surface_radius(ux, uy).min(lvl);
+            let guess = self.world.planet.ground_hint(ux, uy).min(lvl);
             let g = self.ground_near(a, guess);
             let c = ((ux * g).floor() as i64, (uy * g).floor() as i64);
             let m = self.world.material_bare(c.0, c.1);
@@ -317,7 +317,8 @@ impl Sim {
         }
         rest.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         self.far.must_cover = (0..n).filter(|&k| self.far.must[k]).map(|k| self.far_cover(k)).sum();
-        self.far.must_flown = (0..n).filter(|&k| self.far.must[k]).map(|k| load[k] as u64).sum();
+        // (Every cutter homed there, at work or resting in the pool.)
+        self.far.must_flown = (0..self.hubs.len()).filter(|&h| !self.flock[h].dead && self.far.must[self.far_sector_at(self.site_pos(h))]).map(|h| self.hub_load[h] as u64).sum();
         let budget = self.far.budget;
         let mut full = false;
         for (_, k) in rest {
@@ -474,6 +475,9 @@ impl Sim {
         if count == 0 {
             return 0;
         }
+        if std::env::var("DFT_DEBUG_FAR").is_ok() {
+            eprintln!("far unfold {k}: {count} of {}", self.far.cutters[k]);
+        }
         // Its flocks already there first; else new ones over its ground.
         // (Only those still over the ground as it now stands: a landing
         // point left hanging high over ground eaten since is closed.)
@@ -505,7 +509,7 @@ impl Sim {
             for j in 0..spots {
                 let a = a0 + (a1 - a0) * (j as f64 + 0.5) / spots as f64;
                 let (ux, uy) = (a.cos(), a.sin());
-                let g = self.ground_near(a, self.world.planet.surface_radius(ux, uy).min(lvl));
+                let g = self.ground_deep(a, self.world.planet.ground_hint(ux, uy).min(lvl));
                 let c = ((ux * g).floor() as i64, (uy * g).floor() as i64);
                 let m = self.world.material_bare(c.0, c.1);
                 if m == VACUUM || self.world.planet.mats.get(m).state == State::Liquid {
@@ -521,6 +525,13 @@ impl Sim {
             if !homes.is_empty() {
                 let a = 0.5 * (a0 + a1);
                 self.survey_arc(a.cos(), a.sin(), 0.5 * (a1 - a0) * r + 50.0, true);
+            }
+            if homes.is_empty() && std::env::var("DFT_DEBUG_FAR").is_ok() {
+                let a = 0.5 * (a0 + a1);
+                let (ux, uy) = (a.cos(), a.sin());
+                let g = self.ground_deep(a, self.world.planet.ground_hint(ux, uy).min(lvl));
+                let c = ((ux * g).floor() as i64, (uy * g).floor() as i64);
+                eprintln!("far unfold {k}: no spots; level {lvl:.0} surface {:.0} ground found {g:.0} material {} danger {}", self.world.planet.surface_radius(ux, uy), self.world.material_bare(c.0, c.1), self.site_danger((ux * (g + 8.0), uy * (g + 8.0))));
             }
             if homes.is_empty() {
                 // Nowhere to land here: they go to work far sectors.
@@ -547,6 +558,19 @@ impl Sim {
         self.hub_gen += 1;
         self.inbound_stale = true;
         count
+    }
+
+    /// The ground's height in direction `a` from a guess, however far below
+    /// it (a crater or canyon in a sector eaten down to its rim), down to
+    /// 5 km under the guess.
+    fn ground_deep(&self, a: f64, guess: f64) -> f64 {
+        let mut g = self.ground_near(a, guess);
+        let (ux, uy) = (a.cos(), a.sin());
+        let stop = guess - 5000.0;
+        while g > stop.max(1.0) && self.world.material_bare((ux * g).floor() as i64, (uy * g).floor() as i64) == VACUUM {
+            g = self.ground_down(a, g - 1.0);
+        }
+        g
     }
 
     /// A cutter (from a far sector) resting at flock h's drop-off point,
