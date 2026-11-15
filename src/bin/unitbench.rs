@@ -66,6 +66,12 @@ fn costs(s: &mut Sim, game_s: f64) -> Vec<f64> {
         let per = |v: f64| v / game_s.max(1e-9) * 1000.0;
         println!("    fine ms/game s: events {:.1} (work search {:.1}) · sandbox {:.1} · bodies {:.1} · per-second {:.1} (packet etc {:.1}, building {:.1}, orbit {:.1}) · far trips {} near {} · events {} · searches {} dry {}",
             per(s.prof[0]), per(s.prof[4]), per(s.prof[1]), per(s.prof[2]), per(s.prof[3]), per(s.prof[6]), per(s.prof[5]), per(s.prof[7]), s.far_trips, s.near_trips, s.counts[0], s.counts[1], s.counts[2]);
+        println!("    per-second parts ms/game s: fleet commander {:.1} · site safety {:.1} · waiting heat {:.1} · flow fields {:.1} · pool {:.1} · haulers {:.1} · fauna {:.1}", per(s.prof3[5]), per(s.prof3[1]), per(s.prof3[2]), per(s.prof3[3]), per(s.prof3[4]), per(s.unit_prof[1]), per(s.fauna_prof));
+        s.prof3 = [0.0; 6];
+        println!("    fleet commander ({} points moved, {} drones turned) ms/game s: catch-up {:.1} · points moved {:.1} · adrift {:.1} · drop-off points {:.1} · calls {:.1} · answers {:.1}", s.moved_docks, s.turned, per(s.prof4[0]), per(s.prof4[1]), per(s.prof4[2]), per(s.prof4[3]), per(s.prof4[4]), per(s.prof4[5]));
+        s.prof4 = [0.0; 6];
+        println!("    cuts ms/game s: mine cell {:.1} · open cell {:.1} · whole cut {:.1} · whole far trip {:.1} · cells mined {:.0}/game s", per(s.prof5[0]), per(s.prof5[1]), per(s.prof5[2]), per(s.prof5[3]), per(s.prof5[5]) / 1000.0);
+        s.prof5 = [0.0; 6];
     }
     let total: f64 = s.prof[..4].iter().sum();
     let sand = s.prof2[4] + s.prof2[5];
@@ -178,10 +184,14 @@ fn main() {
         let avg: Vec<f64> = sum.iter().map(|v| v / until).collect();
         let hash = format!("{:016x}", s.state_hash());
         println!("  done: {real:.1} s real for {until:.0} game s; fingerprint {hash}");
+        for l in s.fleet_lines() {
+            println!("  {l}");
+        }
         let st = &s.sandbox.stats;
         println!("  sandbox: stepped {} · moves {} · out of sight: tried {:?} (powder, liquid, gas), stuck {:?}, moved {}", st.cells_stepped, st.moves, st.far_tries, st.far_stuck, st.far_moves);
         let mut bm: Vec<(u64, String)> = st.far_by_mat.iter().enumerate().filter(|x| *x.1 > 0).map(|(m, &n)| (n, s.world.planet.mats.get(m as u16).name.clone())).collect();
         bm.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        println!("  sandbox s: gather {:.1} · heat {:.1} · cell by cell {:.1} (settling out of sight {:.1})", st.prof[0], st.prof[1], st.prof[2], st.prof[3]);
         println!("  out-of-sight moves by material: {:?} · sea refills {}", &bm[..bm.len().min(6)], st.far_sea);
         if let Ok(w) = s.world.planet.mats.id("water") {
             let l = &s.world.ledger;

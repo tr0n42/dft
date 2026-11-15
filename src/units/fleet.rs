@@ -40,6 +40,10 @@ pub struct FleetBooks {
     pub reliefs: u64,
 }
 
+/// A drop-off point stays where it is while it is within this far (m, along
+/// the ground) of where it would be placed now, and still clear.
+const DOCK_KEEP_M: f64 = 40.0;
+
 impl Sim {
     /// Where flock h's drop-off point d hangs (the flock's landing point if
     /// it has none yet).
@@ -50,13 +54,33 @@ impl Sim {
     /// The drop-off point of flock h a cutter at `from` should take its
     /// load to: the nearest with a hauler there (or on its way), else the
     /// nearest.
+    /// Visit every hauler of flock h (by the index, unless the list has
+    /// changed since it was made: then all of them, filtered).
+    pub(super) fn each_hauler_of(&self, h: usize, mut f: impl FnMut(usize, &Hauler)) {
+        if self.haulers_moved {
+            for (i, hl) in self.haulers.iter().enumerate() {
+                if hl.site == h {
+                    f(i, hl);
+                }
+            }
+        } else if let Some(v) = self.hauler_by_site.get(h) {
+            for &i in v {
+                f(i, &self.haulers[i]);
+            }
+        }
+    }
+
     pub(super) fn pick_dock(&self, h: usize, from: (f64, f64)) -> usize {
         let Some(v) = self.docks.get(h) else { return 0 };
         let cap = self.eco.hauler.capacity_kg * self.up_cached_cargo;
         // (One that the loads already on their way would fill doesn't
         // count: it is as good as full.)
         let coming = |d: usize| self.incoming.get(&(h, d)).copied().unwrap_or(0.0);
-        let served = |d: usize| self.haulers.iter().any(|hl| hl.alive && hl.site == h && hl.dock == d && matches!(hl.state, HaulerState::Returning | HaulerState::Working) && hl.load + coming(d) < cap);
+        let served = |d: usize| {
+            let mut yes = false;
+            self.each_hauler_of(h, |_, hl| yes |= hl.alive && hl.dock == d && matches!(hl.state, HaulerState::Returning | HaulerState::Working) && hl.load + coming(d) < cap);
+            yes
+        };
         let near = |list: &mut dyn Iterator<Item = usize>| list.min_by(|&a, &b| dist2(from, v[a]).total_cmp(&dist2(from, v[b])));
         near(&mut (0..v.len()).filter(|&d| served(d))).or_else(|| near(&mut (0..v.len()))).unwrap_or(0)
     }
@@ -64,7 +88,13 @@ impl Sim {
     /// A working hauler at flock h's drop-off point d with room, the emptiest.
     pub(super) fn hauler_at_dock(&self, h: usize, d: usize) -> Option<usize> {
         let cap = self.eco.hauler.capacity_kg * self.up_cached_cargo;
-        self.haulers.iter().enumerate().filter(|(_, hl)| hl.alive && hl.site == h && hl.dock == d && hl.state == HaulerState::Working && hl.load < cap).min_by(|a, b| a.1.load.total_cmp(&b.1.load)).map(|(k, _)| k)
+        let mut best: Option<(usize, f64)> = None;
+        self.each_hauler_of(h, |k, hl| {
+            if hl.alive && hl.dock == d && hl.state == HaulerState::Working && hl.load < cap && best.is_none_or(|(_, l)| hl.load < l) {
+                best = Some((k, hl.load));
+            }
+        });
+        best.map(|b| b.0)
     }
 
     /// The flock's coming volume as the director sees it (kg a second):
@@ -85,7 +115,15 @@ impl Sim {
             self.docks.resize(n, Vec::new());
         }
         let was = self.docks.clone();
-        let mut placed: Vec<(f64, f64)> = Vec::new();
+        // Points placed so far, by square dock_gap_m wide (only the 3x3
+        // round a point can be within dock_gap_m of it).
+        let gap = fs.dock_gap_m.max(1.0);
+        let key = |p: (f64, f64)| ((p.0 / gap).floor() as i64, (p.1 / gap).floor() as i64);
+        let mut grid: HashMap<(i64, i64), Vec<(f64, f64)>> = HashMap::new();
+        let near = |grid: &HashMap<(i64, i64), Vec<(f64, f64)>>, p: (f64, f64)| {
+            let (kx, ky) = key(p);
+            (-1..=1).any(|dx| (-1..=1).any(|dy| grid.get(&(kx + dx, ky + dy)).is_some_and(|v| v.iter().any(|&q| dist2(q, p) < gap * gap))))
+        };
         for h in 0..n {
             if self.flock[h].dead || self.hubs[h].kind != HubKind::Seed {
                 self.docks[h].clear();
@@ -101,6 +139,20 @@ impl Sim {
             let mut list = Vec::with_capacity(want);
             for i in 0..want {
                 let a = a0 + (i as f64 - (want - 1) as f64 / 2.0) * fs.dock_spread_m / rc;
+                // Where it was is still good (within DOCK_KEEP_M of where it
+                // would go now, along the ground, with clear air half its
+                // hover under it, and room): it stays. Points that shuffle
+                // with every shift in where the flock cuts send their
+                // waiting cutters back and forth for nothing.
+                if let Some(&o) = was.get(h).and_then(|v| v.get(i)) {
+                    let ao = o.1.atan2(o.0);
+                    let da = (ao - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                    if da.abs() * rc <= DOCK_KEEP_M && !near(&grid, o) && self.clear_under(o, 0.5 * fs.dock_hover_m) {
+                        grid.entry(key(o)).or_default().push(o);
+                        list.push(o);
+                        continue;
+                    }
+                }
                 // Clear of the ground under it and a hauler's length either side.
                 let half = 0.5 * fs.dock_gap_m / rc;
                 let g = [a - half, a, a + half].iter().map(|&b| self.ground_at(b, false)).fold(0.0, f64::max);
@@ -108,18 +160,18 @@ impl Sim {
                 let mut r = g + fs.dock_hover_m;
                 // A hauler's length clear of every point placed already.
                 let top = g + fs.dock_stack_max_m.max(fs.dock_hover_m);
-                while r < top && placed.iter().any(|&q| dist2(q, (ux * r, uy * r)) < fs.dock_gap_m * fs.dock_gap_m) {
+                while r < top && near(&grid, (ux * r, uy * r)) {
                     r += fs.dock_gap_m;
                 }
                 let mut p = (ux * r, uy * r);
                 // A small shift isn't worth the traffic: it stays put.
                 if let Some(&o) = was.get(h).and_then(|v| v.get(i)) {
                     let keep = 0.5 * fs.dock_gap_m;
-                    if dist2(o, p) < keep * keep && !placed.iter().any(|&q| dist2(q, o) < fs.dock_gap_m * fs.dock_gap_m) {
+                    if dist2(o, p) < keep * keep && !near(&grid, o) {
                         p = o;
                     }
                 }
-                placed.push(p);
+                grid.entry(key(p)).or_default().push(p);
                 list.push(p);
             }
             self.docks[h] = list;
@@ -134,7 +186,10 @@ impl Sim {
             }
         }
         if !moved.is_empty() {
+            let t = crate::swarm::clock();
             self.docks_moved(&moved, was);
+            self.prof4[1] += crate::swarm::clock() - t;
+            self.moved_docks += moved.len() as u64;
         }
         // Haulers at a point that's gone: up to unload (and then free).
         for k in 0..self.haulers.len() {
@@ -146,6 +201,16 @@ impl Sim {
                 self.release_hauler(k);
             }
         }
+    }
+
+    /// Open space (nothing but vacuum) for `depth` m straight down under p.
+    fn clear_under(&self, p: (f64, f64), depth: f64) -> bool {
+        let r = len(p).max(1.0);
+        let (ux, uy) = (p.0 / r, p.1 / r);
+        (0..=depth.ceil() as i64).all(|k| {
+            let q = r - k as f64;
+            self.world.material((ux * q).floor() as i64, (uy * q).floor() as i64) == VACUUM
+        })
     }
 
     /// Hauler k leaves its drop-off point: up to the mother swarm to unload
@@ -184,7 +249,11 @@ impl Sim {
     /// few seconds), take calls, answer them newest first, build haulers
     /// for calls no one will be free for soon, recycle idle ones.
     pub(super) fn fleet_work(&mut self) {
+        // (The haulers by flock, fresh: the list was just tidied.)
+        let c0 = crate::swarm::clock();
+        self.reindex();
         self.catch_up();
+        let c1 = crate::swarm::clock();
         let fs = self.eco.fleet.clone();
         let spec = self.eco.hauler.clone();
         let cap = spec.capacity_kg * self.up_cached_cargo;
@@ -197,11 +266,14 @@ impl Sim {
             f.wait_cs = f.wait_cs * fade + waiting as f64 * dt;
             f.filled *= fade;
         }
+        let c2 = crate::swarm::clock();
         self.sort_adrift();
+        let c3 = crate::swarm::clock();
         let new_flock = (0..self.hubs.len()).any(|h| !self.flock[h].dead && self.hubs[h].kind == HubKind::Seed && self.docks.get(h).is_none_or(|v| v.is_empty()));
         if new_flock || self.tick % self.ticks(5.0).max(1) == 0 {
             self.place_docks();
         }
+        let c4 = crate::swarm::clock();
         // Calls: a point with no hauler, or whose hauler will be full by
         // the time a relief from the mother swarm could get there.
         self.calls.retain(|c| self.docks.get(c.site).is_some_and(|v| c.dock < v.len()));
@@ -223,9 +295,10 @@ impl Sim {
                 _ => {}
             }
         }
+        let called: std::collections::HashSet<(usize, usize)> = self.calls.iter().map(|c| (c.site, c.dock)).collect();
         for h in 0..self.docks.len() {
             for d in 0..self.docks[h].len() {
-                if self.calls.iter().any(|c| c.site == h && c.dock == d) {
+                if called.contains(&(h, d)) {
                     continue;
                 }
                 let need = match serving.get(&(h, d)) {
@@ -243,6 +316,7 @@ impl Sim {
                 }
             }
         }
+        let c5 = crate::swarm::clock();
         // Answer the newest call first, each with the nearest free hauler.
         let mut free: Vec<usize> = (0..self.haulers.len()).filter(|&k| self.haulers[k].alive && self.haulers[k].state == HaulerState::Idle).collect();
         while !free.is_empty() {
@@ -256,7 +330,9 @@ impl Sim {
         // Calls left: build for those no hauler on its way up will be free for soon.
         let soon = self.haulers.iter().filter(|hl| hl.alive && matches!(hl.state, HaulerState::Lifting | HaulerState::Unloading)).count() + self.prod.queued(crate::production::Unit::Hauler) + self.prod.building(crate::production::Unit::Hauler);
         let short = self.calls.len().saturating_sub(soon);
-        for i in 0..short.min(4) {
+        // (Benchmarks with a fixed swarm build as many as it takes.)
+        let most = if self.free_drones.is_some() { 64 } else { 4 };
+        for i in 0..short.min(most) {
             let c = self.calls[self.calls.len() - 1 - i];
             if self.free_drones.is_none() && !self.pay_hauler() {
                 self.director_note(c.site, format!("flock {}: a hauler called for, can't afford one", c.site));
@@ -269,6 +345,13 @@ impl Sim {
             }
             self.director_log_push(format!("flock {}: a hauler built for its call ({} calls waiting)", c.site, self.calls.len()));
         }
+        let c6 = crate::swarm::clock();
+        self.prof4[0] += c1 - c0;
+        self.prof4[1] += c2 - c1;
+        self.prof4[2] += c3 - c2;
+        self.prof4[3] += c4 - c3;
+        self.prof4[4] += c5 - c4;
+        self.prof4[5] += c6 - c5;
         // Idle too long at the mother swarm: recycled.
         for k in 0..self.haulers.len() {
             let hl = &self.haulers[k];

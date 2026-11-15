@@ -640,6 +640,24 @@ pub struct Sim {
     /// (Profiling) finer timings: break_free_big, break_free, bodies step,
     /// rock landed, sandbox step, sandbox changes applied, blast tick, the rest.
     pub prof2: [f64; 12],
+    /// (Profiling) the per-second work: packets, site safety, waiting
+    /// cutters' heat, flow fields, the pool, (spare).
+    pub prof3: [f64; 6],
+    /// (Profiling) the fleet commander's second: catch-up, books, matter
+    /// adrift, drop-off points, calls, answers.
+    pub prof4: [f64; 6],
+    /// (Profiling) drop-off points moved, and drones turned for them.
+    pub moved_docks: u64,
+    /// Cutters flying a load home, by (flock, drop-off point), for
+    /// `hauler_filled` (may hold some no longer flying there: each is
+    /// checked). Stale after drones are renumbered or a save is loaded:
+    /// then rebuilt from every drone.
+    pub(super) inbound_idx: HashMap<(usize, usize), Vec<u32>>,
+    pub(super) inbound_stale: bool,
+    /// (Profiling) a cut: mining the cell from the world, opening it (face,
+    /// sandbox, bodies), the whole cut, the whole far trip, (spare), cells mined.
+    pub prof5: [f64; 6],
+    pub turned: u64,
     /// Where cutters are simulated cell by cell (see `set_focus`): None
     /// everywhere (tests and tools); Some(None) nowhere (zoomed out); else
     /// flocks whose hauler is in this rectangle of cells. Elsewhere a cutter's
@@ -707,13 +725,13 @@ pub struct Sim {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn clock() -> f64 {
+pub(crate) fn clock() -> f64 {
     use std::sync::OnceLock;
     static START: OnceLock<std::time::Instant> = OnceLock::new();
     START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64()
 }
 #[cfg(target_arch = "wasm32")]
-fn clock() -> f64 {
+pub(crate) fn clock() -> f64 {
     0.0
 }
 
@@ -1016,6 +1034,13 @@ impl Sim {
             fauna_prof: 0.0,
             prof: [0.0; 8],
             prof2: [0.0; 12],
+            prof3: [0.0; 6],
+            prof4: [0.0; 6],
+            moved_docks: 0,
+            inbound_idx: HashMap::new(),
+            inbound_stale: true,
+            prof5: [0.0; 6],
+            turned: 0,
             focus: None,
             far_trips: 0,
             focus_since: Vec::new(),
@@ -1819,7 +1844,7 @@ impl Sim {
     /// After a cell is dug: it is open space now, its solid neighbours become
     /// diggable, and any natural cave it breaks into opens up too.
     fn open_cell(&mut self, c: (i64, i64)) {
-        self.sandbox.wake_around_filled(&self.world, c);
+        self.sandbox.wake_opened(&self.world, c);
         self.open_cell_woken(c);
         self.unsettle_around(c);
     }
@@ -2058,6 +2083,11 @@ impl Sim {
             moved[i] += 1;
             let waiting = self.drones[id].phase == Phase::Waiting;
             self.drones[id].home = to;
+            // (Flying a load home: listed under its new flock.)
+            if !self.inbound_stale && matches!(self.drones[id].phase, Phase::Inbound { .. }) && self.drones[id].hold > 0.0 {
+                let dock = self.drones[id].dock as usize;
+                self.inbound_idx.entry((to, dock)).or_default().push(id as u32);
+            }
             self.hub_load[from] -= 1;
             self.hub_load[to] += 1;
             if waiting {
@@ -2569,7 +2599,10 @@ impl Sim {
                 self.director_log_push("the flocks are full: opened a new flock on unworked ground".to_string());
             }
         } else if left >= POOL_OPEN && (left as u64) > total_room && self.flock_count() < MAX_FLOCKS {
-            let opened = self.open_flocks(NEW_FLOCKS_PER_ROUND);
+            // (Benchmarks with a fixed swarm open ground faster, so a big
+            // swarm is at work in minutes rather than an hour.)
+            let per = if self.free_drones.is_some() { 8 * NEW_FLOCKS_PER_ROUND } else { NEW_FLOCKS_PER_ROUND };
+            let opened = self.open_flocks(per);
             if opened > 0 {
                 self.flocks_opened += opened as u64;
                 self.director_log_push(format!("{left} drones out of work: opened {opened} new flocks on unworked faces"));
@@ -2812,6 +2845,7 @@ impl Sim {
                     // Drones whose landing point is far from their work move here.
                     let new = self.hubs.len() - 1;
                     self.legs_all_changed();
+                    self.inbound_stale = true;
                     for (i, d) in self.drones.iter_mut().enumerate() {
                         if d.alive && i % 3 == 0 {
                             self.hub_load[d.home] -= 1;
@@ -3419,6 +3453,7 @@ impl Sim {
         self.working.retain(|_, v| !v.is_empty());
         // Everyone's number changed: the screen gets every drone afresh.
         self.legs_all_changed();
+        self.inbound_stale = true;
         self.compactions += 1;
     }
 
@@ -3493,6 +3528,7 @@ impl Sim {
             let t4 = clock();
             self.packet_work();
             let qt = clock();
+            self.prof3[0] += qt - t4;
             self.tunnel_work();
             let qs = clock();
             self.unit_prof[U_TUNNELER] += qs - qt;
@@ -3519,15 +3555,23 @@ impl Sim {
             self.fauna_prof += clock() - q;
             let qh = clock();
             self.hauler_work();
-            self.unit_prof[U_HAULER] += clock() - qh;
+            let qh2 = clock();
+            self.unit_prof[U_HAULER] += qh2 - qh;
             self.site_safety();
+            let qh3 = clock();
             self.waiting_heat();
             let tf = clock();
             self.flow_work();
-            self.flow_s += clock() - tf;
+            let tf2 = clock();
+            self.flow_s += tf2 - tf;
             if self.tick % self.ticks(POOL_EVERY_S) == 0 {
                 self.allocate();
             }
+            let ta = clock();
+            self.prof3[1] += qh3 - qh2;
+            self.prof3[2] += tf - qh3;
+            self.prof3[3] += tf2 - tf;
+            self.prof3[4] += ta - tf2;
             let t5 = clock();
             self.try_build();
             let t6 = clock();
@@ -3537,6 +3581,7 @@ impl Sim {
             }
             if self.tick % self.ticks(60.0) == 0 {
                 self.all_hubs_wet();
+                self.inbound_tidy();
                 self.compact_drones();
             }
             let t7 = clock();

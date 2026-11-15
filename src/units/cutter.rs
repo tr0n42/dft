@@ -17,6 +17,9 @@ const GRAB_REACH: f64 = 1.5;
 /// The biggest body a cutter takes (in holds: it may overfill to take one).
 const GRAB_MAX_HOLDS: f64 = 2.0;
 const FAR_CELLS: usize = 8;
+/// Out of the focus, the cutters waiting at a flock are heated or cooled
+/// this many seconds at a time (see `waiting_heat`).
+const WAIT_HEAT_EVERY: u64 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Phase {
@@ -201,6 +204,12 @@ impl Sim {
     /// somewhere in the loose cloud about its drop-off point (out to
     /// wait_cloud_m, as it is drawn), and whatever is there heats or cools it. Lava pouring over the
     /// cloud melts the drones caught in it, reckless as ever.
+    ///
+    /// Out of the focus (Benjamin: off screen may be approximated), a flock
+    /// is done every WAIT_HEAT_EVERY seconds, in turn, for that long at once;
+    /// and where a few spots in its cloud are all open space (as they nearly
+    /// always are), each of its drones just cools toward space, with no
+    /// look at the ground per drone.
     pub(super) fn waiting_heat(&mut self) {
         let space_k = self.world.planet.space_k;
         let sec = self.tick / self.ticks(1.0).max(1);
@@ -208,8 +217,48 @@ impl Sim {
             if self.site_wait[site].is_empty() {
                 continue;
             }
-            let ids = self.site_wait[site].clone();
             let w = self.eco.fleet.wait_cloud_m;
+            if !self.in_focus(site) {
+                if (sec + site as u64) % WAIT_HEAT_EVERY != 0 {
+                    continue;
+                }
+                let secs = WAIT_HEAT_EVERY as f64;
+                let docks = self.docks.get(site).map_or(0, |v| v.len()).max(1);
+                let open = (0..docks).all(|k| {
+                    let (hx, hy) = self.dock_pos(site, k);
+                    (0..8).all(|j| {
+                        let h = hash(site as u64, sec as i64, j as i64 + 16 * k as i64, 0x7A18);
+                        let r = w * crate::noise::unit(h).sqrt();
+                        let a = crate::noise::unit(h ^ 0x9E37) * std::f64::consts::TAU;
+                        self.world.material((hx + a.cos() * r).floor() as i64, (hy + a.sin() * r * 0.8).floor() as i64) == VACUUM
+                    })
+                });
+                if open {
+                    let ids = std::mem::take(&mut self.site_wait[site]);
+                    let mut lost = false;
+                    for &id in &ids {
+                        let d = &self.drones[id as usize];
+                        if !d.alive || d.home != site || d.phase != Phase::Waiting {
+                            continue;
+                        }
+                        let dock = d.dock as usize;
+                        if self.heat_drone(id, secs, space_k, false) {
+                            let at = self.dock_pos(site, dock);
+                            self.burned += 1;
+                            self.wreck_drone(id, at, (0.0, 0.0));
+                            lost = true;
+                        }
+                    }
+                    self.site_wait[site] = ids;
+                    if lost {
+                        let drones = &self.drones;
+                        self.site_wait[site].retain(|&id| drones[id as usize].alive);
+                    }
+                    continue;
+                }
+            }
+            let secs = if self.in_focus(site) { 1.0 } else { WAIT_HEAT_EVERY as f64 };
+            let ids = self.site_wait[site].clone();
             let mut lost = false;
             for id in ids {
                 let d = &self.drones[id as usize];
@@ -226,10 +275,10 @@ impl Sim {
                 let c = ((hx + a.cos() * r).floor() as i64, (hy + a.sin() * r * 0.8).floor() as i64);
                 let m = self.world.material(c.0, c.1);
                 let melted = if m == VACUUM {
-                    self.heat_drone(id, 1.0, space_k, false)
+                    self.heat_drone(id, secs, space_k, false)
                 } else {
                     let t = self.contact_k(c);
-                    self.heat_drone(id, 1.0, t, true)
+                    self.heat_drone(id, secs, t, true)
                 };
                 if melted {
                     self.burned += 1;
@@ -319,6 +368,9 @@ impl Sim {
         self.unpromise(id);
         let kg = self.drones[id as usize].hold;
         if kg > 0.0 {
+            if !self.inbound_stale {
+                self.inbound_idx.entry((home, dock)).or_default().push(id);
+            }
             *self.incoming.entry((home, dock)).or_insert(0.0) += kg;
             self.drones[id as usize].promised = kg;
             self.drones[id as usize].promised_to = (home, dock);
@@ -598,6 +650,13 @@ impl Sim {
     /// into its hold, the flight and cutting paid for, heat and wear taken.
     /// The seconds paid, or None if the drone was lost doing it.
     pub(super) fn cut_at(&mut self, id: u32, cell: (i64, i64), from: (f64, f64)) -> Option<f64> {
+        let c0 = crate::swarm::clock();
+        let r = self.cut_at_inner(id, cell, from);
+        self.prof5[2] += crate::swarm::clock() - c0;
+        r
+    }
+
+    fn cut_at_inner(&mut self, id: u32, cell: (i64, i64), from: (f64, f64)) -> Option<f64> {
         if let Some(n) = self.reserved.get_mut(&cell) {
             *n -= 1;
             if *n == 0 {
@@ -626,10 +685,15 @@ impl Sim {
             let done = self.progress.get(&cell).copied().unwrap_or(0.0);
             let density = self.world.planet.mats.get(m).density;
             if done + kg >= density - 1e-9 {
+                let a = crate::swarm::clock();
                 self.progress.remove(&cell);
                 self.world.mine_cell(cell.0, cell.1);
+                let b = crate::swarm::clock();
                 self.undope(cell, true);
                 self.open_cell(cell);
+                self.prof5[0] += b - a;
+                self.prof5[1] += crate::swarm::clock() - b;
+                self.prof5[5] += 1.0;
             } else {
                 self.progress.insert(cell, done + kg);
             }
@@ -769,6 +833,12 @@ impl Sim {
     /// event is its arrival. One event and one search a trip instead of one
     /// of each per cell.
     pub(super) fn far_trip(&mut self, id: u32, first: (i64, i64), hub: (f64, f64)) {
+        let c0 = crate::swarm::clock();
+        self.far_trip_inner(id, first, hub);
+        self.prof5[3] += crate::swarm::clock() - c0;
+    }
+
+    fn far_trip_inner(&mut self, id: u32, first: (i64, i64), hub: (f64, f64)) {
         let cap = self.hold_cap();
         let hold = self.drones[id as usize].hold;
         let mut cells = vec![first];
@@ -986,17 +1056,61 @@ impl Sim {
     pub(super) fn hauler_filled(&mut self, k: usize) {
         let (site, dock) = (self.haulers[k].site, self.haulers[k].dock);
         let (t, speed) = (self.time(), self.leg_speed());
-        for id in 0..self.drones.len() as u32 {
-            let d = &self.drones[id as usize];
-            if !d.alive || d.home != site || d.dock as usize != dock || !matches!(d.phase, Phase::Inbound { .. }) || d.hold <= 0.0 {
+        self.inbound_fresh();
+        let mut ids = self.inbound_idx.remove(&(site, dock)).unwrap_or_default();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut keep = Vec::with_capacity(ids.len());
+        for id in ids {
+            if !self.inbound_to(id, site, dock) {
                 continue;
             }
+            let d = &self.drones[id as usize];
             let at = self.leg_of(d, speed).at(t);
             let to = self.pick_dock(site, at);
             if to != dock {
                 self.redirect(id, at, to);
+            } else {
+                keep.push(id);
             }
         }
+        // (Those redirected were listed under their new point.)
+        self.inbound_idx.entry((site, dock)).or_default().extend(keep);
+    }
+
+    /// Whether drone id is flying a load home to flock `site`'s point `dock`.
+    fn inbound_to(&self, id: u32, site: usize, dock: usize) -> bool {
+        let d = &self.drones[id as usize];
+        d.alive && d.home == site && d.dock as usize == dock && matches!(d.phase, Phase::Inbound { .. }) && d.hold > 0.0
+    }
+
+    /// The cutters flying loads home, by point, rebuilt if stale.
+    pub(super) fn inbound_fresh(&mut self) {
+        if !self.inbound_stale {
+            return;
+        }
+        self.inbound_idx.clear();
+        for (i, d) in self.drones.iter().enumerate() {
+            if d.alive && matches!(d.phase, Phase::Inbound { .. }) && d.hold > 0.0 {
+                self.inbound_idx.entry((d.home, d.dock as usize)).or_default().push(i as u32);
+            }
+        }
+        self.inbound_stale = false;
+    }
+
+    /// (Every minute) drop the drones listed under a point they no longer fly to.
+    pub(super) fn inbound_tidy(&mut self) {
+        if self.inbound_stale {
+            return;
+        }
+        let mut idx = std::mem::take(&mut self.inbound_idx);
+        for (&(site, dock), v) in idx.iter_mut() {
+            v.sort_unstable();
+            v.dedup();
+            v.retain(|&id| self.inbound_to(id, site, dock));
+        }
+        idx.retain(|_, v| !v.is_empty());
+        self.inbound_idx = idx;
     }
 
     /// A drone flying home, at `at` now, sent to drop-off point `dock`
@@ -1024,9 +1138,16 @@ impl Sim {
         let (t, speed) = (self.time(), self.leg_speed());
         let mut fly = Vec::new();
         let mut sit = Vec::new();
+        // (Flocks with a point moved, to pass over most drones at a glance.)
+        let mut hit = vec![false; self.hubs.len()];
+        for &(h, _) in moved {
+            if h < hit.len() {
+                hit[h] = true;
+            }
+        }
         for id in 0..self.drones.len() as u32 {
             let d = &self.drones[id as usize];
-            if !d.alive {
+            if !d.alive || !hit.get(d.home).copied().unwrap_or(false) && !matches!(d.phase, Phase::Inbound { hub, .. } if hit.get(hub).copied().unwrap_or(false)) {
                 continue;
             }
             match d.phase {
@@ -1038,6 +1159,7 @@ impl Sim {
             }
         }
         self.docks = now_docks;
+        self.turned += (fly.len() + sit.len()) as u64;
         for (id, at) in fly {
             let home = self.drones[id as usize].home;
             let old = self.drones[id as usize].dock as usize;

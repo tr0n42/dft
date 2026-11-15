@@ -108,6 +108,9 @@ pub struct Stats {
     pub erupted: u64,
     /// Moves out of sight, each straight to about where it comes to rest.
     pub far_moves: u64,
+    /// (Profiling) seconds: gathering the cells, heat for all at once, the
+    /// cell-by-cell pass, and of it settling out of sight.
+    pub prof: [f64; 4],
     /// Out of sight: cells looked at to settle, by state (powder, liquid,
     /// gas), and of them those with nowhere to go.
     pub far_tries: [u64; 3],
@@ -154,6 +157,9 @@ pub struct Sandbox {
     /// Out of sight, powder and liquid settle at once (see `settle_far`);
     /// off, they wait dormant until seen, as gas does (for comparison).
     pub far_settle: bool,
+    /// Materials that never do anything on their own beside fresh open
+    /// space: solid, in no reaction, not burning (see `wake_opened`).
+    inert: Vec<bool>,
     /// Where motion is simulated: cell rectangle (x0, x1, y0, y1), ends
     /// exclusive; Some(None) nowhere; None everywhere.
     attention: Attention,
@@ -439,7 +445,8 @@ impl Sandbox {
             by_mat[r.a as usize].push((i, true));
             by_mat[r.b as usize].push((i, false));
         }
-        Sandbox { next: CellQueue::default(), warm: CellQueue::default(), slow: CellQueue::default(), far: CellQueue::default(), latent: CellMap::default(), temps: CellMap::default(), tick: 0, time_s: 0.0, sun: None, sun_cache: CellMap::default(), ambient: Default::default(), shallow: Default::default(), sun_sensitive, sun_step: -1, seed: world.planet.spec.seed ^ 0x5A4D_B0C5, by_mat, stats: Stats::default(), attention: None, far_settle: true, dormant: Waiting::default(), vents: CellMap::default(), ejecta: Vec::new() }
+        let inert: Vec<bool> = (0..mats.len()).map(|m| mats.get(m as MatId).state == State::Solid && by_mat[m].is_empty() && mats.burns[m].is_none()).collect();
+        Sandbox { next: CellQueue::default(), warm: CellQueue::default(), slow: CellQueue::default(), far: CellQueue::default(), latent: CellMap::default(), temps: CellMap::default(), tick: 0, time_s: 0.0, sun: None, sun_cache: CellMap::default(), ambient: Default::default(), shallow: Default::default(), sun_sensitive, sun_step: -1, seed: world.planet.spec.seed ^ 0x5A4D_B0C5, by_mat, stats: Stats::default(), attention: None, far_settle: true, inert, dormant: Waiting::default(), vents: CellMap::default(), ejecta: Vec::new() }
     }
 
     /// Where motion is simulated (see `Attention`; None, everywhere, is the
@@ -551,6 +558,29 @@ impl Sandbox {
     /// Wake a cell and its eight neighbours, skipping the empty ones (an
     /// empty cell has nothing to do; whatever later fills it wakes it then).
     /// An empty cell is let go of its temperature, as stepping it would.
+    /// Cell c was just emptied (cut out, broken free): wake what is round
+    /// it. Out of sight, plain rock round a new hole is left asleep (it
+    /// would only be stepped to find it has nothing to do: most of what
+    /// cutting cost the sandbox): only what can move, react or burn, or is
+    /// off its normal heat, wakes.
+    pub fn wake_opened(&mut self, world: &World, c: Cell) {
+        if self.sees(c) {
+            self.wake_around_filled(world, c);
+            return;
+        }
+        let mut rd = world.reader();
+        self.temps.remove(&c);
+        for d in DIRS {
+            let x = add(c, d);
+            let m = rd.get(x.0, x.1);
+            if m == VACUUM {
+                self.temps.remove(&x);
+            } else if !self.inert[m as usize] || self.temps.contains_key(&x) || self.latent.contains_key(&x) {
+                self.next.insert(x);
+            }
+        }
+    }
+
     pub fn wake_around_filled(&mut self, world: &World, c: Cell) {
         let mut rd = world.reader();
         for x in std::iter::once(c).chain(DIRS.iter().map(|d| add(c, *d))) {
@@ -924,6 +954,7 @@ impl Sandbox {
     }
 
     pub fn step(&mut self, world: &mut World) -> Vec<Change> {
+        let p0 = crate::swarm::clock();
         self.tick += 1;
         // Where the Sun is: moved on a step, last step's shadows are stale.
         if world.planet.spec.sun.is_some() {
@@ -975,6 +1006,7 @@ impl Sandbox {
         // Cells already changed this tick: each cell acts at most once.
         let mut touched = CellQueue::default();
         let phys = world.planet.mats.physics.clone();
+        let p1 = crate::swarm::clock();
         // Step 1, heat, for every cell first, side by side on all the
         // simulation's threads: each reads the temperatures as the tick
         // began (so the order cells are done in doesn't matter, and the
@@ -1000,6 +1032,7 @@ impl Sandbox {
                 cells.iter().map(one).collect()
             }
         };
+        let p2 = crate::swarm::clock();
         // Sunlight looked up for the first time this tick, kept.
         for ho in &pre {
             for &(n, v) in ho.sun_new.iter().flatten() {
@@ -1192,7 +1225,11 @@ impl Sandbox {
             let mat = world.planet.mats.get(m);
             let state = mat.state;
             let far = state != State::Solid && !self.sees(c);
+            let pf = if far { crate::swarm::clock() } else { 0.0 };
             let settle = if far && self.far_settle { self.settle_far(world, &touched, c, state) } else { None };
+            if far {
+                self.stats.prof[3] += crate::swarm::clock() - pf;
+            }
             if far && self.far_settle {
                 let k = match state { State::Powder => 0, State::Liquid => 1, _ => 2 };
                 self.stats.far_tries[k] += 1;
@@ -1543,6 +1580,10 @@ impl Sandbox {
                 self.temps.remove(&c);
             }
         }
+        let p3 = crate::swarm::clock();
+        self.stats.prof[0] += p1 - p0;
+        self.stats.prof[1] += p2 - p1;
+        self.stats.prof[2] += p3 - p2;
         changes
     }
 }

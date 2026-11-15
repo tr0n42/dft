@@ -239,7 +239,8 @@ impl Sim {
             }
             let here = self.dock_pos(site, self.haulers[k].dock);
             let cur = self.hauler_pos(k);
-            let fleet = self.eco.fleet.clone();
+            let fleet = &self.eco.fleet;
+            let (drift_m_s, load_min_s) = (fleet.drift_m_s, fleet.load_min_s);
             let hot_here = self.contact_k((here.0.floor() as i64, here.1.floor() as i64)) > self.eco.harvester.melt_k;
             let now = self.tick;
             let hl = &mut self.haulers[k];
@@ -252,7 +253,7 @@ impl Sim {
                         hl.from = cur;
                         hl.to = here;
                         hl.t0 = now;
-                        hl.t1 = now + ((way / fleet.drift_m_s.max(0.1)) / self.eco.tick_s).ceil().max(1.0) as u64;
+                        hl.t1 = now + ((way / drift_m_s.max(0.1)) / self.eco.tick_s).ceil().max(1.0) as u64;
                     }
                     // Lava (or anything hotter than it can stand) over its
                     // spot: it melts where it stands, cargo and all.
@@ -260,7 +261,7 @@ impl Sim {
                         hl.life_left = 0.0;
                     }
                     let stayed = (now - hl.since) as f64 * self.eco.tick_s;
-                    if (hl.load >= cap && stayed >= fleet.load_min_s) || (hl.load > 0.0 && stayed >= spec.max_stay_s) {
+                    if (hl.load >= cap && stayed >= load_min_s) || (hl.load > 0.0 && stayed >= spec.max_stay_s) {
                         if self.happenings.len() < 400 {
                             self.happenings.push((Happening::HaulerLift, here.0, here.1));
                         }
@@ -370,7 +371,9 @@ impl Sim {
         }
         self.haulers.retain(|h| h.alive);
         self.haulers_moved = true;
+        let t = crate::swarm::clock();
         self.fleet_work();
+        self.prof3[5] += crate::swarm::clock() - t;
     }
 
     /// Every hauler, for drawing.
