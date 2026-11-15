@@ -375,7 +375,7 @@ Rules Benjamin set (10 Nov 2026), for every piece of art:
 
 Not yet redesigned: the fabricator and factory ("later").
 
-## Cutters: level of detail and formations (14 Nov, uncommitted)
+## Cutters: level of detail and formations (14 Nov)
 
 Benjamin, 14 Nov: cutters must work exactly when their flock is zoomed in
 on; every other flock may be approximated (sample-based or statistical);
@@ -444,7 +444,7 @@ simulate about twice the screen; and give flights some flocking beauty.
   the factory was the throttle; now growth is limited only by stock,
   energy and the director's orders, and haulers are the bottleneck.
 
-## Haulers: the fleet commander (14 Nov, uncommitted)
+## Haulers: the fleet commander (14 Nov)
 
 Benjamin, 14 Nov: tie haulers to activity, not flocks; the director judges
 each flock's coming volume and haulers are dispatched ahead of time
@@ -610,6 +610,117 @@ cutters use the clear air, hundreds of metres of it.
   jumps). That covers every path change, including idle cutters at a
   moved drop-off point and trips worked out at once.
 
+## The big-swarm speed pass (night of 14 to 15 Nov)
+
+Benjamin's ask: the game fell under 10x (down to 3x) past 100k cutters on
+the 5 km Dev planet; aim for a million cutters on big worlds, the
+simulation never under 15x (10x is the real floor, 5x headroom for the
+other units). Anything out of sight or too small to see may be
+approximated, as long as what is looked at behaves the same. Commits
+6700b21 to 191b55d.
+
+**Tools made for it:**
+- `tools/prof` (its own workspace; `cd tools/prof && cargo run --release`):
+  a sampling profiler. It runs the unitbench set-up and pauses the sim
+  thread every millisecond, walking its stack (`WARM`, `SECS`, `BODY`,
+  `KM`, `DRONES`; `CALLERS=name` lists who calls a function, `LINES=name`
+  where in it the time goes). `attach.exe <program> [s]` samples another
+  running program's threads by name (the game: build it with
+  `CARGO_PROFILE_RELEASE_DEBUG=line-tables-only CARGO_TARGET_DIR=target-prof`
+  for names, and pass `SYMPATH` to that folder).
+- unitbench: `FINE=1` (cost split finer: events, searches, the per-second
+  parts, the fleet commander, cuts), `us real per tonne mined` (the fair
+  measure when a change shifts how much gets done), `NOSETTLE=1`, and the
+  sandbox's out-of-sight counters. With a fixed swarm (benchmarks) flocks
+  open 8x faster and haulers are built up to 64 a second, so a million
+  cutters are at work in minutes.
+- `stress-big-swarm.bat`: the real game, 300k cutters on the living world,
+  the camera stepping through every zoom; prints speed and frame rate per
+  shot.
+
+**What was slow, and what changed:**
+- The bottomless sea made water out of nothing out of sight (1.6 Mt in 5
+  game minutes with 100k cutters), and the cutters drained it as fast as
+  it came: an endless conveyor. Out of sight the sea no longer refills.
+  Settling wakes only what could fall into the gap. Game, Dev planet, 100k
+  cutters: 4.5x -> 13-19x.
+- Benjamin's own log (the 3x session): zooming to 1.9 m a pixel woke a
+  million cells waiting out of sight at once, and the sea poured; the sim
+  fell to 0.3x. Both causes are gone (out-of-sight settling, no refill).
+- The fleet commander: `hauler_filled` looked at every drone; drop-off
+  points moved 41,527 times in 800 s (12.7 million cutters turned to follow
+  them); placing points, taking calls and `pick_dock` / `hauler_at_dock`
+  were all quadratic or scanned every hauler. Now indexed (an index of
+  cutters flying to each point, the per-flock hauler index), points stay
+  put while within 40 m of their ideal spot and clear (`DOCK_KEEP_M`), and
+  grids instead of all-pairs. Waiting cutters out of focus are heated or
+  cooled every 10 s per flock instead of one by one every second.
+- Shared caches: the sandbox's ambient-heat cache was one lock for all its
+  threads (now 64 parts, worked out outside the lock); the world now keeps
+  what the generator gave for untouched cells (`World::gen_cache`); reads
+  of neighbours go through a leaf-caching reader; three hot maps used
+  Rust's slow default hasher.
+- Out of sight, plain rock round a new hole stays asleep (`wake_opened`).
+- The drones due in a tick make their searches for work side by side on
+  the sim's threads (`prefetch_searches`; read only, then each drops what
+  the ones before it took). A fresh leaf's 4,096 cells are generated row by
+  row side by side.
+- Tried and dropped: sharing one search among a flock's cutters out of
+  focus (cheaper searches, but costlier sand and heat: worse per tonne);
+  plant-free lookups for out-of-sight settling (no gain).
+- Game, zoomed out: each flock is one mark past 5 m a pixel (`ICON_MPP`),
+  a hauler under 8 px is one mark (each was drawn block by block, hull and
+  tentacles: 16 ms of a frame with 2,000 in view), hauler spacing looks
+  only at grid neighbours (it compared every pair six times a frame),
+  tiles rebuild more slowly the further out (`REBUILD_ZOOM_MPP`), and the
+  sim runs above normal priority on its own helper threads. Living world,
+  300k cutters, whole planet in view: 14.5 -> 33 fps.
+
+**Measured (headless unitbench, stage 1, everything out of sight, this
+PC; speed = game seconds per real second at the end of the run):**
+
+| World | Cutters | Working at the end | Speed | Before tonight |
+|---|---|---|---|---|
+| Dev planet 5 km | 100k | 89k | 17x (15x over the run) | 5.7x |
+| Dev planet 5 km | 300k | 164k | 10x | - |
+| Living world 35 km | 300k | 243k (159k waiting) | 13x | - |
+| Living world 35 km | 1M | 493k (318k waiting) | 6.5x | 3.2x (800 s run 134.8 s -> 79.1 s) |
+| Ocean world 40 km | 1M | 144k (80k waiting) | 16x | - |
+| Earth 6,371 km | 300k | 13k (10k waiting) | idle | - |
+| 4x Earth 25,484 km | 300k | 22k, all waiting | idle | - |
+
+Cost now about 5-6.5 us of real time per tonne mined. 15x holds up to
+roughly 250k working cutters; at 500k working it is 6.5x.
+
+Real game, living world, 300k cutters (stress-big-swarm.bat): 7.1-7.4x
+with the whole planet in view, 9.7x close up, 8.5x at mid zoom.
+
+**Where the time goes now (1M, profiler):** cutter events 36% (the far
+trips' cuts 21%, searches 7%), sand and heat 33% (out-of-sight settling of
+water 13%), waiting on its own helper threads 14%, the rest under 5% each.
+Next steps for a million at 15x: simulate flocks out of sight as a whole
+(no event per trip, cut in batches), and settle out-of-sight liquids at a
+slower cadence.
+
+**Zoom:** the swarm's size sets the speed far more than the zoom. Zoomed
+out the sim runs about a quarter slower than zoomed in with the same work
+(7.1-7.4x against 9.7x at 300k cutters): the drawing and the tile builders
+share the CPU's cache with it. Not thread contention (capping the game's
+pools and raising the sim's priority changed nothing), nor tile locks.
+
+**Big worlds are held back by the game, not the speed:**
+- Earth size: after 10 game minutes only 13k of 300k cutters work. New
+  ground is surveyed only either side of each flock, so after the first
+  rounds no new flock can open (0 candidates most rounds). And every
+  hauler climbs to the mother swarm, which circles 400 m over the highest
+  ground on the whole body, kilometres up: 32 of 34 haulers "on the way".
+- 4x Earth: all 21,934 working cutters waiting for haulers by 200 game s;
+  mining stops. Both need a design answer (mother swarm near the work,
+  landing zones as a purchase), not a faster sim.
+- Even on the 35 km world, with a million cutters a third or more wait for
+  haulers: the commander only builds one when the haulers on their way up
+  won't be free soon, and on a big world that isn't soon.
+
 ## What's next
 
 See ROADMAP.md "Where we are (13 Nov)" for the reassessment and the proposed
@@ -649,15 +760,48 @@ life). The production plan below still stands for step 3 of that order.
   each flock's haulers from its round trip instead.
 - Open questions for Benjamin: which generation-bending perks go in the
   meta tree first; planet ranking for selection (parked until he decides).
-- Also waiting: map icons for the zoomed-out view, the lava flow
+- Also waiting: proper map icons for the zoomed-out view (flocks and
+  haulers are plain marks for now, see the speed pass), the lava flow
   bug (lava not running into hollows), warm ground and decay with
   radioactivity (technetium, polonium, astatine and francium are on no body
   until then).
 
-## Last session's report (13 November 2026)
+## Last session's report (14 to 15 November 2026)
 
 When Benjamin asks for a "handoff digestion", repeat this section to him
 as it stands.
+
+**What we did (14 Nov, with Benjamin):** the fleet commander for haulers
+(drop-off points, calls, relief), cutters following moved points and
+circling while they wait, cutters grabbing loose matter adrift first, the
+atmosphere haze reaching into eaten ground and thinning as the body is
+eaten, the low-zoom "checkerboard" fixed (chunks cut free out of sight now
+fall), loose matter settling out of sight instead of piling up to play out
+when looked at, zooming in on a flock catching its cutters up, drones
+flying (not jumping) onto a changed path, and haulers carrying 5,000 t.
+
+**Overnight (Benjamin away, asked for a speed pass):** see "The big-swarm
+speed pass" above for every change and number. In short:
+- Dev planet, 100k cutters: 5.7x -> 15-17x headless; in the game 4.5x ->
+  13-19x. The worst slowdown was the bottomless sea making water out of
+  sight for the cutters to drain, and a backlog of loose matter waking all
+  at once when zooming in.
+- A million cutters on the 35 km living world: 800 game s took 134.8 s,
+  now 79.1 s; about 500k working there at 6.5x. 15x holds up to about
+  250k working cutters.
+- Zoomed out, the game draws flocks and small haulers as single marks
+  (whole-planet view with 300k cutters: 14.5 -> 33 fps); zoom changes the
+  sim speed by about a quarter, not more.
+- Earth size and 4x Earth: the swarm can't spread or haul (new ground
+  only opens beside flocks; haulers climb kilometres to the mother swarm),
+  so few cutters work. A design question for Benjamin, not speed.
+- New tools: a sampling profiler (tools/prof), finer bench numbers, and
+  stress-big-swarm.bat for the real game.
+
+**Tests:** full suite 109 passed, 0 failed, 3 ignored (the two old tutorial timing tests and one other kept off as before). Game builds. Commits 1f3a0dc to the last of the night; not
+pushed (the safety check blocked pushing; Benjamin can push).
+
+## Previous session's report (13 November 2026)
 
 **What we did:** pushed and pulled between the two PCs, ran the first
 500k-cutter stress test, fixed the biggest slowdown it found, split every
@@ -709,115 +853,3 @@ units stage by stage, then production, then life.
 (its generator fingerprint wasn't locked yet, and it switched plant life
 on in its own file, which no body does); both fixed and passing. Game
 builds. Committed and pushed.
-
-## Previous session's report (12 November 2026)
-
-**What we did:** plants now live and die, the forester became a sideways
-crab, walkers got procedural legs, the sapper's blast is ported one for
-one from the proving ground, and the game has its lighting engine.
-
-**Plants:**
-- Felled trees die and rot: deadwood and leaf litter, then dark humus soil.
-- Where plants are cut, eaten or burned, life spreads back from living
-  plants nearby, all the time: ground cover first, then new plants of the
-  species beside it, creeping out over eaten ground until it is as wooded
-  as before. Nothing grows back where nothing nearby is alive, and not
-  while drones are still working there.
-- F1 shows "Life:" counts and a "show regrowth" button that jumps the camera
-  to a plant growing back.
-- Plants near the camera sway (you said it looks good).
-
-**Forester:** now a sideways crab: a claw each side, the bag slung in the
-middle, four legs (two a side, stepping in diagonal pairs), lasers from eye
-stalks centred on the body. Its body stands 50 m over the tallest plant
-around it and the legs scale to reach the ground. It cuts with its claws
-and burns with its laser while it walks, not just when it stops, and it
-leaps only over steep terrain (at least 20 m of rise), never over trees,
-fallen trunks or rubble. A full bag is dropped; couriers come down for it
-and carry it up, and only then does it count. In a 20 min test it took
-1,675 t of plants, fired 1,894 times and leapt 25 times.
-
-**Abductor:** ported from the mockup on three long curved legs; it still
-has nothing to catch (that waits for animals).
-
-**Procedural legs (new, game/src/rig.rs):** one system for any number of
-legs and joints, built from the usual game method (FABRIK reach solving,
-feet planted on the ground until they lag too far, legs stepping in turns,
-a springy body). It replaced the old hand-made gait for both walkers.
-
-**Sapper:** the blast breaks rock the way the proving ground does (rays,
-cracks, held chunks, a molten heart that cools to glass, rubble that
-settles, thrown rock, and a plume out of the drill hole that lasts several
-seconds), with the shock ring, the heat glow and chain blasts timed as on
-the bench. Yield is 5 kt by default; a sapper that would go off near the
-surface digs down about 25 m first. The flash and screen shake happen only
-when the blast is on screen. In a test, 28 blasts cracked about 100,000
-cells.
-
-**Smoother motion:** drones, haulers and walkers are now drawn from a
-smoothed clock, so they move at the screen's frame rate instead of
-stepping at about 30 per second.
-
-**Loose debris** (rubble, fallen rock, dead plants) takes a cutter about one
-second a cell, whatever it is.
-
-**Lighting:** one engine, as in the mockup: eyes, lasers, explosions, melt
-and drill sparks light the blocks around them in stepped bands.
-
-**Tests:** full suite 99 passed, 0 failed. Game builds. Everything is
-committed; not yet pushed.
-
-**Later the same day (second PC): sappers' charges.** Uranium no longer
-runs out. A fuser in the refinery fuses two atoms into one heavier one; it
-makes uranium from iron and calcium (iron + iron = tellurium, calcium +
-calcium = zirconium, the two = uranium), at a high energy cost. Where no
-uranium can be had or made, a sapper gets a conventional 5 kt charge instead,
-cast from 3,125 t of RDX or 5,000 t of aluminium-oxygen slurry, looking the
-same. Every nuclear blast leaves about 3.9 kg of unreacted uranium in its
-rubble for the cutters. Test with test-fuser.bat (a lava world, no uranium
-of its own; the F1 panel's "sapper charges", "uranium left in rubble" and
-"fuser" lines). In 40 min on a lava world: 72 sappers instead of 25, 384 kg
-of uranium fused. With the fuser off, conventional charges are slow to come
-(only one in 40 min: it waits for about 5,300 t of refined aluminium).
-Full suite: 106 passed, 0 failed. Not committed yet.
-
-**Later still: the slowdown.** Benjamin noticed the game eating far more
-CPU. Measured (same 5 km living world run to 30 game min as fast as it
-goes): before the 12 Nov commit 8 s, after it 22 s, with the fuser 25 s.
-The cost was the specialists' new work done in full even off screen: sapper
-blasts (thrown rock and the plume, then rubble settling cell by cell; the
-molten heart's heat), and the foresters' first plant scan building the
-ground of 256 places round the body at once (a 1.7 s stall). Benjamin's
-rule now (memory): off screen can almost always be approximated. Fixed:
-out of sight a blast's heart goes straight to glass and nothing is thrown
-or blown out (it lies as rubble where it broke); rubble out of sight waits
-and settles when the view comes over it (`settle_wait`); falling chunks and
-thrown rock land at once when zoomed out too (bodies.rs); the plant scan
-looks at 8 of its 256 directions per scan (plus over every flock). Now 13 s
-in the game (10 s headless). `cargo run --release --bin simbench` times the
-sim alone with features switched off (VERBOSE=1 for per-2-minute stage and
-finer timings, `Sim::prof2`); the game log now also times lights and plant
-sway. Still to look at: drawing drones got about 10x dearer per drone
-since 11 Nov (about 2 ms a frame at 1,000 drones, 3.8 ms at 3,000).
-
-**Last: blasts on screen.** Benjamin: the sim must keep going, at least to
-the eye; simplify the boom so it doesn't hitch. The blast's own maths was
-never the cost (about 20 ms); the stall was flying every thrown cell as a
-physics piece (often 1,000+ per blast) and then settling them. Now a blast
-on screen throws at most 200 pieces and blows at most 200 out of its plume
-(`THROW_MAX`, `PLUME_MAX` in src/units/sapper.rs, a fixed random share); the
-rest lies as rubble where it broke. Watched everywhere at once
-(`simbench ... all`), 10 game min went from about 40 s to 28 s.
-
-**On "500k drones used to cost 150 ms".** Measured per drone, the drones
-themselves are no dearer: about 0.5 microseconds per drone per game second
-(1,200 drones, 0.6 ms per game second; 500k would be about 250 ms, about
-what it was). What is new is fixed cost that doesn't scale with drones:
-the specialists, life, falling sand and heat, and fires. Zoomed out it is
-now about 4 to 6 ms per game second in all (`simbench`, VERBOSE shows a
-new "specialists" timer, `prof2[11]`). Next, if the game still feels slow:
-run the game with a big swarm and read the log's stage timings to see which
-of those it is in that case, and look at the drone-drawing cost above.
-
-**Open questions:** plant panic (species-by-species losses; most species don't react;
-exodus rare, about one living world in three).
