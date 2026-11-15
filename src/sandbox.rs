@@ -108,6 +108,14 @@ pub struct Stats {
     pub erupted: u64,
     /// Moves out of sight, each straight to about where it comes to rest.
     pub far_moves: u64,
+    /// Out of sight: cells looked at to settle, by state (powder, liquid,
+    /// gas), and of them those with nowhere to go.
+    pub far_tries: [u64; 3],
+    pub far_stuck: [u64; 3],
+    /// (Diagnostics) out-of-sight moves by material.
+    pub far_by_mat: Vec<u64>,
+    /// Out of sight: sea cells refilled behind liquid leaving the sea.
+    pub far_sea: u64,
 }
 
 pub struct Sandbox {
@@ -877,17 +885,42 @@ impl Sandbox {
         if let Some(v) = ln {
             self.latent.insert(c, v);
         }
-        // (The open sea closes up behind, as on screen.)
-        if state == State::Liquid && nm == VACUUM && world.planet.sea().is_some_and(|(sm, _)| sm == m) && world.planet.in_sea(c.0, c.1) {
-            world.deposit_cell(c.0, c.1, m);
-            changes.push(Change { cell: c, from: VACUUM, to: m });
-        }
+        // (The open sea doesn't close up behind, as it does on screen: that
+        // is only so a dent never wanders over its surface where someone can
+        // see it, and out of sight, with cutters draining what runs out,
+        // it made water without end.)
+        let _ = state;
         self.stats.moves += 1;
         self.stats.far_moves += 1;
+        if self.stats.far_by_mat.len() <= m as usize {
+            self.stats.far_by_mat.resize(m as usize + 1, 0);
+        }
+        self.stats.far_by_mat[m as usize] += 1;
         touched.insert(c);
         touched.insert(n);
-        self.wake_around_filled(world, c);
-        self.wake_around_filled(world, n);
+        // Only what could now move into the gap wakes (matter only moves
+        // strictly nearer the centre: the neighbours further out; gas the
+        // other way), and the cell itself where it landed (its heat and
+        // reactions with its new neighbours). Waking all eighteen round both
+        // ends, as on screen, wakes many times more cells that can't move.
+        let r2 = |q: Cell| (2 * q.0 + 1) * (2 * q.0 + 1) + (2 * q.1 + 1) * (2 * q.1 + 1);
+        let rc = r2(c);
+        let mut rd = world.reader();
+        for d in DIRS {
+            let x = add(c, d);
+            let xm = rd.get(x.0, x.1);
+            if xm == VACUUM {
+                continue;
+            }
+            let xs = world.planet.mats.get(xm).state;
+            if (xs != State::Solid && r2(x) > rc) || xs == State::Gas {
+                self.next.insert(x);
+            }
+        }
+        if rd.get(c.0, c.1) != VACUUM {
+            self.next.insert(c);
+        }
+        self.next.insert(n);
     }
 
     pub fn step(&mut self, world: &mut World) -> Vec<Change> {
@@ -1160,6 +1193,13 @@ impl Sandbox {
             let state = mat.state;
             let far = state != State::Solid && !self.sees(c);
             let settle = if far && self.far_settle { self.settle_far(world, &touched, c, state) } else { None };
+            if far && self.far_settle {
+                let k = match state { State::Powder => 0, State::Liquid => 1, _ => 2 };
+                self.stats.far_tries[k] += 1;
+                if settle.is_none() {
+                    self.stats.far_stuck[k] += 1;
+                }
+            }
             if far && !self.far_settle {
                 self.dormant.add(c);
             } else if let Some(FarTo::Cell(n)) = settle {

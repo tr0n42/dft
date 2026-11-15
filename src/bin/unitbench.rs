@@ -62,6 +62,11 @@ fn columns() -> Vec<String> {
 
 /// ms of real time per game second in each column, since the last call.
 fn costs(s: &mut Sim, game_s: f64) -> Vec<f64> {
+    if std::env::var("FINE").is_ok() {
+        let per = |v: f64| v / game_s.max(1e-9) * 1000.0;
+        println!("    fine ms/game s: events {:.1} (work search {:.1}) · sandbox {:.1} · bodies {:.1} · per-second {:.1} (packet etc {:.1}, building {:.1}, orbit {:.1}) · far trips {} near {} · events {} · searches {} dry {}",
+            per(s.prof[0]), per(s.prof[4]), per(s.prof[1]), per(s.prof[2]), per(s.prof[3]), per(s.prof[6]), per(s.prof[5]), per(s.prof[7]), s.far_trips, s.near_trips, s.counts[0], s.counts[1], s.counts[2]);
+    }
     let total: f64 = s.prof[..4].iter().sum();
     let sand = s.prof2[4] + s.prof2[5];
     let bodies = s.prof[2];
@@ -135,6 +140,7 @@ fn main() {
         let mut s = Sim::new(World::new(planet), e);
         s.free_drones = Some(drones);
         s.free_units = team.clone();
+        s.sandbox.far_settle = std::env::var("NOSETTLE").is_err();
         // Zoomed out, as the player mostly is.
         s.set_attention(Some(None));
         // ...so cutters' trips are worked out at once (NOFOCUS=1: flown
@@ -172,6 +178,15 @@ fn main() {
         let avg: Vec<f64> = sum.iter().map(|v| v / until).collect();
         let hash = format!("{:016x}", s.state_hash());
         println!("  done: {real:.1} s real for {until:.0} game s; fingerprint {hash}");
+        let st = &s.sandbox.stats;
+        println!("  sandbox: stepped {} · moves {} · out of sight: tried {:?} (powder, liquid, gas), stuck {:?}, moved {}", st.cells_stepped, st.moves, st.far_tries, st.far_stuck, st.far_moves);
+        let mut bm: Vec<(u64, String)> = st.far_by_mat.iter().enumerate().filter(|x| *x.1 > 0).map(|(m, &n)| (n, s.world.planet.mats.get(m as u16).name.clone())).collect();
+        bm.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        println!("  out-of-sight moves by material: {:?} · sea refills {}", &bm[..bm.len().min(6)], st.far_sea);
+        if let Ok(w) = s.world.planet.mats.id("water") {
+            let l = &s.world.ledger;
+            println!("  water: mined {:.0} kt · deposited {:.0} kt · of all mined {:.0} kt", l.mined[w as usize] / 1e6, l.deposited[w as usize] / 1e6, l.mined_kg() / 1e6);
+        }
 
         // Against the last run of this stage on this machine.
         let header = format!("date,machine,commit,stage,body,km,drones,game_s,real_s,fingerprint,note,{}", cols.join(","));
