@@ -167,12 +167,25 @@ fn main() {
     let mut s = Sim::new(World::new(planet), e);
     s.free_drones = Some(drones);
     s.set_attention(Some(None));
+    // FARSWITCH=t (with FAR): the camera comes in close at game time t.
+    let switch: Option<f64> = std::env::var("FARSWITCH").ok().and_then(|v| v.parse().ok());
+    // FAR=1: a camera zoomed out over the whole body (see units/far.rs).
+    if std::env::var("FAR").is_ok() {
+        let r = s.world.planet.max_radius as i64 + 1000;
+        s.set_view(Some(([-r, r, -r, r], 2.0 * r as f64 / 1000.0)));
+    }
     if std::env::var("NOFOCUS").is_err() {
         s.set_focus(Some(None));
     }
     println!("dft-prof: {body} {km} km, {drones} drones; warming {warm:.0} game s, then sampling {secs:.0} game s");
     let t0 = std::time::Instant::now();
     s.run(warm);
+    if switch.is_some() {
+        let (x, y) = s.mother_pos_now();
+        let (x, y) = (x as i64, y as i64);
+        s.set_view(Some(([x - 1600, x + 1600, y - 900, y + 900], 2.0)));
+        s.set_focus(Some(Some([x - 3200, x + 3200, y - 1800, y + 1800])));
+    }
     println!("  warm in {:.1} s real; {} working", t0.elapsed().as_secs_f64(), {
         let (_, w, o, h) = s.phase_counts();
         w + o + h
@@ -196,6 +209,22 @@ fn main() {
         stacks
     });
     let t1 = std::time::Instant::now();
+    // FARPAN=m (with FARSWITCH): the close camera slides along the surface
+    // at m metres per game second while sampling.
+    if let Some(v) = std::env::var("FARPAN").ok().and_then(|x| x.parse::<f64>().ok()) {
+        let (x0, y0) = s.mother_pos_now();
+        let r = (x0 * x0 + y0 * y0).sqrt();
+        let a0 = y0.atan2(x0);
+        let mut t = warm;
+        while t < warm + secs {
+            t += 1.0;
+            let a = a0 + v * (t - warm) / r;
+            let (x, y) = ((a.cos() * r) as i64, (a.sin() * r) as i64);
+            s.set_view(Some(([x - 1600, x + 1600, y - 900, y + 900], 2.0)));
+            s.set_focus(Some(Some([x - 3200, x + 3200, y - 1800, y + 1800])));
+            s.run(t);
+        }
+    }
     s.run(warm + secs);
     let real = t1.elapsed().as_secs_f64();
     stop.store(true, Ordering::Relaxed);

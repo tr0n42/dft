@@ -39,6 +39,31 @@ impl View {
     }
 }
 
+/// The wheel's zoom, glided to rather than jumped to (Benjamin: smoothing
+/// covers the switch between the swarm worked as a count far off and
+/// flown drone by drone close up), and where the view is heading, for the
+/// simulation to get ready there first (see `Heading`).
+#[derive(Resource, Default)]
+pub struct Glide {
+    /// The zoom wanted (m per pixel), and the world point held still under
+    /// the cursor while getting there, with its offset from the window's
+    /// middle (pixels, +y up).
+    pub to: Option<(f64, (f64, f64), (f64, f64))>,
+    /// The view's own speed lately (m per second), from drags and keys.
+    vel: (f64, f64),
+    last: Option<(f64, f64, f64)>,
+}
+
+/// Fastest the wheel's zoom goes: this factor per second (a whole body to
+/// close up in a few seconds), and how quickly it closes on what's wanted.
+const ZOOM_PER_S: f64 = 4.0;
+const ZOOM_EASE: f64 = 8.0;
+
+/// Where the view will be shortly: where a zoom under way ends, and where
+/// a pan carries it in a second (the world rectangle, and the zoom).
+#[derive(Resource, Default, Clone, Copy)]
+pub struct Heading(pub Option<((f64, f64, f64, f64), f64)>);
+
 pub struct ViewPlugin;
 
 /// The player's camera controls run in this set (the director runs after).
@@ -47,7 +72,7 @@ pub struct Controls;
 
 impl Plugin for ViewPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(View { x: 0.0, y: 0.0, mpp: 1.0, w: 1.0, h: 1.0 }).add_systems(Startup, start_view).add_systems(PreUpdate, (track_window, controls.run_if(not(bevy_egui::input::egui_wants_any_pointer_input))).chain().in_set(Controls));
+        app.insert_resource(View { x: 0.0, y: 0.0, mpp: 1.0, w: 1.0, h: 1.0 }).init_resource::<Glide>().init_resource::<Heading>().add_systems(Startup, start_view).add_systems(PreUpdate, (track_window, controls.run_if(not(bevy_egui::input::egui_wants_any_pointer_input))).chain().in_set(Controls));
     }
 }
 
@@ -79,6 +104,8 @@ fn track_window(mut view: ResMut<View>, windows: Query<&Window, With<PrimaryWind
 /// hands it back (Home fits the whole body when there's no director).
 #[allow(clippy::too_many_arguments)]
 fn controls(
+    mut glide: ResMut<Glide>,
+    mut heading: ResMut<Heading>,
     mut cam: ResMut<crate::camera::Camera>,
     time: Res<Time<Real>>,
     mut view: ResMut<View>,
@@ -94,6 +121,7 @@ fn controls(
     if keys.just_pressed(KeyCode::KeyC) && cam.can_direct {
         cam.director = !cam.director;
         cam.resume();
+        glide.to = None;
     }
     // Pan with the keyboard (arrows or WASD), a screen's width in about 1.5 s.
     let dt = time.delta_secs_f64().min(0.1);
@@ -117,6 +145,7 @@ fn controls(
         view.y += ky * speed * dt;
     }
     if keys.just_pressed(KeyCode::Home) || buttons.just_pressed(MouseButton::Middle) {
+        glide.to = None;
         if cam.director {
             cam.resume();
         } else {
@@ -125,8 +154,14 @@ fn controls(
     }
     if (buttons.pressed(MouseButton::Right) || buttons.pressed(MouseButton::Left)) && motion.delta != Vec2::ZERO {
         cam.manual(now);
-        view.x -= motion.delta.x as f64 * view.mpp;
-        view.y += motion.delta.y as f64 * view.mpp;
+        let (dx, dy) = (-(motion.delta.x as f64) * view.mpp, motion.delta.y as f64 * view.mpp);
+        view.x += dx;
+        view.y += dy;
+        // (A zoom under way keeps its point under the cursor as it drags.)
+        if let Some((_, w, _)) = &mut glide.to {
+            w.0 += dx;
+            w.1 += dy;
+        }
     }
     let mut notches = match scroll.unit {
         MouseScrollUnit::Line => scroll.delta.y as f64,
@@ -144,13 +179,43 @@ fn controls(
         // Bounds: a block 64 pixels across at most; as far out as the zoom
         // limit allows (twice the whole body at most).
         let max_mpp = (4.0 * (body.0.max_radius + body.0.spec.atmosphere_m) / view.w.min(view.h).max(1.0)).min(cam.max_mpp.max(view.mpp.min(1.0)));
-        let new = (view.mpp * f).clamp(1.0 / 64.0, max_mpp.max(1.0 / 64.0));
-        // Keep the point under the cursor still.
-        if let Some(c) = windows.single().ok().and_then(|w| w.cursor_position()) {
-            let (cx, cy) = (c.x as f64 - view.w / 2.0, view.h / 2.0 - c.y as f64);
-            view.x += cx * (view.mpp - new);
-            view.y += cy * (view.mpp - new);
-        }
-        view.mpp = new;
+        let from = glide.to.map_or(view.mpp, |g| g.0);
+        let new = (from * f).clamp(1.0 / 64.0, max_mpp.max(1.0 / 64.0));
+        // The point under the cursor stays still as the zoom glides there.
+        let off = windows.single().ok().and_then(|w| w.cursor_position()).map_or((0.0, 0.0), |c| (c.x as f64 - view.w / 2.0, view.h / 2.0 - c.y as f64));
+        let at = (view.x + off.0 * view.mpp, view.y + off.1 * view.mpp);
+        glide.to = Some((new, at, off));
     }
+    // The zoom, a little nearer what's wanted each frame (no faster than
+    // ZOOM_PER_S), the cursor's point held still.
+    if let Some((want, at, off)) = glide.to {
+        let gap = (want / view.mpp).ln();
+        let step = (gap * (1.0 - (-ZOOM_EASE * dt).exp())).clamp(-ZOOM_PER_S.ln() * dt, ZOOM_PER_S.ln() * dt);
+        let done = gap.abs() < 1e-3;
+        view.mpp = if done { want } else { view.mpp * step.exp() };
+        view.x = at.0 - off.0 * view.mpp;
+        view.y = at.1 - off.1 * view.mpp;
+        if done {
+            glide.to = None;
+        }
+    }
+    // Where the view is heading: the zoom's end, and a second on at the
+    // speed it has been moving.
+    let (x, y) = (view.x, view.y);
+    if dt > 0.0 {
+        if let Some((lx, ly, _)) = glide.last {
+            let k = 1.0 - (-dt / 0.25f64).exp();
+            glide.vel.0 += ((x - lx) / dt - glide.vel.0) * k;
+            glide.vel.1 += ((y - ly) / dt - glide.vel.1) * k;
+        }
+    }
+    glide.last = Some((x, y, view.mpp));
+    let (mut hx, mut hy, mut hm) = (x + glide.vel.0, y + glide.vel.1, view.mpp);
+    if let Some((want, at, off)) = glide.to {
+        hm = want;
+        hx = at.0 - off.0 * want;
+        hy = at.1 - off.1 * want;
+    }
+    let (hw, hh) = (view.w * 0.5 * hm, view.h * 0.5 * hm);
+    heading.0 = Some(((hx - hw, hy - hh, hx + hw, hy + hh), hm));
 }

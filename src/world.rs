@@ -108,6 +108,116 @@ pub struct World {
     /// untouched cell always generates the same, so this never goes stale.
     /// Not part of the world's state or its hash.
     pub gen_cache: GenCache,
+    /// Ground eaten out of sight (see `FarCut`): everything further out than
+    /// a sector's level is gone. Part of the world's state.
+    pub far: FarCut,
+}
+
+/// Ground eaten out of sight, a whole stretch of the surface at a time (the
+/// swarm's far field, src/far.rs): the body is cut into sectors by angle,
+/// and in each one every cell further from the centre than its level is
+/// gone. Cells generated cell by cell are emptied when the level comes down
+/// past them (`World::far_lower`); untouched ones (still as generated) read
+/// as empty above it, so nothing has to be generated to eat it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FarCut {
+    /// Each sector's level (distance from the centre, m); INFINITY: not cut.
+    /// Sector k covers angles [k, k+1) * TAU / n from +x, counter-clockwise.
+    pub levels: Vec<f32>,
+    /// Whether any sector is cut (the lookups skip the rest when not).
+    pub any: bool,
+    /// Bumped whenever a level changes (for a renderer's copy). Not part of
+    /// the world's state.
+    pub version: u64,
+    /// Sectors far from the camera now (the swarm there works as a count,
+    /// and loose matter there waits until someone looks: see the sandbox).
+    /// Not part of the world's state.
+    pub asleep: Vec<bool>,
+}
+
+/// How far a far sector's eaten face rises toward a higher neighbour (m),
+/// and how deep its pits go below its level.
+pub const FAR_RAMP_M: f64 = 48.0;
+pub const FAR_PIT_M: f64 = 24.0;
+
+/// Smooth noise in 0..1 along a line (value noise, eased).
+#[inline]
+fn value_noise(s: f64, salt: u64) -> f64 {
+    let i = s.floor();
+    let f = s - i;
+    let h = |k: f64| (crate::noise::hash(0xFA2C_17, k as i64, 0, salt) >> 11) as f64 / (1u64 << 53) as f64;
+    let u = f * f * (3.0 - 2.0 * f);
+    h(i) * (1.0 - u) + h(i + 1.0) * u
+}
+
+impl FarCut {
+    /// Sectors round a body this big: about `width_m` of surface each.
+    pub fn new(radius_m: f64, width_m: f64) -> Self {
+        let n = ((std::f64::consts::TAU * radius_m / width_m.max(1.0)).round() as usize).max(16);
+        FarCut { levels: vec![f32::INFINITY; n], any: false, version: 0, asleep: Vec::new() }
+    }
+
+    /// The sector holding direction (x, y) from the centre.
+    #[inline]
+    pub fn sector_of(&self, x: f64, y: f64) -> usize {
+        let n = self.levels.len();
+        let t = y.atan2(x) / std::f64::consts::TAU;
+        let t = if t < 0.0 { t + 1.0 } else { t };
+        ((t * n as f64) as usize).min(n - 1)
+    }
+
+    /// Whether cell (x, y) lies in a sector far from the camera.
+    #[inline]
+    pub fn asleep_at(&self, x: i64, y: i64) -> bool {
+        if self.asleep.is_empty() {
+            return false;
+        }
+        let k = self.sector_of(x as f64 + 0.5, y as f64 + 0.5);
+        self.asleep.get(k).copied().unwrap_or(false)
+    }
+
+    /// Whether cell (x, y) has been eaten out of sight: further out than
+    /// its sector's level where it stands. Not one flat level: toward a
+    /// higher neighbour the ground rises to meet it (a ramp over half the
+    /// sector, never a wall), and the eaten face is pitted as flocks leave
+    /// it (wide shallow bowls, small bites). The ramp only ever raises a
+    /// sector's own level, so a sector is never cut lower by its
+    /// neighbours.
+    #[inline]
+    pub fn cut(&self, x: i64, y: i64) -> bool {
+        if !self.any {
+            return false;
+        }
+        let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
+        let n = self.levels.len();
+        let t = fy.atan2(fx) / std::f64::consts::TAU;
+        let t = (if t < 0.0 { t + 1.0 } else { t }) * n as f64;
+        let k = (t as usize).min(n - 1);
+        let own = self.levels[k] as f64;
+        if !own.is_finite() {
+            return false;
+        }
+        let r2 = fx * fx + fy * fy;
+        // (Quick answers well clear of the face.)
+        let top = own + FAR_RAMP_M;
+        if r2 > top * top {
+            return true;
+        }
+        let low = own - FAR_PIT_M;
+        if r2 < low * low {
+            return false;
+        }
+        let f = t - k as f64;
+        let (j, w) = if f < 0.5 { ((k + n - 1) % n, (0.5 - f) * 2.0) } else { ((k + 1) % n, (f - 0.5) * 2.0) };
+        let other = (self.levels[j] as f64).min(own + FAR_RAMP_M);
+        let w = w * w * (3.0 - 2.0 * w);
+        let lvl = if other > own { own + (other - own) * w } else { own };
+        // Pits: along the surface (metres round the body, the same either
+        // side of a sector's edge), bowls and bites of several sizes.
+        let s = t / n as f64 * std::f64::consts::TAU * own.max(1.0);
+        let pit = FAR_PIT_M * (0.45 * value_noise(s / 300.0, 1) + 0.3 * value_noise(s / 80.0, 2) + 0.17 * value_noise(s / 15.0, 3) + 0.08 * value_noise(s / 4.0, 4));
+        r2.sqrt() > lvl - pit
+    }
 }
 
 /// See `World::gen_cache`: split in parts by cell, each with its own lock,
@@ -233,7 +343,7 @@ impl World {
         let initial_kg = est.iter().enumerate().map(|(i, c)| c * planet.mats.get(i as crate::materials::MatId).density).collect();
         let mut nodes = NodeMap::default();
         nodes.insert(key(root), Entry { state: State::Untouched, totals: est });
-        World { ledger: Ledger::new(initial_kg), planet, tree, nodes, track: None, life_watch: Vec::new(), life_notes: LifeNotes::default(), looks: HashMap::new(), gen_cache: GenCache::default() }
+        World { ledger: Ledger::new(initial_kg), planet, tree, nodes, track: None, life_watch: Vec::new(), life_notes: LifeNotes::default(), looks: HashMap::new(), gen_cache: GenCache::default(), far: FarCut::default() }
     }
 
     /// Note that cell (x, y) changed (if anyone is keeping track).
@@ -357,8 +467,8 @@ impl World {
                         return c[((y - y0) * LEAF + (x - x0)) as usize];
                     }
                     State::Empty => return VACUUM,
-                    State::Uniform(m) => return *m,
-                    State::Untouched => return generated(x, y),
+                    State::Uniform(m) => return if self.far.cut(x, y) { VACUUM } else { *m },
+                    State::Untouched => return if self.far.cut(x, y) { VACUUM } else { generated(x, y) },
                     State::Split => {}
                 }
             }
@@ -370,9 +480,9 @@ impl World {
                 None => return VACUUM,
             };
             match self.nodes.get(&key(n)).map(|e| &e.state) {
-                None | Some(State::Untouched) => return generated(x, y),
+                None | Some(State::Untouched) => return if self.far.cut(x, y) { VACUUM } else { generated(x, y) },
                 Some(State::Empty) => return VACUUM,
-                Some(State::Uniform(m)) => return *m,
+                Some(State::Uniform(m)) => return if self.far.cut(x, y) { VACUUM } else { *m },
                 Some(State::Dense(c)) => {
                     let (x0, _, y0, _) = self.tree.bounds(n);
                     return c[((y - y0) * LEAF + (x - x0)) as usize];
@@ -386,6 +496,13 @@ impl World {
     /// the generator: None where the cell is still as generated (untouched).
     /// Lets a renderer keep its own cache of generated cells.
     pub fn material_stored(&self, x: i64, y: i64) -> Option<MatId> {
+        self.stored(x, y, true)
+    }
+
+    /// `material_stored`, with or without ground eaten out of sight (see
+    /// `FarCut`) applied to what is still as generated.
+    fn stored(&self, x: i64, y: i64, far: bool) -> Option<MatId> {
+        let cut = |x: i64, y: i64| far && self.far.cut(x, y);
         if let Some(n) = self.node_at(0, x, y) {
             if let Some(e) = self.nodes.get(&key(n)) {
                 match &e.state {
@@ -394,8 +511,8 @@ impl World {
                         return Some(c[((y - y0) * LEAF + (x - x0)) as usize]);
                     }
                     State::Empty => return Some(VACUUM),
-                    State::Uniform(m) => return Some(*m),
-                    State::Untouched => return None,
+                    State::Uniform(m) => return Some(if cut(x, y) { VACUUM } else { *m }),
+                    State::Untouched => return if cut(x, y) { Some(VACUUM) } else { None },
                     State::Split => {}
                 }
             }
@@ -404,9 +521,9 @@ impl World {
         loop {
             let n = self.node_at(level, x, y)?;
             match self.nodes.get(&key(n)).map(|e| &e.state) {
-                None | Some(State::Untouched) => return None,
+                None | Some(State::Untouched) => return if cut(x, y) { Some(VACUUM) } else { None },
                 Some(State::Empty) => return Some(VACUUM),
-                Some(State::Uniform(m)) => return Some(*m),
+                Some(State::Uniform(m)) => return Some(if cut(x, y) { VACUUM } else { *m }),
                 Some(State::Dense(c)) => {
                     let (x0, _, y0, _) = self.tree.bounds(n);
                     return Some(c[((y - y0) * LEAF + (x - x0)) as usize]);
@@ -445,7 +562,8 @@ impl World {
         if let Some(c) = self.dense_leaf(x0, y0) {
             return Some(LeafSnap::Dense(c.into()));
         }
-        self.material_stored(x0, y0).map(LeafSnap::Uniform)
+        // (Ground eaten out of sight is left to the renderer: see FarCut.)
+        self.stored(x0, y0, false).map(LeafSnap::Uniform)
     }
 
     /// Every leaf that isn't as generated (for a renderer starting its copy,
@@ -598,18 +716,30 @@ impl World {
         let cells: Box<[MatId]> = match e.state {
             State::Dense(_) => return,
             State::Empty => vec![VACUUM; (LEAF * LEAF) as usize].into_boxed_slice(),
-            State::Uniform(m) => vec![m; (LEAF * LEAF) as usize].into_boxed_slice(),
+            State::Uniform(m) => {
+                let mut c = vec![m; (LEAF * LEAF) as usize];
+                if self.far.any {
+                    for (i, o) in c.iter_mut().enumerate() {
+                        if self.far.cut(x0 + i as i64 % LEAF, y0 + i as i64 / LEAF) {
+                            *o = VACUUM;
+                        }
+                    }
+                }
+                c.into_boxed_slice()
+            }
             State::Untouched => {
                 // Row by row side by side (the generator only reads, and
                 // is the same on any thread: a leaf is 4,096 of its calls,
                 // most of the cost of the first cut in fresh ground).
                 use rayon::prelude::*;
                 let planet = &*self.planet;
+                let far = &self.far;
                 let mut c = vec![VACUUM; (LEAF * LEAF) as usize];
                 c.par_chunks_mut(LEAF as usize).enumerate().for_each(|(row, out)| {
                     let y = y0 + row as i64;
                     for (i, o) in out.iter_mut().enumerate() {
-                        *o = planet.material(x0 + i as i64, y);
+                        let x = x0 + i as i64;
+                        *o = if far.cut(x, y) { VACUUM } else { planet.material(x, y) };
                     }
                 });
                 c.into_boxed_slice()
@@ -685,6 +815,96 @@ impl World {
         self.ledger.cell_ops += 1;
         self.collapse_from(leaf);
         Some(m)
+    }
+
+    /// Sector k's level comes down to `to`, from `from` (its old level, or
+    /// the highest ground in it when first cut): every cell already
+    /// generated cell by cell further out than that, in the sector, is
+    /// emptied, and the cells emptied are returned (per material) for the
+    /// swarm to book as eaten out of sight. Untouched cells need nothing:
+    /// they read as empty above the level (see `FarCut`).
+    pub fn far_lower(&mut self, k: usize, from: f64, to: f64) -> Vec<f64> {
+        let nm = self.nm();
+        let mut eaten = vec![0.0; nm];
+        let n = self.far.levels.len();
+        if k >= n {
+            return eaten;
+        }
+        self.far.levels[k] = to as f32;
+        self.far.any = true;
+        self.far.version += 1;
+        // The band's box: the sector's two edges and middle, at both radii,
+        // and half its neighbours (whose ramps lean on its level).
+        let tau = std::f64::consts::TAU;
+        let (a0, a1) = (tau * (k as f64 - 0.5) / n as f64, tau * (k as f64 + 1.5) / n as f64);
+        let to = to - FAR_PIT_M;
+        let from = from + FAR_RAMP_M;
+        let (mut bx0, mut bx1, mut by0, mut by1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        for a in [a0, a1, 0.5 * (a0 + a1)] {
+            for r in [to - 1.0, from + 1.0] {
+                let (x, y) = (a.cos() * r, a.sin() * r);
+                bx0 = bx0.min(x);
+                bx1 = bx1.max(x);
+                by0 = by0.min(y);
+                by1 = by1.max(y);
+            }
+        }
+        let (x0, x1, y0, y1) = (bx0.floor() as i64 - 1, bx1.ceil() as i64 + 1, by0.floor() as i64 - 1, by1.ceil() as i64 + 1);
+        let (lx0, ly0) = self.leaf_of(x0, y0);
+        let (lx1, ly1) = self.leaf_of(x1, y1);
+        let to2 = to * to;
+        for ly in ly0..=ly1 {
+            for lx in lx0..=lx1 {
+                let (cx, cy) = self.leaf_corner(lx, ly);
+                let Some(leaf) = self.node_at(0, cx, cy) else { continue };
+                let far = &self.far;
+                let cells: Vec<usize> = match self.nodes.get(&key(leaf)).map(|e| &e.state) {
+                    Some(State::Dense(c)) => (0..(LEAF * LEAF) as usize)
+                        .filter(|&i| c[i] != VACUUM)
+                        .filter(|&i| {
+                            let (x, y) = (cx + i as i64 % LEAF, cy + i as i64 / LEAF);
+                            let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
+                            fx * fx + fy * fy > to2 && far.cut(x, y)
+                        })
+                        .collect(),
+                    _ => continue,
+                };
+                if cells.is_empty() {
+                    continue;
+                }
+                let e = self.nodes.get_mut(&key(leaf)).unwrap();
+                let mut gone = vec![0.0; nm];
+                let mut taken = Vec::with_capacity(cells.len());
+                if let State::Dense(c) = &mut e.state {
+                    for &i in &cells {
+                        gone[c[i] as usize] += 1.0;
+                        taken.push((cx + i as i64 % LEAF, cy + i as i64 / LEAF, c[i]));
+                        c[i] = VACUUM;
+                    }
+                }
+                for m in 1..nm {
+                    e.totals[m] -= gone[m];
+                }
+                for m in 1..nm {
+                    if gone[m] != 0.0 {
+                        self.adjust_ancestors(leaf, m, -gone[m]);
+                        eaten[m] += gone[m];
+                    }
+                }
+                for &(x, y, m) in &taken {
+                    self.mark(x, y);
+                    self.note_removed(x, y, m);
+                    self.clear_look(x, y);
+                }
+                self.ledger.cell_ops += taken.len() as u64;
+                self.collapse_from(leaf);
+            }
+        }
+        // Whatever a renderer drew of the untouched ground there is stale.
+        if let Some(t) = &mut self.track {
+            t.rects.push([x0, x1 + 1, y0, y1 + 1]);
+        }
+        eaten
     }
 
     /// Write material `to` into cell (x, y), keeping every node's counts right.
@@ -1031,6 +1251,13 @@ impl World {
         mix(l.generated.to_bits());
         mix(l.cell_ops);
         mix(l.node_ops);
+        // (Only once something is eaten out of sight, so fingerprints from
+        // before the far field are unchanged.)
+        if self.far.any {
+            for v in &self.far.levels {
+                mix(v.to_bits() as u64);
+            }
+        }
         h
     }
 

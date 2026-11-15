@@ -34,6 +34,9 @@ pub struct Control {
     /// Where cutters are worked cell by cell (see `Sim::set_focus`): about
     /// twice the screen; elsewhere their trips are worked out at once.
     pub focus: Option<Option<[i64; 4]>>,
+    /// What the camera shows: the screen's rectangle (cells) and its zoom
+    /// (m per pixel), for the swarm's far field (see Sim::set_view).
+    pub view: Option<([i64; 4], f64)>,
     /// Ignore the screen and move everything everywhere (dev panel).
     pub full_detail: bool,
     pub quit: bool,
@@ -166,7 +169,8 @@ pub struct Out {
     pub leg_full: Option<Vec<Leg>>,
     pub leg_changes: Vec<(u32, Leg)>,
     /// Landing points and other hubs: x, y, kind (0 landing, 1 refiner, 2
-    /// shaft), and how many drones call it home.
+    /// shaft, 3 a far sector's swarm as a count), and how many drones call
+    /// it home.
     pub hubs: Vec<(f64, f64, u8, u32)>,
     /// The haulers, each on its flight (or hovering over its flock).
     pub haulers: Vec<dft_sim::swarm::HaulerView>,
@@ -217,6 +221,8 @@ pub struct Mirror {
     leaves: std::collections::HashMap<(i64, i64), dft_sim::world::LeafSnap>,
     /// Cells' looks beyond their material (a blast's marks), by leaf.
     looks: std::collections::HashMap<(i64, i64), Arc<std::collections::HashMap<(i64, i64), u8>>>,
+    /// Ground eaten out of sight (see dft_sim::world::FarCut).
+    far: dft_sim::world::FarCut,
 }
 
 impl Mirror {
@@ -224,8 +230,11 @@ impl Mirror {
     pub fn get(&self, x: i64, y: i64) -> Option<dft_sim::materials::MatId> {
         const L: i64 = dft_sim::totals::LEAF;
         let (lx, ly) = ((x - self.origin.0).div_euclid(L), (y - self.origin.1).div_euclid(L));
-        let snap = self.leaves.get(&(lx, ly))?;
-        Some(snap.at(x - self.origin.0 - lx * L, y - self.origin.1 - ly * L))
+        match self.leaves.get(&(lx, ly)) {
+            Some(snap) => Some(snap.at(x - self.origin.0 - lx * L, y - self.origin.1 - ly * L)),
+            // (As generated, unless eaten out of sight.)
+            None => self.far.cut(x, y).then_some(dft_sim::materials::VACUUM),
+        }
     }
 
     /// Cell (x, y)'s look (0: none; see dft_sim::world::Look).
@@ -316,7 +325,7 @@ fn above_normal() {
 pub fn start(mut sim: Sim, control: Control) -> Arc<Shared> {
     sim.world.track = Some(Default::default());
     sim.leg_track = Some(Default::default());
-    let mirror = Mirror { origin: sim.world.leaf_corner(0, 0), leaves: Default::default(), looks: Default::default() };
+    let mirror = Mirror { origin: sim.world.leaf_corner(0, 0), leaves: Default::default(), looks: Default::default(), far: sim.world.far.clone() };
     let shared = Arc::new(Shared { sim: Mutex::new(sim), mirror: parking_lot::RwLock::new(mirror), readers: AtomicUsize::new(0), out: Mutex::new(Out::default()), control: Mutex::new(control), blasts: Mutex::new(Vec::new()) });
     let s = shared.clone();
     std::thread::Builder::new()
@@ -384,6 +393,7 @@ fn run(shared: &Shared) {
             s.free_drones = c.free_drones;
             s.set_attention(if c.full_detail { None } else { c.attention });
             s.set_focus(if c.full_detail { None } else { c.focus });
+            s.set_view(if c.full_detail { None } else { c.view });
             // Only the specialists being worked on (economy.toml
             // `game_deploys`), in a loaded save too.
             if s.deploy_only.is_none() {
@@ -445,10 +455,17 @@ fn run(shared: &Shared) {
                 let tp = Instant::now();
                 let changes = s.take_leg_changes();
                 use dft_sim::swarm::HubKind;
-                let hubs = s.hubs.iter().zip(s.hub_loads()).map(|(h, &n)| (h.x, h.y, match h.kind { HubKind::Seed => 0, HubKind::Refiner => 1, HubKind::Shaft => 2 }, n)).collect();
+                let mut hubs: Vec<(f64, f64, u8, u32)> = s.hubs.iter().zip(s.hub_loads()).map(|(h, &n)| (h.x, h.y, match h.kind { HubKind::Seed => 0, HubKind::Refiner => 1, HubKind::Shaft => 2 }, n)).collect();
+                // Far sectors (the swarm far from the camera, as a count):
+                // one mark each, over its ground.
+                for (a, lvl, n) in s.far_sectors() {
+                    let r = lvl.min(s.world.planet.max_radius) + 20.0;
+                    hubs.push((a.cos() * r, a.sin() * r, 3, n.min(u32::MAX as u64) as u32));
+                }
                 stats.time = s.time();
                 stats.drones = s.drone_count();
-                stats.packet = s.packet;
+                // (Cutters in far sectors count with the packet.)
+                stats.packet = s.packet + s.far_cutters();
                 stats.consumed = s.consumed_share();
                 stats.energy = s.energy;
                 stats.mass = s.mass;
@@ -572,6 +589,10 @@ fn run(shared: &Shared) {
                     let mut blocks = Vec::with_capacity(snaps.len() * 4);
                     {
                         let mut m = shared.mirror.write();
+                        if m.far.version != s.world.far.version || m.far.levels.len() != s.world.far.levels.len() {
+                            m.far = s.world.far.clone();
+                            m.far.asleep = Vec::new();
+                        }
                         for ((k, snap), look) in snaps.into_iter().zip(looks) {
                             pending.remove(&k);
                             // Its looks changed: every square of it is drawn again.

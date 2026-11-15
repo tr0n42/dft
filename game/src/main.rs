@@ -356,7 +356,7 @@ fn main() {
         }
     };
     let Start { planet, sim, source, restore } = start;
-    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, focus: None, full_detail: o.full_detail, quit: false };
+    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, focus: None, view: None, full_detail: o.full_detail, quit: false };
     let script = match o.camera.as_deref().map(bench::parse) {
         Some(Ok(steps)) => Some(bench::Script::new(steps)),
         Some(Err(e)) => {
@@ -440,10 +440,14 @@ fn quit_after(o: Res<Options>, time: Res<Time<Real>>, mut exit: MessageWriter<Ap
     }
 }
 
+/// The zoom (m per pixel) closer than which the swarm on screen is flown
+/// drone by drone (see dft_sim::swarm::FAR_MPP).
+pub const FAR_MPP_GAME: f64 = dft_sim::swarm::FAR_MPP;
+
 /// Loose matter only moves where it can be seen: on screen, and only when
 /// cells there are at least half a pixel across. Elsewhere it waits, and
 /// moves once the view comes over it.
-fn attention(view: Res<view::View>, run: Res<Run>) {
+fn attention(view: Res<view::View>, heading: Res<view::Heading>, run: Res<Run>) {
     const MARGIN: f64 = 128.0;
     let a = if view.mpp <= 2.0 {
         let (l, b, r, t) = view.bounds();
@@ -460,7 +464,24 @@ fn attention(view: Res<view::View>, run: Res<Run>) {
     } else {
         None
     };
+    // The far field's view: what's on screen and where the view is heading
+    // (a zoom's end, a pan a second on), so the swarm there is flown drone
+    // by drone before it comes into sight.
+    let v = {
+        let (mut l, mut b, mut r, mut t) = view.bounds();
+        let mut mpp = view.mpp;
+        if let Some(((hl, hb, hr, ht), hm)) = heading.0 {
+            // (Only where it's heading closer in: zoomed out, the whole
+            // rectangle it spans would be huge and is far anyway.)
+            if hm < crate::FAR_MPP_GAME {
+                (l, b, r, t) = if mpp < crate::FAR_MPP_GAME { (l.min(hl), b.min(hb), r.max(hr), t.max(ht)) } else { (hl, hb, hr, ht) };
+                mpp = mpp.min(hm);
+            }
+        }
+        Some(([l.floor() as i64, r.ceil() as i64, b.floor() as i64, t.ceil() as i64], mpp))
+    };
     let mut c = run.0.control.lock();
+    c.view = v;
     if c.attention != Some(a) {
         c.attention = Some(a);
     }

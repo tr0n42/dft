@@ -218,8 +218,7 @@ impl Sim {
     pub(super) fn release_hauler(&mut self, k: usize) {
         let here = self.hauler_pos(k);
         let mother = self.rendezvous(self.haulers[k].site.min(self.hubs.len() - 1));
-        let top = self.world.planet.max_radius;
-        let speed = self.eco.hauler.speed.max(1.0);
+        let trip_s = self.hauler_trip_s(self.hauler_way(here, mother));
         let now = self.tick;
         let tick_s = self.eco.tick_s;
         let hl = &mut self.haulers[k];
@@ -228,7 +227,7 @@ impl Sim {
         hl.from = here;
         hl.to = mother;
         hl.t0 = now;
-        hl.t1 = now + ((route_len(here, mother, route_cruise(here, mother, top)) / speed) / tick_s).ceil() as u64;
+        hl.t1 = now + (trip_s / tick_s).ceil() as u64;
         self.haulers_moved = true;
     }
 
@@ -306,7 +305,7 @@ impl Sim {
                     // Only ones working there: the soonest to lift is relieved in time.
                     Some(&(coming, lifts_in)) => coming == 0 && {
                         let p = self.docks[h][d];
-                        let eta = self.hauler_way(self.rendezvous(h), p) / spec.speed.max(1.0);
+                        let eta = self.hauler_trip_s(self.hauler_way(self.rendezvous(h), p));
                         lifts_in <= eta + fs.call_margin_s
                     },
                 };
@@ -371,7 +370,7 @@ impl Sim {
     pub(super) fn send_to_dock(&mut self, k: usize, h: usize, d: usize) {
         let from = self.hauler_pos(k);
         let to = self.dock_pos(h, d);
-        let t1 = self.tick + self.ticks(self.hauler_way(from, to) / self.eco.hauler.speed.max(1.0));
+        let t1 = self.tick + self.ticks(self.hauler_trip_s(self.hauler_way(from, to)));
         let hl = &mut self.haulers[k];
         hl.site = h;
         hl.dock = d;

@@ -38,7 +38,13 @@ fn lava_is_drunk_and_melts_the_reckless() {
 
 #[test]
 fn seas_are_eaten() {
-    let s = run("ocean-world", 15.0);
+    // (Over the top of the map, by the sea: over the highest ground, the
+    // swarm is inland for longer than this.)
+    let mut e = eco();
+    e.seed_swarm.highest_start = false;
+    let mut s = Sim::new(World::new(dft_sim::load_body(&data(), "ocean-world").unwrap()), e);
+    s.free_drones = Some(3000);
+    s.run(15.0 * 60.0);
     assert!(s.consumed_share() > 0.0);
     let mats = &s.world.planet.mats;
     let liquid: f64 = s.world.ledger.mined.iter().enumerate().filter(|(i, _)| mats.get(*i as u16).state == dft_sim::materials::State::Liquid).map(|(_, k)| *k).sum();

@@ -96,8 +96,10 @@ fn cutters_out_of_sight_dig_alike_and_keep_the_books() {
     let mut far = sim(eco());
     far.set_focus(Some(None));
     far.run(450.0);
-    // Half the body in focus for a while, then none again.
-    far.set_focus(Some(Some([0, 4000, -4000, 4000])));
+    // Half the body in focus for a while (the half the swarm landed on),
+    // then none again.
+    let (mx, _) = far.mother_pos_now();
+    far.set_focus(Some(Some(if mx >= 0.0 { [0, 4000, -4000, 4000] } else { [-4000, 0, -4000, 4000] })));
     far.run(700.0);
     far.set_focus(Some(None));
     far.run(900.0);

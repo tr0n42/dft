@@ -117,6 +117,8 @@ pub struct Stats {
     pub far_stuck: [u64; 3],
     /// (Diagnostics) out-of-sight moves by material.
     pub far_by_mat: Vec<u64>,
+    /// Out-of-sight moves by where round the body (64 slices from +x).
+    pub far_by_angle: Vec<u64>,
     /// Out of sight: sea cells refilled behind liquid leaving the sea.
     pub far_sea: u64,
 }
@@ -955,6 +957,15 @@ impl Sandbox {
             self.stats.far_by_mat.resize(m as usize + 1, 0);
         }
         self.stats.far_by_mat[m as usize] += 1;
+        {
+            // (Where round the body, in 64 slices: for reports.)
+            let a = (c.1 as f64 + 0.5).atan2(c.0 as f64 + 0.5) / std::f64::consts::TAU;
+            let k = (((a + 1.0).fract()) * 64.0) as usize % 64;
+            if self.stats.far_by_angle.len() < 64 {
+                self.stats.far_by_angle.resize(64, 0);
+            }
+            self.stats.far_by_angle[k] += 1;
+        }
         touched.insert(c);
         touched.insert(n);
         // Only what could now move into the gap wakes (matter only moves
@@ -1254,6 +1265,13 @@ impl Sandbox {
             let mat = world.planet.mats.get(m);
             let state = mat.state;
             let far = state != State::Solid && !self.sees(c);
+            // In a sector the swarm works as a count, far from the camera:
+            // it waits, dormant, until someone looks (the sector is eaten
+            // from the top down meanwhile).
+            if far && world.far.asleep_at(c.0, c.1) {
+                self.dormant.add(c);
+                continue;
+            }
             let pf = if far { crate::swarm::clock() } else { 0.0 };
             let settle = if far && self.far_settle { self.settle_far(world, &touched, c, state) } else { None };
             if far {

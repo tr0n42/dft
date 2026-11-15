@@ -539,7 +539,8 @@ fn draw(
         // thousands, placing each one's mark took most of a frame, and none
         // could be told apart this far out anyway.
         for &(x, y, kind, n) in &flocks {
-            if kind != 0 || n == 0 || x < l || x > r || y < b || y > t {
+            // (Kind 3: a far sector, its swarm as one count: marked alike.)
+            if !(kind == 0 || kind == 3) || n == 0 || x < l || x > r || y < b || y > t {
                 continue;
             }
             let p = v.to_screen(x, y);

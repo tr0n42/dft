@@ -44,6 +44,9 @@ mod forester;
 mod abductor;
 #[path = "fauna.rs"]
 mod fauna;
+#[path = "units/far.rs"]
+mod far;
+pub use far::{Far, COVER_PER_M, FAR_BUDGET, FAR_MPP, SECTOR_M};
 pub use fauna::AnimalView;
 #[allow(unused_imports)]
 use {abductor::*, cutter::*, fauna::*, forester::*, heatsink::*, platform::*, sapper::*, tunneler::*};
@@ -472,6 +475,9 @@ pub struct Sim {
     /// kg of cargo burned by drones for their own energy.
     pub fuel_kg: f64,
     pub mother: Mother,
+    /// The swarm far from the camera, a sector of surface at a time (see
+    /// units/far.rs).
+    pub far: Far,
     /// The ground's height in evenly spaced directions, as last checked
     /// (it only goes down), for finding the highest point.
     peaks: Vec<f64>,
@@ -833,6 +839,12 @@ impl Sim {
             }
             sim.energy += sim.eco.production.start_energy;
         }
+        // The mother swarm arrives over the highest ground on the body (the
+        // most to eat, the shortest climb), and the ring of landing points
+        // starts under it.
+        if sim.eco.seed_swarm.highest_start {
+            sim.mother.centre = sim.highest_dir();
+        }
         sim.build_ring();
         sim.mother_work();
         sim.seed_frontier();
@@ -936,6 +948,7 @@ impl Sim {
             haulers_lost: 0,
             fuel_kg: 0.0,
             mother: Mother { centre: std::f64::consts::FRAC_PI_2, half: 0.0, grown_kg: 0.0, radius: 0.0, returned_kg: 0.0 },
+            far: Far::default(),
             peaks: Vec::new(),
             fine_peaks: Vec::new(),
             peaks_cursor: 0,
@@ -1103,10 +1116,41 @@ impl Sim {
 
     // ---- The seed swarm's landing points ----
 
+    /// The direction (radians, as atan2) of the highest ground on the body:
+    /// the highest of evenly spaced samples (as the mother swarm's own
+    /// sweep), then closer looks around it.
+    fn highest_dir(&mut self) -> f64 {
+        self.lower_mother();
+        let n = self.peaks.len();
+        if n == 0 {
+            return std::f64::consts::FRAC_PI_2;
+        }
+        let tau = std::f64::consts::TAU;
+        let at = |k: usize| self.peaks[k].max(if self.fine_peaks[k].is_nan() { 0.0 } else { self.fine_peaks[k] });
+        let best = (0..n).max_by(|&a, &b| at(a).total_cmp(&at(b)).then(b.cmp(&a))).unwrap_or(0);
+        // Closer and closer looks, a sample's width either side.
+        let (mut a, mut h) = (tau * best as f64 / n as f64, self.peaks[best]);
+        let mut w = tau / n as f64;
+        while w * self.world.planet.max_radius > 1.0 {
+            let mut top = (a, h);
+            for j in -16..=16 {
+                let b = a + w * j as f64 / 16.0;
+                let g = self.ground_near(b, self.world.planet.surface_radius(b.cos(), b.sin()));
+                if g > top.1 {
+                    top = (b, g);
+                }
+            }
+            (a, h) = top;
+            w /= 8.0;
+        }
+        let a = a.rem_euclid(tau);
+        if a > std::f64::consts::PI { a - tau } else { a }
+    }
+
     fn build_ring(&mut self) {
         let n = self.eco.seed_swarm.hub_ring;
         let (c, s) = turn(n);
-        let (mut ux, mut uy) = (0.0f64, 1.0f64);
+        let (mut ux, mut uy) = (self.mother.centre.cos(), self.mother.centre.sin());
         for _ in 0..n {
             let r = self.ground_radius(ux, uy, self.world.planet.max_radius + 1.0) + self.eco.seed_swarm.hover_m;
             self.ring.push((ux * r, uy * r));
@@ -1514,7 +1558,9 @@ impl Sim {
         }
         let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
         let r = (fx * fx + fy * fy).sqrt().max(1e-9);
-        let out = r > self.world.planet.surface_radius(fx / r, fy / r) || self.world.planet.in_crater(fx, fy);
+        // (Ground eaten out of sight is open air too, not a cave: levels
+        // only ever come down, so the answer stays right.)
+        let out = r > self.world.planet.surface_radius(fx / r, fy / r) || self.world.planet.in_crater(fx, fy) || self.world.far.cut(x, y);
         if out {
             self.outside.insert((x, y));
         }
@@ -1820,10 +1866,15 @@ impl Sim {
     /// at the same spacing as a whole-body survey.
     /// Returns how many solid (diggable) cells it found.
     fn survey_zone(&mut self, ux: f64, uy: f64) -> usize {
+        self.survey_arc(ux, uy, self.eco.seed_swarm.zone_m)
+    }
+
+    /// `survey_zone` over `half_m` either side.
+    fn survey_arc(&mut self, ux: f64, uy: f64, half_m: f64) -> usize {
         let n = self.survey_n();
         let (c, s) = turn(n);
         let ground = self.world.planet.surface_radius(ux, uy).max(1.0);
-        let half = ((self.eco.seed_swarm.zone_m / ground * n as f64 / (2.0 * std::f64::consts::PI)).ceil() as u32).min(n / 2);
+        let half = ((half_m / ground * n as f64 / (2.0 * std::f64::consts::PI)).ceil() as u32).min(n / 2);
         // Back up half the zone, then sweep across it.
         let (mut vx, mut vy) = (ux, uy);
         for _ in 0..half {
@@ -2588,8 +2639,11 @@ impl Sim {
             self.pool_noted = self.tick + self.ticks(30.0);
             self.director_log_push(format!("pool: sent {sent} of {pooled} resting drones to {flocks} flocks"));
         }
+        // Drones still out of work: to far sectors with room.
+        let near_full = total_room.saturating_sub(sent as u64) == 0;
+        self.far_take_pool(near_full);
         // Room left after this round's sends: what new cutters may fill.
-        self.last_room = total_room.saturating_sub(sent as u64);
+        self.last_room = total_room.saturating_sub(sent as u64) + self.far_room();
         // Many left with nowhere to go: open new ground.
         let left = self.parked.len();
         // (With the economy on, few are ever left over, since no more are
@@ -2662,6 +2716,10 @@ impl Sim {
             let open_face = list.iter().map(|x| x.0).find(|c| [(0, 1), (0, -1), (1, 0), (-1, 0)].iter().any(|d| self.world.material(c.0 + d.0, c.1 + d.1) == VACUUM));
             let Some(c) = open_face else { continue };
             let p = (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
+            // (Not in a far sector: its cutters work there as a count.)
+            if !self.far_near_at(p) {
+                continue;
+            }
             let near = live.iter().map(|q| dist2(p, *q)).fold(f64::INFINITY, f64::min);
             if near >= gap2 {
                 cands.push((near, c));
@@ -2801,7 +2859,10 @@ impl Sim {
             // Grow toward the target by about 1% of it a second (at least 10),
             // spreading the new drones around the orbit like the real swarm.
             let n = target.saturating_sub(self.harvesters_alive()).min((target / 100).max(10));
-            for _ in 0..n {
+            // (Those for far sectors, all at once.)
+            let far = self.far_absorb_many(n);
+            self.harvesters_built += far;
+            for _ in far..n {
                 self.spawn_harvester();
             }
             // Specialists for the benchmarks: one more a second while short.
@@ -3360,6 +3421,7 @@ impl Sim {
     }
 
     fn upkeep(&self) -> f64 {
+        // (Far cutters power themselves too: see units/far.rs.)
         // (Cutters out working power themselves from their cargo; the packet,
         // simulated as a whole, is paid for here.)
         self.packet as f64 * self.eco.harvester.upkeep
@@ -3541,6 +3603,7 @@ impl Sim {
         if self.tick % self.ticks(1.0) == 0 {
             let t4 = clock();
             self.packet_work();
+            self.far_work();
             let qt = clock();
             self.prof3[0] += qt - t4;
             self.tunnel_work();
@@ -3630,6 +3693,7 @@ impl Sim {
         if self.ready_at.is_none() && self.consumed_share() >= self.eco.launch.threshold {
             self.ready_at = Some(self.time());
         }
+        self.far.busy_s += clock() - t0;
         self.tick += 1;
     }
 
@@ -4017,7 +4081,7 @@ pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches f
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 14; // 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
+const SIM_VERSION: u32 = 15; // 15: the far field; 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -4253,6 +4317,7 @@ impl Sim {
         }
         self.write_charges(o);
         self.write_fauna(o);
+        self.write_far(o);
     }
 
     /// Rebuild a game from what `write_save` wrote, on the same body, with
@@ -4500,6 +4565,9 @@ impl Sim {
         }
         if version >= 14 {
             s.read_fauna(r)?;
+        }
+        if version >= 15 {
+            s.read_far(r)?;
         }
         s.sandbox.time_s = s.time();
         s.legs_all_changed();

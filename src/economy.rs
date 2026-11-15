@@ -31,6 +31,14 @@ pub struct SeedSwarm {
     pub mother_kg_per_m: f64,
     #[serde(default = "mother_share")]
     pub mother_growth_share: f64,
+    /// The mother swarm arrives over the highest ground on the body (the
+    /// most to eat, the shortest climb); false: over the top of the map.
+    #[serde(default = "yes")]
+    pub highest_start: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn mother_start() -> f64 {
@@ -184,11 +192,20 @@ pub struct HaulerSpec {
     pub wait_trigger: u32,
     /// The mother swarm's height above the highest ground on the body (metres).
     pub mother_alt_m: f64,
+    /// Long trips: a hauler speeds up the further it has to go, so no trip
+    /// takes much more than this many times a trip over a flat body (up
+    /// from its drop-off point to the mother swarm overhead).
+    #[serde(default = "trip_cap")]
+    pub trip_cap: f64,
+}
+
+fn trip_cap() -> f64 {
+    1.5
 }
 
 impl Default for HaulerSpec {
     fn default() -> Self {
-        HaulerSpec { capacity_kg: 5_000_000.0, max_stay_s: 600.0, speed: 40.0, unload_s: 30.0, life_s: 3600.0, mass_cost: 2000.0, energy_cost: 1000.0, wait_trigger: 6, mother_alt_m: 400.0 }
+        HaulerSpec { capacity_kg: 5_000_000.0, max_stay_s: 600.0, speed: 40.0, unload_s: 30.0, life_s: 3600.0, mass_cost: 2000.0, energy_cost: 1000.0, wait_trigger: 6, mother_alt_m: 400.0, trip_cap: 1.5 }
     }
 }
 

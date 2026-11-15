@@ -721,6 +721,105 @@ pools and raising the sim's priority changed nothing), nor tile locks.
   haulers: the commander only builds one when the haulers on their way up
   won't be free soon, and on a big world that isn't soon.
 
+## Covering a planet: the far field (15 Nov)
+
+Benjamin's goal, restated: not fixed drone counts but a planet covered in
+working drones at 15x (he will cap the game at 10x; the 5x is headroom for
+the units and features still to come), on every body up to 4x Earth, which
+comes late in the meta progression. Accuracy only where the player looks
+("quantum"); far off, anything that looks right when he zooms in. Memory is
+the only real limit he accepts.
+
+**Coverage (what "covered" means).** A flock takes as many cutters as the
+rock face in its reach has room for. On the 35 km living world the swarm
+levels off at about 1.35 million working (350k of them waiting for
+haulers): about 6 cutters per metre of surface (`COVER_PER_M`). So:
+
+| Body | Surface | Covered |
+|---|---|---|
+| Dev planet 5 km | 31 km | 190k |
+| Living world 35 km | 220 km | 1.3M |
+| Ocean world 40 km | 251 km | 1.5M (its land only works) |
+| Earth 6,371 km | 40,030 km | 240M |
+| 4x Earth 25,484 km | 160,121 km | 960M |
+
+Earth when the swarm could cover it: the ground eaten by then is 150 m
+(benchmark growth) to 2.5 km (the real economy's pace, 1,240 t mined per
+cutter alive) off a 6,371 km radius, so the surface is 0.002-0.04% shorter:
+still about 240 million cutters.
+
+**Two gameplay changes (Benjamin's asks):**
+- The mother swarm arrives over the highest ground on the body
+  (`highest_dir`), and the ring of landing points starts there.
+- Haulers speed up on long trips: no trip takes much over 1.5x a flat-body
+  trip (drop-off point straight up to the mother swarm), smoothly
+  (`hauler_trip_s`, `[hauler] trip_cap`). Earth size, 300k cutters, 10
+  game minutes: 13k -> 53k working, 315 kt -> 2,262 kt mined; 4x Earth no
+  longer stalls.
+
+**The far field (src/units/far.rs, world::FarCut).** The surface is cut
+into sectors about 1 km wide (by angle). Near the camera the swarm is what
+it was: flocks of cutters flown one by one. Beyond what the sim can afford
+one by one (a budget that follows the sim's own cost, aiming at 50 ms per
+game second, never trimming what the camera shows), whole sectors go far:
+their flocks fold into a count, haulers go up to unload, and each far
+sector is eaten as a whole, a bite every few seconds (staggered, at most
+~400 bites a second, worked out side by side): its level comes down by what
+that many cutters would cut (hold, dig time of the rock at the top, pace
+0.6), highest ground first, delivered straight to the mother swarm.
+- What is eaten: every cell further from the centre than its sector's
+  level. Untouched ground is never generated for it (the rule is applied
+  when read: `FarCut::cut`); cells already generated are emptied
+  (`World::far_lower`). Not a flat plate: toward a higher neighbour the
+  level ramps up over half a sector (an S-curve), and the face is pitted
+  (bowls 300 m and 80 m wide, bites 15 m and 4 m, up to 24 m deep) so it
+  reads as dug, not chopped. Untouched-cell reads, materialising leaves,
+  the game's ground copy (`Mirror::get`) and the cave check all honour it.
+- Loose matter in far sectors (water, sand) waits until someone looks
+  (dormant): otherwise lakes woken by flocks before they folded drained
+  across the eaten floor cell by cell, 140 ms a game second.
+- A far sector next to a sea stops at the sea's surface (a shore is left).
+- Sectors the camera shows (or within a screen of it, three screens across)
+  closer than 5 m a pixel are always flocks: their cutters come back down,
+  up to 20,000 a game second (`UNFOLD_PER_S`), over the ground as it now
+  stands, into the flocks already there or new ones every 200 m.
+- New cutters past the budget go straight to far sectors with room;
+  sectors open beside the swarm's reach as it fills them.
+- Saved (sim save version 15; older saves load with no far field).
+- No camera (tests, plain benchmarks): nothing goes far; everything is as
+  before. `FAR=1` (unitbench, tools/prof) gives a zoomed-out camera,
+  `FAR=close` a close one, `FARSWITCH=t` comes in close at t,
+  `FARBUDGET=n` fixes the budget, `FARPAN=m` (prof) pans.
+
+**Measured, headless, zoomed out (FAR=1), this PC:**
+
+| Body | Cutters | Speed once spread |
+|---|---|---|
+| Living world 35 km | 1.5M (covered) | 28-43x |
+| Earth 6,371 km | 10M | 14-37x |
+| Earth 6,371 km | 203M working (~covered) | 43x |
+| 4x Earth 25,484 km | 815M working (~covered) | 23-26x |
+
+Before: the living world with 1.35M working ran at about 1x; Earth and 4x
+Earth couldn't be covered at all.
+
+**In the game (living world, 1.5M, 10x, stress-big-swarm.bat):** whole
+planet, mid zoom and close up all hold 10x; zooming in costs 20-40 ms a
+game second while it comes down; a fast pan along the surface still dips to
+about 7x (sectors unfolding in turn, and the water and magma the flocks
+break into, which is real physics in view).
+
+**Camera (Benjamin's suggestion):** the wheel's zoom now glides (at most 4x
+a second, eased) with the point under the cursor held still, and the sim is
+told where the view is heading (a zoom's end, a pan a second on), so the
+sectors there are flocks before they come into sight (`view::Glide`,
+`view::Heading`). Drags stay one to one.
+
+**Open:** the zoomed-out game spends about 50 ms a game second against 15
+headless (not profiled yet); a fast pan; the economy's growth is far too
+slow to cover anything big (living world: 11k cutters after 4 game hours,
+held back by how fast flocks open, with 11 Mt unused in the stockpile).
+
 ## What's next
 
 See ROADMAP.md "Where we are (13 Nov)" for the reassessment and the proposed

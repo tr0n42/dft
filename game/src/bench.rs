@@ -105,7 +105,8 @@ impl Plugin for BenchPlugin {
 /// Where the swarm is busiest: the hub most drones call home.
 fn busiest(run: &crate::Run, body: &dft_sim::planet::Planet) -> (f64, f64) {
     let out = run.0.out.lock();
-    out.hubs.iter().max_by_key(|h| h.3).map(|h| (h.0, h.1)).unwrap_or((0.0, body.max_radius))
+    // (Flocks only: a far sector's mark would unfold as the camera came.)
+    out.hubs.iter().filter(|h| h.2 == 0).max_by_key(|h| h.3).map(|h| (h.0, h.1)).unwrap_or((0.0, body.max_radius))
 }
 
 fn fit_mpp(view: &View, body: &dft_sim::planet::Planet) -> f64 {

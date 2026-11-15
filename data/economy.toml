@@ -24,6 +24,7 @@ zone_m = 500                 # bigger ones: the ground this far either side of e
 mother_start_m = 400         # the mother swarm arrives this long, high over one spot...
 mother_kg_per_m = 20000      # ...and grows a metre longer (both ways around the body) for every 20 t put into it
 mother_growth_share = 0.25   # the share of every delivery it puts into growing
+highest_start = true         # the mother swarm arrives over the highest ground on the body (false: over the top of the map)
 
 [harvester]
 mass_cost = 100
@@ -60,6 +61,7 @@ mass_cost = 2000
 energy_cost = 1000
 wait_trigger = 6             # no more cutters are sent to a flock while this many of its cutters wait for a hauler
 mother_alt_m = 400           # the mother swarm circles this high above the highest ground on the body; haulers unload at its nearest point
+trip_cap = 1.5               # long trips: haulers speed up with distance, so no trip takes much over 1.5x a flat-planet trip (drop-off point to the mother overhead)
 
 [fleet]                      # the fleet commander: air traffic control for haulers (units/fleet.rs)
 dock_hover_m = 60            # drop-off points hang this high over the ground, in clear air over the ground traffic...

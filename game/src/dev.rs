@@ -106,7 +106,7 @@ fn panel_inner(mut contexts: EguiContexts, mut dev: ResMut<Dev>, run: Res<Run>, 
         ui.monospace(format!("cost    {:.1} ms computing per game second", stats.cost_ms));
         let sp = stats.split;
         ui.monospace(format!("  spent drones {:.0}% · sand {:.0}% · rocks {:.0}% · other {:.0}%", sp[0] * 100.0, sp[1] * 100.0, sp[2] * 100.0, sp[3] * 100.0));
-        ui.monospace(format!("drones  {}  + packet {}   hubs {}   lost {}", stats.drones, stats.packet, stats.hubs, stats.deaths));
+        ui.monospace(format!("drones  {}  + far {}   hubs {}   lost {}", stats.drones, stats.packet, stats.hubs, stats.deaths));
         ui.monospace(format!("haulers {}  ({} away)   cutters waiting {}   starved {}", stats.haulers, stats.haulers_away, stats.waiting, stats.starved));
         ui.monospace(format!("resting {} out of work, in the mother swarm (not drawn)", stats.resting));
         ui.monospace(format!("flocks  {}   splits {}  merges {}  helpers sent {}   booms {}", stats.flocks, stats.splits, stats.merges, stats.helpers, stats.explosions));

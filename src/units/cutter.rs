@@ -80,6 +80,11 @@ impl Sim {
             self.harvesters_built += 1;
             return;
         }
+        // No flock near the camera to drop to: it joins a far sector.
+        if self.far_absorb_new() {
+            self.harvesters_built += 1;
+            return;
+        }
         let id = self.drones.len() as u32;
         let home = self.orbit_hub;
         self.hub_load[home] += 1;
@@ -126,7 +131,7 @@ impl Sim {
     }
 
     pub fn harvesters_alive(&self) -> u64 {
-        self.alive_count as u64 + self.packet
+        self.alive_count as u64 + self.packet + self.far.total
     }
 
     pub(super) fn cutter_speed(&self) -> f64 {

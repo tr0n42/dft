@@ -156,6 +156,23 @@ impl Sim {
         route_len(a, b, route_cruise(a, b, self.world.planet.max_radius))
     }
 
+    /// Seconds a hauler takes to fly a way of `way` m (as `hauler_way`
+    /// measures it). Up to a flat body's trip (its drop-off point straight
+    /// up to the mother swarm) at its own speed; further, it speeds up the
+    /// longer the way, so no trip takes much over trip_cap times that.
+    pub(super) fn hauler_trip_s(&self, way: f64) -> f64 {
+        let spec = &self.eco.hauler;
+        let v = spec.speed.max(1.0);
+        let t = way.max(0.0) / v;
+        let t0 = (spec.mother_alt_m - self.eco.fleet.dock_hover_m).max(50.0) / v;
+        let extra = spec.trip_cap - 1.0;
+        if extra <= 0.0 || t <= t0 {
+            return t;
+        }
+        // Smooth: as fast as before at first, levelling off at the cap.
+        t0 * (1.0 + extra * (1.0 - (-(t - t0) / (t0 * extra)).exp()))
+    }
+
     /// Pay for a hauler (economy on): its energy, and its parts from the
     /// parts stock, any it is short of made at once from the stockpile (or
     /// its mass, with no recipe). Returns whether it could.

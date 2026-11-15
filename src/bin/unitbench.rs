@@ -154,6 +154,25 @@ fn main() {
         if std::env::var("NOFOCUS").is_err() {
             s.set_focus(Some(None));
         }
+        // FAR=1: a camera zoomed out over the whole body (sectors beyond what
+        // can be flown one by one go far, see units/far.rs); FAR=close: one
+        // close up over where the swarm lands.
+        match std::env::var("FAR").as_deref() {
+            Ok("close") => {
+                let (x, y) = s.mother_pos_now();
+                let (x, y) = (x as i64, y as i64);
+                s.set_view(Some(([x - 960, x + 960, y - 540, y + 540], 1.0)));
+            }
+            Ok(_) => {
+                let r = s.world.planet.max_radius as i64 + 1000;
+                s.set_view(Some(([-r, r, -r, r], 2.0 * r as f64 / 1000.0)));
+            }
+            Err(_) => {}
+        }
+        if let Some(b) = std::env::var("FARBUDGET").ok().and_then(|v| v.parse::<f64>().ok()) {
+            s.far.budget = b.max(1e-9);
+            s.far.fixed = true;
+        }
         let names: Vec<String> = team.iter().map(|(u, n)| format!("{n} {}", u.name())).collect();
         println!("\nstage {stage}: {} ({})", STAGES[stage - 1], if names.is_empty() { "no specialists".into() } else { names.join(", ") });
         let t0 = Instant::now();
@@ -165,6 +184,17 @@ fn main() {
             let w = Instant::now();
             let from = t;
             t = (t + every).min(until);
+            // FARSWITCH=t: at game time t the camera comes in close (2 m a
+            // pixel) over where the swarm landed, from zoomed out.
+            if let Some(at) = std::env::var("FARSWITCH").ok().and_then(|v| v.parse::<f64>().ok()) {
+                if from >= at && s.far.view.is_some_and(|v| v.1 > 2.0) {
+                    let (x, y) = s.mother_pos_now();
+                    let (x, y) = (x as i64, y as i64);
+                    s.set_view(Some(([x - 1600, x + 1600, y - 900, y + 900], 2.0)));
+                    s.set_focus(Some(Some([x - 3200, x + 3200, y - 1800, y + 1800])));
+                    println!("  (camera in close at {from:.0} s)");
+                }
+            }
             s.run(t);
             let c = costs(&mut s, t - from);
             for (k, v) in c.iter().enumerate() {
@@ -179,7 +209,7 @@ fn main() {
             println!(
                 "  t {t:5.0}: {:6.1} s per game min · {:6} working ({} waiting) · {:.0} kt mined · ms per game s: {}",
                 w.elapsed().as_secs_f64() / ((t - from) / 60.0),
-                waiting + out + home,
+                waiting + out + home + s.far_cutters() as usize,
                 waiting,
                 s.world.ledger.mined_kg() / 1e6,
                 top.join(", ")
@@ -192,7 +222,22 @@ fn main() {
         for l in s.fleet_lines() {
             println!("  {l}");
         }
+        {
+            let f = &s.far;
+            println!("  far field: {} cutters in {} far sectors of {} ({} reached) · eaten {:.0} kt · folded {} flocks, unfolded {} sectors ({} cutters) · {:.1} s · budget {:.0} one by one, sim {:.0} ms per game s lately", f.total, f.is_far.iter().filter(|x| **x).count(), f.cutters.len(), f.open.iter().filter(|x| **x).count(), f.eaten_kg / 1e6, f.folded, f.unfolded, f.cutters_unfolded, f.prof, f.budget, f.cost_ms);
+        }
         let st = &s.sandbox.stats;
+        if std::env::var("FAR").is_ok() {
+            let n = s.far.is_far.len();
+            let row: String = (0..64).map(|i| {
+                let k = (i * n / 64).min(n.saturating_sub(1));
+                let far = s.far.is_far.get(k).copied().unwrap_or(false);
+                let wet = s.far.wet.get(k).copied().unwrap_or(false);
+                if wet { 'w' } else if far { 'f' } else if s.far.open.get(k).copied().unwrap_or(false) { 'N' } else { '.' }
+            }).collect();
+            println!("  slices (f far, N near, w sea): {row}");
+            println!("  out-of-sight moves by slice: {:?}", st.far_by_angle);
+        }
         println!("  sandbox: stepped {} · moves {} · out of sight: tried {:?} (powder, liquid, gas), stuck {:?}, moved {}", st.cells_stepped, st.moves, st.far_tries, st.far_stuck, st.far_moves);
         let mut bm: Vec<(u64, String)> = st.far_by_mat.iter().enumerate().filter(|x| *x.1 > 0).map(|(m, &n)| (n, s.world.planet.mats.get(m as u16).name.clone())).collect();
         bm.sort_unstable_by(|a, b| b.0.cmp(&a.0));

@@ -277,5 +277,5 @@ pub fn read_world(r: &mut R, planet: std::sync::Arc<Planet>) -> Result<World, St
         nodes.insert(k, Entry { state, totals });
     }
     let tree = crate::totals::Tree::for_planet(&planet);
-    Ok(World { planet, tree, nodes, ledger, track: None, life_watch: Vec::new(), life_notes: Default::default(), looks: Default::default(), gen_cache: Default::default() })
+    Ok(World { planet, tree, nodes, ledger, track: None, life_watch: Vec::new(), life_notes: Default::default(), looks: Default::default(), gen_cache: Default::default(), far: Default::default() })
 }

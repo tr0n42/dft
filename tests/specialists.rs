@@ -136,6 +136,8 @@ fn conventional_charges_without_uranium() {
     let mut e = eco();
     e.fuser.fuse.clear();
     e.production.start_refined.remove("U");
+    // (Where the swarm landed when this was written: over the top of the map.)
+    e.seed_swarm.highest_start = false;
     let mut s = Sim::new(World::new(body("lava-world", 3.0)), e);
     watch(&mut s, 2400);
     let (n, kg, doped, _) = s.charge_totals();
