@@ -137,7 +137,7 @@ pub struct FarCut {
 
 /// How far a far sector's eaten face rises toward a higher neighbour (m),
 /// and how deep its pits go below its level.
-pub const FAR_RAMP_M: f64 = 48.0;
+pub const FAR_RAMP_M: f64 = 400.0;
 pub const FAR_PIT_M: f64 = 24.0;
 
 /// Smooth noise in 0..1 along a line (value noise, eased).
@@ -164,6 +164,15 @@ impl FarCut {
         let t = y.atan2(x) / std::f64::consts::TAU;
         let t = if t < 0.0 { t + 1.0 } else { t };
         ((t * n as f64) as usize).min(n - 1)
+    }
+
+    /// The level of the sector holding (x, y) (INFINITY: not cut).
+    #[inline]
+    pub fn level_at(&self, x: f64, y: f64) -> f64 {
+        if !self.any {
+            return f64::INFINITY;
+        }
+        self.levels[self.sector_of(x, y)] as f64
     }
 
     /// Whether cell (x, y) lies in a sector far from the camera.
@@ -198,8 +207,10 @@ impl FarCut {
             return false;
         }
         let r2 = fx * fx + fy * fy;
-        // (Quick answers well clear of the face.)
-        let top = own + FAR_RAMP_M;
+        // (Quick answers well clear of the face: above where a ramp up to
+        // either neighbour could reach.)
+        let (l, r) = (self.levels[(k + n - 1) % n] as f64, self.levels[(k + 1) % n] as f64);
+        let top = own.max(l.max(r).min(own + FAR_RAMP_M));
         if r2 > top * top {
             return true;
         }
@@ -838,7 +849,9 @@ impl World {
         let tau = std::f64::consts::TAU;
         let (a0, a1) = (tau * (k as f64 - 0.5) / n as f64, tau * (k as f64 + 1.5) / n as f64);
         let to = to - FAR_PIT_M;
-        let from = from + FAR_RAMP_M;
+        // (Up to where its neighbours' ramps reach, at most.)
+        let hi = |j: usize| self.far.levels[j] as f64;
+        let from = from.max(hi((k + n - 1) % n).min(from + FAR_RAMP_M)).max(hi((k + 1) % n).min(from + FAR_RAMP_M)) + 1.0;
         let (mut bx0, mut bx1, mut by0, mut by1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
         for a in [a0, a1, 0.5 * (a0 + a1)] {
             for r in [to - 1.0, from + 1.0] {
@@ -900,10 +913,8 @@ impl World {
                 self.collapse_from(leaf);
             }
         }
-        // Whatever a renderer drew of the untouched ground there is stale.
-        if let Some(t) = &mut self.track {
-            t.rects.push([x0, x1 + 1, y0, y1 + 1]);
-        }
+        // (A renderer learns of untouched ground eaten from the levels
+        // themselves: see `version`. Cells emptied above were marked.)
         eaten
     }
 

@@ -361,6 +361,9 @@ fn run(shared: &Shared) {
     let mut stats = Stats::default();
     let mut perf = ThreadPerf::default();
     let mut heights_seen = 0u64;
+    // Far sectors' levels as last redrawn, and when (see below).
+    let mut far_drawn: Vec<f32> = Vec::new();
+    let mut far_drawn_at = Instant::now();
     let mut fields_seen = u64::MAX;
     let mut rest_counted = Instant::now() - Duration::from_secs(5);
     // Leaves the screen's copy (see `Mirror`) doesn't have up to date yet:
@@ -455,7 +458,9 @@ fn run(shared: &Shared) {
                 let tp = Instant::now();
                 let changes = s.take_leg_changes();
                 use dft_sim::swarm::HubKind;
-                let mut hubs: Vec<(f64, f64, u8, u32)> = s.hubs.iter().zip(s.hub_loads()).map(|(h, &n)| (h.x, h.y, match h.kind { HubKind::Seed => 0, HubKind::Refiner => 1, HubKind::Shaft => 2 }, n)).collect();
+                // (Landing points with cutters, and the other hubs: flocks
+                // gone long since are left out.)
+                let mut hubs: Vec<(f64, f64, u8, u32)> = s.hubs.iter().zip(s.hub_loads()).map(|(h, &n)| (h.x, h.y, match h.kind { HubKind::Seed => 0, HubKind::Refiner => 1, HubKind::Shaft => 2 }, n)).filter(|h| h.2 != 0 || h.3 > 0).collect();
                 // Far sectors (the swarm far from the camera, as a count):
                 // one mark each, over its ground.
                 for (a, lvl, n) in s.far_sectors() {
@@ -699,6 +704,52 @@ fn run(shared: &Shared) {
                 out.blocks.extend(mirrored);
                 out.fine.extend(fine);
                 out.rects.append(&mut track.rects);
+                // Ground eaten far off (whole sectors, see dft_sim::world::
+                // FarCut): every 2 s at most, one area to redraw, round the
+                // sectors whose level came down, as far as the view goes.
+                if far_drawn_at.elapsed() >= Duration::from_secs(2) && far_drawn != s.world.far.levels {
+                    far_drawn_at = Instant::now();
+                    let lv = &s.world.far.levels;
+                    let n = lv.len();
+                    let tau = std::f64::consts::TAU;
+                    let (mut bx0, mut bx1, mut by0, mut by1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+                    let vr = c.view.map(|(r, _)| (r[0] as f64, r[1] as f64, r[2] as f64, r[3] as f64));
+                    for k in 0..n {
+                        let was = far_drawn.get(k).copied().unwrap_or(f32::INFINITY);
+                        if lv[k] == was {
+                            continue;
+                        }
+                        let top = if was.is_finite() { was as f64 } else { s.world.planet.max_radius };
+                        let (r0, r1) = (lv[k] as f64 - dft_sim::world::FAR_PIT_M, top + dft_sim::world::FAR_RAMP_M);
+                        let (mut sx0, mut sx1, mut sy0, mut sy1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+                        for a in [tau * (k as f64 - 0.5) / n as f64, tau * (k as f64 + 0.5) / n as f64, tau * (k as f64 + 1.5) / n as f64] {
+                            for r in [r0, r1] {
+                                let (x, y) = (a.cos() * r, a.sin() * r);
+                                sx0 = sx0.min(x);
+                                sx1 = sx1.max(x);
+                                sy0 = sy0.min(y);
+                                sy1 = sy1.max(y);
+                            }
+                        }
+                        // (Only sectors the view shows.)
+                        if let Some((vx0, vx1, vy0, vy1)) = vr {
+                            if sx1 < vx0 || sx0 > vx1 || sy1 < vy0 || sy0 > vy1 {
+                                continue;
+                            }
+                        }
+                        bx0 = bx0.min(sx0);
+                        bx1 = bx1.max(sx1);
+                        by0 = by0.min(sy0);
+                        by1 = by1.max(sy1);
+                    }
+                    far_drawn = lv.clone();
+                    if let Some(([vx0, vx1, vy0, vy1], _)) = c.view {
+                        let (x0, x1, y0, y1) = (bx0.max(vx0 as f64), bx1.min(vx1 as f64), by0.max(vy0 as f64), by1.min(vy1 as f64));
+                        if x0 < x1 && y0 < y1 {
+                            out.rects.push([x0.floor() as i64, x1.ceil() as i64 + 1, y0.floor() as i64, y1.ceil() as i64 + 1]);
+                        }
+                    }
+                }
                 let pt = tp.elapsed().as_secs_f64();
                 perf.publishes += 1;
                 perf.publish_s += pt;

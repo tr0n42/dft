@@ -203,7 +203,7 @@ fn main() {
         busy.push((n, total, b.len(), b));
     }
     busy.sort_by(|a, b| b.2.cmp(&a.2));
-    for (n, total, nb, st) in busy.iter().take(6) {
+    for (n, total, nb, st) in busy.iter().take(12) {
         if *nb == 0 {
             continue;
         }

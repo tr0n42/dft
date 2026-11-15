@@ -1823,7 +1823,10 @@ impl Sim {
     /// Returns whether the cell found is solid ground (not liquid).
     fn survey_dir_fast(&mut self, ux: f64, uy: f64) -> bool {
         let top = self.world.planet.max_radius + 1.0;
-        let skip = ((top - (self.world.planet.ground_hint(ux, uy) + 3.0)) / 0.5).floor().max(0.0);
+        // (Over ground eaten out of sight: from just above its level, not
+        // the ground as it was, which may be far above now.)
+        let hint = self.world.planet.ground_hint(ux, uy).min(self.world.far.level_at(ux, uy) + crate::world::FAR_RAMP_M);
+        let skip = ((top - (hint + 3.0)) / 0.5).floor().max(0.0);
         let mut r = top - skip * 0.5;
         let solid = |w: &World, r: f64| w.material((ux * r).floor() as i64, (uy * r).floor() as i64) != VACUUM;
         while r > 4.0 && !solid(&self.world, r) && !solid(&self.world, r - 4.0) {
@@ -2461,6 +2464,12 @@ impl Sim {
         for (h, f, cap) in built {
             self.sweeps += 1;
             self.capacity[h] = cap;
+            // (A flock's first field: whatever its cutters found without
+            // one, they may look again.)
+            if self.fields[h].is_none() && self.hub_dry.get(h).copied().unwrap_or(false) {
+                self.hub_dry[h] = false;
+                self.hub_gen += 1;
+            }
             self.fields[h] = Some(f);
         }
         self.fields_version += 1;
@@ -2507,6 +2516,11 @@ impl Sim {
             let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
             let r = (fx * fx + fy * fy).sqrt();
             if !rd.touched(x, y) {
+                // Ground eaten out of sight is open air (flown low over, as
+                // the ground anywhere).
+                if self.world.far.cut(x, y) {
+                    return r < self.world.far.level_at(fx, fy) + FIELD_SKY_M;
+                }
                 let g = ground_at(fx, fy);
                 if r > g + 2.0 {
                     // Drones fly low: the open sky well above the ground isn't

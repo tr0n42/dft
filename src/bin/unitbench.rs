@@ -193,6 +193,22 @@ fn main() {
                     s.set_view(Some(([x - 1600, x + 1600, y - 900, y + 900], 2.0)));
                     s.set_focus(Some(Some([x - 3200, x + 3200, y - 1800, y + 1800])));
                     println!("  (camera in close at {from:.0} s)");
+                    let k = s.world.far.sector_of(x as f64, y as f64);
+                    for i in 1..=20 {
+                        s.run(from + i as f64);
+                        let live: Vec<(usize, u32)> = (0..s.hubs.len()).filter(|&h| s.world.far.sector_of(s.hubs[h].x, s.hubs[h].y) == k && s.hub_loads()[h] > 0).map(|h| (h, s.hub_loads()[h])).collect();
+                        let pz: Vec<u64> = s.passed.iter().map(|a| a.swap(0, std::sync::atomic::Ordering::Relaxed)).collect();
+                        println!("    +{i} s: sector {k} far cutters {}, flocks with cutters {:?}, pool {}, flown {}, phases {:?}; searches {} empty {}; passed over (far, taken, unreachable, not worth, weighed) {:?}; frontier {}", s.far.cutters[k], &live[..live.len().min(6)], s.parked_count(), s.drone_count(), s.phase_counts(), s.counts[1], s.counts[2], pz, s.frontier_len());
+                    }
+                    let r = [x - 1600, x + 1600, y - 900, y + 900];
+                    let near: Vec<(f64, f64, u32)> = s.hubs.iter().zip(s.hub_loads()).filter(|(h, n)| **n > 0 && h.x >= r[0] as f64 && h.x <= r[1] as f64 && h.y >= r[2] as f64 && h.y <= r[3] as f64).map(|(h, n)| (h.x, h.y, *n)).collect();
+                    {
+                        let k = s.world.far.sector_of(x as f64, y as f64);
+                        let lv = s.world.far.levels[k];
+                        let in_k: Vec<(f64, f64, u32)> = s.hubs.iter().zip(s.hub_loads()).filter(|(h, _)| s.world.far.sector_of(h.x, h.y) == k).map(|(h, n)| (h.x, h.y, *n)).collect();
+                        println!("  sector {k}: level {lv} (camera at r {:.0}), far {}, must {}, far cutters {}, open {}, wet {}; flocks there {:?}", ((x * x + y * y) as f64).sqrt(), s.far.is_far[k], s.far.must[k], s.far.cutters[k], s.far.open[k], s.far.wet[k], &in_k[..in_k.len().min(8)]);
+                    }
+                    println!("  20 s later: {} flocks with cutters on screen, {} cutters; flown {} in all; mother at ({x}, {y}): {:?}", near.len(), near.iter().map(|f| f.2).sum::<u32>(), s.drone_count(), &near[..near.len().min(6)]);
                 }
             }
             s.run(t);

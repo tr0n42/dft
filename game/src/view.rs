@@ -202,15 +202,26 @@ fn controls(
     // Where the view is heading: the zoom's end, and a second on at the
     // speed it has been moving.
     let (x, y) = (view.x, view.y);
+    let screen = view.w.max(view.h) * view.mpp;
     if dt > 0.0 {
-        if let Some((lx, ly, _)) = glide.last {
-            let k = 1.0 - (-dt / 0.25f64).exp();
-            glide.vel.0 += ((x - lx) / dt - glide.vel.0) * k;
-            glide.vel.1 += ((y - ly) / dt - glide.vel.1) * k;
+        if let Some((lx, ly, lm)) = glide.last {
+            // (A jump, a screen or more in one frame or a big change of
+            // zoom, is a cut to somewhere else, not a movement.)
+            if (x - lx).hypot(y - ly) > screen || (view.mpp / lm.max(1e-9)).ln().abs() > 0.7 {
+                glide.vel = (0.0, 0.0);
+            } else {
+                let k = 1.0 - (-dt / 0.25f64).exp();
+                glide.vel.0 += ((x - lx) / dt - glide.vel.0) * k;
+                glide.vel.1 += ((y - ly) / dt - glide.vel.1) * k;
+            }
         }
     }
     glide.last = Some((x, y, view.mpp));
-    let (mut hx, mut hy, mut hm) = (x + glide.vel.0, y + glide.vel.1, view.mpp);
+    // (A second on, but never more than a screen ahead.)
+    let (vx, vy) = glide.vel;
+    let sp = vx.hypot(vy);
+    let f = if sp > screen { screen / sp } else { 1.0 };
+    let (mut hx, mut hy, mut hm) = (x + vx * f, y + vy * f, view.mpp);
     if let Some((want, at, off)) = glide.to {
         hm = want;
         hx = at.0 - off.0 * want;

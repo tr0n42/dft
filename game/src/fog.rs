@@ -52,6 +52,8 @@ pub struct Fog {
     seen: Vec<HashMap<(i64, i64), f32>>,
     /// Where the round-robin over the swarm has got to.
     cursor: usize,
+    /// Far sectors' marks charted so far this round (a share a frame).
+    far_cursor: usize,
     /// The body the charts are of (a new body starts over).
     body: usize,
     /// The ground's radius by direction, for telling ground from sky.
@@ -103,7 +105,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, o: Res<crate
     img.sampler = ImageSampler::nearest();
     let image = images.add(img);
     let sprite = commands.spawn((Sprite { image: image.clone(), custom_size: Some(Vec2::ONE), ..default() }, Transform::from_xyz(0.0, 0.0, 8.0))).id();
-    commands.insert_resource(Fog { on: !o.no_fog, seen: vec![HashMap::new(); GRIDS], cursor: 0, body: 0, surface: Vec::new(), base: Vec::new(), heights_seen: 0, image, sprite, restore: None });
+    commands.insert_resource(Fog { on: !o.no_fog, seen: vec![HashMap::new(); GRIDS], cursor: 0, far_cursor: 0, body: 0, surface: Vec::new(), base: Vec::new(), heights_seen: 0, image, sprite, restore: None });
 }
 
 fn toggle(keys: Res<ButtonInput<KeyCode>>, mut fog: ResMut<Fog>) {
@@ -160,7 +162,18 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
     }
     let (t, hubs) = {
         let out = run.0.out.lock();
-        (out.stats.time, out.hubs.iter().map(|h| (h.0, h.1)).collect::<Vec<_>>())
+        // Flocks every frame; far sectors' marks (a swarm worked as a
+        // count, tens of thousands on a big body) a few hundred a frame.
+        // (Flocks with cutters: a flock that's gone charts nothing.)
+        let mut v: Vec<(f64, f64)> = out.hubs.iter().filter(|h| h.2 != 3 && h.3 > 0).map(|h| (h.0, h.1)).collect();
+        let far: Vec<(f64, f64)> = out.hubs.iter().filter(|h| h.2 == 3).map(|h| (h.0, h.1)).collect();
+        if !far.is_empty() {
+            let start = fog.far_cursor % far.len();
+            let end = (start + 256).min(far.len());
+            v.extend_from_slice(&far[start..end]);
+            fog.far_cursor = if end >= far.len() { 0 } else { end };
+        }
+        (out.stats.time, v)
     };
     let cell = |x: f64, y: f64| ((x / CELL).floor() as i64, (y / CELL).floor() as i64);
     // This frame's share of the swarm, on all cores: the cells drones are in.

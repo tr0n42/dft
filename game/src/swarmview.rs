@@ -333,6 +333,10 @@ fn draw(layers: Res<Layers>, mut meshes: ResMut<Assets<Mesh>>, view: Res<crate::
             let s1 = (a1 / seg_a).ceil() as i64 + 8;
             let life = 7.0;
             let dot = ((1.1 / v.mpp) as f32).max(1.2);
+            // (Zoomed out over a body's worth of swarm, the currents are
+            // far under a pixel apart and can't be told from the specks:
+            // left out rather than work out millions of them a frame.)
+            let s1 = if s1 - s0 > 50_000 { s0 - 1 } else { s1 };
             for sk in s0..=s1 {
                 for j in 0..3u64 {
                     let h = dft_sim::noise::hash(sk as u64, j as i64, 5, 0xC0_44);

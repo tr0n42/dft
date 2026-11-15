@@ -29,7 +29,7 @@ pub const FAR_MPP: f64 = 5.0;
 /// far, at first: the budget then follows what the simulation can afford
 /// (FAR_TARGET_MS), between FAR_BUDGET_MIN and FAR_BUDGET_MAX.
 pub const FAR_BUDGET: f64 = 100_000.0;
-const FAR_BUDGET_MIN: f64 = 5_000.0;
+const FAR_BUDGET_MIN: f64 = 0.0;
 const FAR_BUDGET_MAX: f64 = 400_000.0;
 /// Real ms the simulation may take per second of game time: 15x with room
 /// for drawing and everything else the game does (1000 / 15 = 67).
@@ -50,6 +50,11 @@ pub const COVER_PER_M: f64 = 6.0;
 /// A far cutter's pace against one flown cell by cell with the same cut
 /// time: flights, waits for haulers, rests (measured, see HANDOFF).
 const PACE: f64 = 0.6;
+/// New cutters a second that drop to flocks on screen past the budget.
+const NEAR_NEW_PER_S: u64 = 2_000;
+/// Most a far sector's level goes under a neighbour's (m): its ramp spans
+/// it (see world::FAR_RAMP_M).
+const FAR_STEP_M: f64 = 300.0;
 /// Cutters a second at most come down from far sectors to work as flocks.
 const UNFOLD_PER_S: u64 = 20_000;
 /// New far sectors opened per second at most (the economy's swarm; a fixed
@@ -97,6 +102,12 @@ pub struct Far {
     pub flown: f64,
     /// Whether any sector is far now.
     pub any_far: bool,
+    /// Cutters the sectors the camera shows keep at work (their cover), and
+    /// those flown one by one in them now.
+    must_cover: u64,
+    must_flown: u64,
+    /// Pool drones passed over this round (see `far_pop_parked`).
+    kept: Vec<u32>,
     /// One past the tick in which no far sector had room.
     no_room_tick: u64,
     /// The sector new cutters went to last, and sectors opened this second.
@@ -193,22 +204,45 @@ impl Sim {
         if mpp >= FAR_MPP {
             return false;
         }
+        // The view a screen wider each way, as angles round the body and
+        // distances from its centre (a view is small beside the body).
         let (w, h) = ((r[1] - r[0]) as f64, (r[3] - r[2]) as f64);
         let (x0, x1, y0, y1) = (r[0] as f64 - w, r[1] as f64 + w, r[2] as f64 - h, r[3] as f64 + h);
-        let (a0, a1) = self.far_span(k);
-        let lvl = (self.world.far.levels[k] as f64).min(self.world.planet.max_radius);
-        let (rin, rout) = ((lvl - 1500.0).max(0.0), lvl + 600.0);
-        let (mut bx0, mut bx1, mut by0, mut by1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
-        for a in [a0, 0.5 * (a0 + a1), a1] {
-            for rr in [rin, rout] {
-                let (x, y) = (a.cos() * rr, a.sin() * rr);
-                bx0 = bx0.min(x);
-                bx1 = bx1.max(x);
-                by0 = by0.min(y);
-                by1 = by1.max(y);
+        let (cx, cy) = (0.5 * (x0 + x1), 0.5 * (y0 + y1));
+        let ca = cy.atan2(cx);
+        let (mut amin, mut amax, mut rmin, mut rmax) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, 0.0f64);
+        for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+            let mut d = y.atan2(x) - ca;
+            while d > std::f64::consts::PI {
+                d -= std::f64::consts::TAU;
             }
+            while d < -std::f64::consts::PI {
+                d += std::f64::consts::TAU;
+            }
+            amin = amin.min(d);
+            amax = amax.max(d);
+            let rr = (x * x + y * y).sqrt();
+            rmin = rmin.min(rr);
+            rmax = rmax.max(rr);
         }
-        bx1 >= x0 && bx0 <= x1 && by1 >= y0 && by0 <= y1
+        // (The body's centre in view: everything is.)
+        if x0 <= 0.0 && x1 >= 0.0 && y0 <= 0.0 && y1 >= 0.0 {
+            return true;
+        }
+        let rmin = rmin.min((cx * cx + cy * cy).sqrt());
+        // The sector: its angles, and from its floor up to the highest ground.
+        let (a0, a1) = self.far_span(k);
+        let mut d0 = a0 - ca;
+        while d0 > std::f64::consts::PI {
+            d0 -= std::f64::consts::TAU;
+        }
+        while d0 < -std::f64::consts::PI {
+            d0 += std::f64::consts::TAU;
+        }
+        let d1 = d0 + (a1 - a0);
+        let lvl = (self.world.far.levels[k] as f64).min(self.world.planet.max_radius);
+        let (rin, rout) = ((lvl - 1500.0).max(0.0), self.world.planet.max_radius + 600.0);
+        d1 >= amin && d0 <= amax && rout >= rmin && rin <= rmax
     }
 
     /// Once a second, with a camera: which sectors are far (the nearest to
@@ -233,9 +267,11 @@ impl Sim {
             }
             if !self.far.fixed && self.tick % self.ticks(5.0) == 0 {
                 if self.far.cost_ms > FAR_TARGET_MS {
-                    self.far.budget = (self.far.budget * 0.85).max(FAR_BUDGET_MIN);
+                    // (Down to nothing but what the camera shows, if that's
+                    // what it takes.)
+                    self.far.budget = if self.far.budget < 2_000.0 { FAR_BUDGET_MIN } else { (self.far.budget * 0.85).max(FAR_BUDGET_MIN) };
                 } else if self.far.cost_ms < 0.6 * FAR_TARGET_MS && self.far.flown >= 0.8 * self.far.budget {
-                    self.far.budget = (self.far.budget * 1.05).min(FAR_BUDGET_MAX);
+                    self.far.budget = (self.far.budget * 1.05).max(self.far.budget + 2_000.0).min(FAR_BUDGET_MAX);
                 }
             }
         }
@@ -280,6 +316,8 @@ impl Sim {
             }
         }
         rest.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        self.far.must_cover = (0..n).filter(|&k| self.far.must[k]).map(|k| self.far_cover(k)).sum();
+        self.far.must_flown = (0..n).filter(|&k| self.far.must[k]).map(|k| load[k] as u64).sum();
         let budget = self.far.budget;
         let mut full = false;
         for (_, k) in rest {
@@ -336,6 +374,9 @@ impl Sim {
             rate -= got.min(rate);
             allow -= got.min(allow);
         }
+        self.far.any_far = self.far.is_far.iter().any(|f| *f);
+        self.far.total = self.far.cutters.iter().sum();
+        self.far_spread();
         // Loose matter in far sectors waits until someone looks.
         if self.world.far.asleep != self.far.is_far {
             self.world.far.asleep = self.far.is_far.clone();
@@ -434,12 +475,33 @@ impl Sim {
             return 0;
         }
         // Its flocks already there first; else new ones over its ground.
-        let mut homes: Vec<usize> = (0..self.hubs.len()).filter(|&h| !self.flock[h].dead && self.hubs[h].kind == HubKind::Seed && self.far_sector_at(self.site_pos(h)) == k).collect();
+        // (Only those still over the ground as it now stands: a landing
+        // point left hanging high over ground eaten since is closed.)
+        let mut homes: Vec<usize> = Vec::new();
+        for h in 0..self.hubs.len() {
+            if self.flock[h].dead || self.hubs[h].kind != HubKind::Seed || self.far_sector_at(self.site_pos(h)) != k {
+                continue;
+            }
+            let p = self.site_pos(h);
+            let r = (p.0 * p.0 + p.1 * p.1).sqrt();
+            let a = p.1.atan2(p.0);
+            if r - self.ground_down(a, r) > 0.5 * self.eco.harvester.search_m {
+                self.flock[h].dead = true;
+                self.hub_gen += 1;
+                continue;
+            }
+            homes.push(h);
+        }
         if homes.is_empty() {
             let (a0, a1) = self.far_span(k);
             let lvl = self.world.far.levels[k] as f64;
             let r = lvl.min(self.world.planet.max_radius);
-            let spots = (((a1 - a0) * r / NEW_FLOCK_GAP_M).round() as usize).max(1);
+            // A flock for every split-size crew it brings (no closer than
+            // they'd merge), along its ground.
+            let width = (a1 - a0) * r;
+            let crews = (self.far.cutters[k] as f64 / self.eco.flock.split_cutters.max(1) as f64).ceil();
+            let gap = (width / crews.max(1.0)).clamp(self.eco.flock.merge_m * 1.25, NEW_FLOCK_GAP_M);
+            let spots = ((width / gap).round() as usize).max(1);
             for j in 0..spots {
                 let a = a0 + (a1 - a0) * (j as f64 + 0.5) / spots as f64;
                 let (ux, uy) = (a.cos(), a.sin());
@@ -514,7 +576,11 @@ impl Sim {
         });
         self.alive_count += 1;
         self.leg_changed(id);
-        self.schedule(id, self.tick + 1 + (i % 40));
+        // (Setting out once its flock has its flow field, two seconds on,
+        // and spread over the next twenty, as a flock's cutters are over
+        // their round trips.)
+        let spread = self.ticks(20.0);
+        self.schedule(id, self.tick + self.ticks(2.0) + (i.wrapping_mul(7919) % spread));
     }
 
     /// kg delivered to the mother swarm from out of sight (worth `cr`):
@@ -554,7 +620,9 @@ impl Sim {
     /// `dt` seconds, taken off the top of its ground. (Its level from and
     /// to, and kg per material.) None: nothing to cut.
     fn far_plan(&self, k: usize, dt: f64) -> Option<(usize, f64, f64, Vec<(MatId, f64)>)> {
-        let cutters = self.far.cutters[k] as f64;
+        // (No more work at once than its surface has room for: the rest
+        // wait for room, see `far_spread`.)
+        let cutters = (self.far.cutters[k] as f64).min(self.far_cover(k) as f64);
         let (a0, a1) = self.far_span(k);
         let mut lvl = self.world.far.levels[k] as f64;
         if !lvl.is_finite() {
@@ -566,9 +634,16 @@ impl Sim {
         let n = self.far_n();
         let mut floor = 0.0f64;
         for j in [(k + n - 1) % n, (k + 1) % n] {
-            if self.far.wet[j] && self.world.far.levels[j].is_finite() {
-                floor = floor.max(self.world.far.levels[j] as f64 + 1.0);
+            let lj = self.world.far.levels[j] as f64;
+            if !lj.is_finite() {
+                continue;
             }
+            if self.far.wet[j] {
+                floor = floor.max(lj + 1.0);
+            }
+            // No deeper than FAR_STEP_M under a neighbour: it waits for
+            // them, so the ground eaten stays slopes, not canyons.
+            floor = floor.max(lj - FAR_STEP_M);
         }
         if lvl <= floor {
             return None;
@@ -695,7 +770,7 @@ impl Sim {
                 }
                 let r = self.far_room_of(k);
                 for _ in 0..r {
-                    let Some(id) = self.parked.pop() else { break };
+                    let Some(id) = self.far_pop_parked() else { break };
                     let d = &mut self.drones[id as usize];
                     if !d.alive {
                         continue;
@@ -726,7 +801,7 @@ impl Sim {
             let usable: Vec<usize> = (0..n).filter(|&k| self.far.is_far[k] && self.far.open[k] && !self.far.wet[k]).collect();
             if !usable.is_empty() {
                 let mut i = 0;
-                while let Some(id) = self.parked.pop() {
+                while let Some(id) = self.far_pop_parked() {
                     let d = &mut self.drones[id as usize];
                     if !d.alive {
                         continue;
@@ -742,8 +817,28 @@ impl Sim {
                 }
             }
         }
+        // (Those kept back, back in the pool.)
+        let kept = std::mem::take(&mut self.far.kept);
+        self.parked.extend(kept);
         self.far.total = self.far.cutters.iter().sum();
         sent
+    }
+
+    /// A drone resting in the pool to send far: not one whose flock the
+    /// camera looks at (it waits there for room), latest first.
+    fn far_pop_parked(&mut self) -> Option<u32> {
+        while let Some(&id) = self.parked.last() {
+            let h = self.drones[id as usize].home;
+            let k = if h < self.hubs.len() { self.far_sector_at(self.site_pos(h)) } else { 0 };
+            if self.far.must.get(k).copied().unwrap_or(false) && !self.flock.get(h).is_none_or(|f| f.dead) {
+                // (Kept: the rest of the pool is looked at next time.)
+                let keep = self.parked.pop().unwrap();
+                self.far.kept.push(keep);
+                continue;
+            }
+            return self.parked.pop();
+        }
+        None
     }
 
     /// A new cutter, when the flock it would drop to is gone or far: it
@@ -757,7 +852,8 @@ impl Sim {
         let h = self.orbit_hub;
         if h < self.hubs.len() && !self.flock[h].dead && self.far_near_at(self.site_pos(h)) {
             let k = self.far_sector_at(self.site_pos(h));
-            if (self.alive_count as f64) < self.far.budget || self.far.must.get(k).copied().unwrap_or(false) {
+            let short = self.far.must_cover > self.far.must_flown;
+            if (self.alive_count as f64) < self.far.budget || (short && self.far.must.get(k).copied().unwrap_or(false)) {
                 return false;
             }
         }
@@ -824,8 +920,12 @@ impl Sim {
         let h = self.orbit_hub;
         let room = (self.far.budget - self.alive_count as f64).max(0.0) as u64;
         if h < self.hubs.len() && !self.flock[h].dead && self.far_near_at(self.site_pos(h)) {
+            // (Where the camera looks, a few more a second whatever the
+            // budget, so its flocks stay full as cutters wear out.)
             let k = self.far_sector_at(self.site_pos(h));
-            if count <= room || self.far.must.get(k).copied().unwrap_or(false) {
+            let short = self.far.must_cover.saturating_sub(self.far.must_flown);
+            let room = if self.far.must.get(k).copied().unwrap_or(false) { room.max(NEAR_NEW_PER_S.min(short)) } else { room };
+            if count <= room {
                 return 0;
             }
             return self.far_rehome(count - room);
@@ -868,13 +968,61 @@ impl Sim {
             last = Some(k);
         }
         if left > 0 {
-            let Some(k) = last else { return count - left };
-            self.far.cutters[k] += left;
-            left = 0;
+            // No room anywhere yet: shared out evenly over the far sectors
+            // (they wait for room there; see `far_spread`).
+            if last.is_none() {
+                return count - left;
+            }
+            let usable: Vec<usize> = (0..n).filter(|&k| self.far.is_far[k] && self.far.open[k] && !self.far.wet[k]).collect();
+            let each = left / usable.len() as u64;
+            let mut extra = left - each * usable.len() as u64;
+            for &k in &usable {
+                let one = (extra > 0) as u64;
+                extra -= one;
+                self.far.cutters[k] += each + one;
+            }
         }
-        let _ = left;
         self.far.total += count;
         count
+    }
+
+    /// Cutters sector k's surface keeps at work (COVER_PER_M).
+    fn far_cover(&self, k: usize) -> u64 {
+        let (a0, a1) = self.far_span(k);
+        let r = (self.world.far.levels[k] as f64).min(self.world.planet.max_radius);
+        (COVER_PER_M * (a1 - a0) * r) as u64
+    }
+
+    /// Once a second: far sectors with more cutters than room hand the
+    /// extra on to sectors with room (opening new ones beside the swarm's
+    /// reach), a share each second.
+    fn far_spread(&mut self) {
+        let n = self.far_n();
+        let mut extra = 0u64;
+        let mut from = None;
+        for k in 0..n {
+            if !self.far.is_far[k] {
+                continue;
+            }
+            let cover = self.far_cover(k);
+            if self.far.cutters[k] > cover + cover / 2 {
+                let e = self.far.cutters[k] - cover;
+                self.far.cutters[k] -= e;
+                extra += e;
+                from = Some(k);
+            }
+        }
+        if extra > 0 {
+            self.far.total -= extra;
+            let put = self.far_rehome(extra);
+            if put < extra {
+                // (Nowhere at all to go: they stay.)
+                if let Some(k) = from {
+                    self.far.cutters[k] += extra - put;
+                    self.far.total += extra - put;
+                }
+            }
+        }
     }
 
     /// Cutters sector k has room for (its whole surface worked, COVER_PER_M).
