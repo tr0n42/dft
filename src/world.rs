@@ -600,12 +600,18 @@ impl World {
             State::Empty => vec![VACUUM; (LEAF * LEAF) as usize].into_boxed_slice(),
             State::Uniform(m) => vec![m; (LEAF * LEAF) as usize].into_boxed_slice(),
             State::Untouched => {
-                let mut c = Vec::with_capacity((LEAF * LEAF) as usize);
-                for y in y0..y0 + LEAF {
-                    for x in x0..x0 + LEAF {
-                        c.push(self.planet.material(x, y));
+                // Row by row side by side (the generator only reads, and
+                // is the same on any thread: a leaf is 4,096 of its calls,
+                // most of the cost of the first cut in fresh ground).
+                use rayon::prelude::*;
+                let planet = &*self.planet;
+                let mut c = vec![VACUUM; (LEAF * LEAF) as usize];
+                c.par_chunks_mut(LEAF as usize).enumerate().for_each(|(row, out)| {
+                    let y = y0 + row as i64;
+                    for (i, o) in out.iter_mut().enumerate() {
+                        *o = planet.material(x0 + i as i64, y);
                     }
-                }
+                });
                 c.into_boxed_slice()
             }
             State::Split => panic!("materialize: leaves never split"),
