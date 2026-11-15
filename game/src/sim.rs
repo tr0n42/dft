@@ -31,6 +31,9 @@ pub struct Control {
     /// Where loose matter moves (see `Sandbox::set_attention`): None
     /// everywhere; the game sets it to what's on screen.
     pub attention: Option<Option<[i64; 4]>>,
+    /// Where cutters are worked cell by cell (see `Sim::set_focus`): about
+    /// twice the screen; elsewhere their trips are worked out at once.
+    pub focus: Option<Option<[i64; 4]>>,
     /// Ignore the screen and move everything everywhere (dev panel).
     pub full_detail: bool,
     pub quit: bool,
@@ -346,6 +349,14 @@ fn run(shared: &Shared) {
             }
             s.free_drones = c.free_drones;
             s.set_attention(if c.full_detail { None } else { c.attention });
+            s.set_focus(if c.full_detail { None } else { c.focus });
+            // Only the specialists being worked on (economy.toml
+            // `game_deploys`), in a loaded save too.
+            if s.deploy_only.is_none() {
+                s.deploy_only = s.eco.units.game_deploys.clone();
+            }
+            // No fabricator or bays yet: units are built the moment they're ordered.
+            s.instant_build = true;
             for (at, size, scrap) in std::mem::take(&mut *shared.blasts.lock()) {
                 s.big_boom(at, size, scrap);
             }
@@ -466,6 +477,7 @@ fn run(shared: &Shared) {
                         .collect();
                     stats.built_for_room = s.cutters_built_for_room;
                     stats.production = s.production_lines();
+                    stats.production.extend(s.fleet_lines());
                     stats.regrowth = s.life.as_ref().and_then(|l| l.showcase());
                     stats.room = s.last_room;
                 }

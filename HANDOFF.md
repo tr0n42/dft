@@ -375,6 +375,241 @@ Rules Benjamin set (10 Nov 2026), for every piece of art:
 
 Not yet redesigned: the fabricator and factory ("later").
 
+## Cutters: level of detail and formations (14 Nov, uncommitted)
+
+Benjamin, 14 Nov: cutters must work exactly when their flock is zoomed in
+on; every other flock may be approximated (sample-based or statistical);
+simulate about twice the screen; and give flights some flocking beauty.
+
+- **The focus** (`Sim::focus`, `set_focus`, same three states as
+  attention): the game sets it to the screen plus half a screen each side
+  while a cell is at least half a pixel (mpp <= 2), else nowhere
+  (game/src/main.rs `attention`). Tests and tools default to everywhere,
+  so they play exactly as before (samecheck fingerprints unchanged).
+- **Far trips** (`far_trip` in units/cutter.rs): a cutter whose flock's
+  hauler is outside the focus (by more than search_m + chain_m) does its
+  whole trip at once: one search from the hauler, then the next cells from
+  that same candidate list (best first, each within chain_m of the last, as
+  a flown drone chains), each cut via `cut_at` (the old Outbound branch,
+  moved out unchanged: mining, pay, heat, wear, losses), and one event, its
+  arrival home (it sets off home when the last cut would be done;
+  `head_home_after`). Cells are taken at the trip's start rather than over
+  it. Counted in `far_trips` / `near_trips`.
+- **Measured** (unitbench stage 1, 600 game s, NOSAVE): old way
+  (`NOFOCUS=1`) 32.9 s real, cutters 48 ms per game s with 93k working;
+  far trips 25.9 s, cutters 36 ms with 144k working, about half the cost
+  per working drone. It mines 16% more by 10 min only because cells are
+  taken at the start of a trip in a fast-growing swarm; the new test
+  `cutters_out_of_sight_dig_alike_and_keep_the_books` (tests/swarm.rs) has
+  them within 4% over 15 min on the tutorial body, books balanced. The
+  benches now run with the focus nowhere, so the next bench-units.bat row
+  shows a new fingerprint.
+- **Formations** (game/src/drones.rs, drawing only): flights weave mostly
+  on a wave shared by the flock and running back along the stream (a
+  ribbon), and `formation` is boids for drones in flight: cohesion toward
+  the neighbours flying the same way, separation under 1.6 m, smooth
+  weights, at most 12 neighbours (starlings heed about 7), a grid of 7 m
+  squares, faded to nothing at take-off and arrival so every drone still
+  reaches its cell; at most 3 m off its line; off above 60k drones in
+  flight on screen. Not yet seen moving by Benjamin.
+- **Research behind it, and what's next on this road:** Reynolds' boids and
+  spatial hashing (done); topological neighbours from the starling studies
+  (done, as the neighbour cap); Sunshine-Hill and Badler's "alibi
+  generation" (2010) for agents coming into view: next, give drones of a
+  flock entering the focus mid far-trip a believable place (now they sit
+  at their last cell until they set off home); hybrid macro/micro crowd
+  models: next, a flock-level statistical mode for flocks far out of sight
+  (one search and one event per flock per few seconds for all its drones,
+  drones only counted) to cut the remaining per-trip cost.
+- **Shoving** (Benjamin: show their voracity, competing despite their
+  recklessness; rare but noticeable, about one every 15 s in any flock):
+  each flock (keyed by its hauler's end of the flight) shoves once every
+  12 to 18 s of real time; one of its drones in flight lunges at the
+  nearest beside it within 3 m; the one hit is knocked 2.2 m aside and
+  drops up to 4 m back along the stream, working its way in again over
+  2.6 s (`Shoves` in `DrawMem`, `formation`; drawing only, faded at either
+  end of the flight so arrivals stay exact).
+- **Only cutters and haulers in the game** (Benjamin: no other drone until
+  we work on it or have finished it): economy.toml `[units] game_deploys
+  = []` lists the specialists the game builds; the game copies it into
+  `Sim::deploy_only` (not saved; applies to loaded saves too) and the
+  replicator orders nothing else. Tests, benches and tools still build all.
+- **No production in the game yet** (Benjamin: just deduct the resources,
+  fake-refining them, and the energy, and spawn): the game sets
+  `Sim::instant_build`; every order is built the moment it's ordered from
+  the stockpile, refined first and then raw (`Stock::plan`), and energy
+  (`build_now`), with no fabricator or bay times. Tests keep the factory.
+  Seen on the Dev planet at 6:40: 12,237 cutters built (930 with the
+  factory), 72 haulers, 1,096 cutters waiting for haulers and 1,371 starved:
+  the factory was the throttle; now growth is limited only by stock,
+  energy and the director's orders, and haulers are the bottleneck.
+
+## Haulers: the fleet commander (14 Nov, uncommitted)
+
+Benjamin, 14 Nov: tie haulers to activity, not flocks; the director judges
+each flock's coming volume and haulers are dispatched ahead of time
+through a LIFO queue to points central to a flock, with a flock given two
+or more drop-off points when it needs more than one hauler; haulers never
+closer than one hauler's length; a fleet commander agent (air traffic
+control) handles the calls so the director doesn't; haulers and waiting
+cutters use the clear air, hundreds of metres of it.
+
+- **`src/units/fleet.rs`** (the commander), `[fleet]` in economy.toml.
+  Every 5 s (and at once for a new flock) `place_docks`: each live flock
+  gets 1 to `max_docks` (4) drop-off points, as many as keep one hauler
+  from filling in under `fill_min_s` (180 s) at its volume (`flock_rate`:
+  kg cut lately / memory_s), spread `dock_spread_m` (60 m) apart along the
+  face over its work, `dock_hover_m` (60 m) above the highest ground under
+  it and a hauler's length either side; any point within `dock_gap_m`
+  (24 m, a hauler's length clear) of one already placed is stacked a gap
+  higher, up to `dock_stack_max_m` (300 m). Haulers at a point that's gone
+  lift to unload (`release_hauler`).
+- **Calls, LIFO:** each second a point calls (`Call`, one stack for the
+  swarm) when it has no hauler there or coming, or when its hauler will be
+  full (or its stay up) by the time one from the mother swarm could get
+  there plus `call_margin_s`. Free (`Idle`) haulers wait at the mother
+  swarm; the newest call is answered first by the nearest free one
+  (`send_to_dock`). A relief arriving sends the one there up to unload.
+  Haulers are built only for calls beyond those lifting/unloading/on
+  order (at most 4 a second); one idle `idle_recycle_s` (600 s) is
+  recycled (its mass back). Busy flocks call more and so get more of the
+  fleet. F1 shows the commander's lines (`fleet_lines`).
+- **Haulers** (units/hauler.rs): a new `Idle` state, a `dock`; after
+  unloading they wait free instead of returning to "their" flock. The old
+  director (`direct`), max_per_flock, spare-hauler blowing up, and the
+  per-flock hauler sending on splits and merges are gone. Saves: the dock
+  rides in the hauler's state byte (old saves load with point 0).
+- **Cutters** (units/cutter.rs): each has a `dock`; heading home it picks
+  its flock's nearest point with a hauler (`pick_dock`), else the nearest;
+  arriving with none there but one at another point, it flies over; it
+  waits in a cloud out to `wait_cloud_m` (30 m) round its point, in the
+  air. Searches still start from the flock's landing point; flights out
+  start from the drop-off point.
+- **First look** (Dev planet, game, 6:40): old way 12,237 cutters built,
+  1,096 waiting for haulers, 1,371 starved, swarm matter 247 kt; the
+  commander's first run 3,342 cutters, 0 waiting, 24 starved, 51 drop-off
+  points over 14 flocks, 64 haulers, 154 kt (flocks at their most
+  drop-off points were then sent no more cutters; that limit is gone, and
+  the next run reached 175 kt). The climb to the drop-off points costs
+  cutter time.
+- **Fixes after Benjamin's look:**
+  - Haulers teleported: a working hauler was drawn at its drop-off point,
+    which is placed afresh every 5 s. Now it keeps its own place and,
+    when its point moves, glides there straight and eased at `drift_m_s`
+    (6 m/s), bobbing slowly up and down while it waits (drawing). Its
+    stay is timed from its arrival (`Hauler::since`). Test:
+    `working_haulers_follow_their_point_smoothly` (no working hauler moves
+    more than 9 m in a second, the eased glide's peak).
+  - Haulers filled at once: a hauler now loads for at least `load_min_s`
+    (5 s, Benjamin's figure) before it lifts, and its hold is drawn
+    filling over that time.
+  - A hauler that will be filled is unavailable at once: each cutter
+    heading home counts its load against its point (`Sim::incoming`,
+    `Drone::promised`) until it arrives, turns or is lost; a hauler whose
+    load plus what's on its way reaches capacity is no longer picked
+    (`pick_dock`), though those already coming still unload into it.
+    `incoming_check` and the flocks test check the count matches the
+    cutters actually flying.
+  - Cutters chased a full hauler up: a full hauler now takes no more and
+    doesn't count as a place to go (`hauler_at`, `hauler_at_dock`,
+    `pick_dock`); the moment it fills (`hauler_filled`), cutters on their
+    way to its point turn mid-flight for the nearest point with room or
+    a hauler coming. To turn a drone mid-flight, every drone event now goes
+    through `schedule`, which notes when it is due (`Drone::due`); an
+    event at any other tick was overtaken and is skipped.
+  - Cutters flew to where a point had been and piled into one dot there:
+    the drawn flight ended at the point's old place (the renderer was
+    never told the point moved), and the drawing got there early (it flew
+    the straight line; the sim times the way round through open space),
+    so arrivals sat stacked on the exact point until their event. Now:
+    - `place_docks` keeps a point where it was if the new place is within
+      half a hauler gap (12 m): small shifts cause no traffic.
+    - When a point moves or goes (`docks_moved`), cutters flying to it
+      turn mid-flight for its new place (`redirect`, which keeps a far
+      trip's set-off time), and cutters waiting there fly over with their
+      loads; idle ones take the new point.
+    - A flight home is drawn timed to arrive when the sim says it does
+      (speed clamped to 35-100% of cutter speed).
+    - Drawing: a cutter flying home makes for its own place in the
+      waiting cloud over the last 40 m (`CLOUD_EASE_M`), and one setting
+      off from a point leaves from its place in the cloud (`Leg::cloud`,
+      `Drone::off_dock`): no stacking, and waiting cutters circle the point.
+- **Loose matter adrift is grabbed first (14 Nov).** Chunks cut free (plant
+  matter above all, on the low-gravity Dev planet) floated off for good:
+  cutters only took cells in the ground. Now each second `sort_adrift`
+  hands every body in the air (`Bodies::adrift`) to the nearest flock
+  with a drop-off point within 1.5 search radii (240 m), up to 2 holds of
+  mass. An idle cutter takes one of those before looking for rock to cut
+  (`take_adrift`, `go_grab`: aimed where the body will be), takes it whole
+  out of the air on arrival (`Bodies::grab`, booked as mined), and goes for
+  the next one near by or home. Dev planet, 600 game s with everything
+  simulated: 2,335 bodies grabbed; matter lost to space 1,334 t against
+  2,492 t without grabbing (`NOGRAB=1` simbench; that figure includes vents
+  and blasts). About 350 bodies are still in the air at any moment (too far
+  or too big). A reach of 3 search radii did worse (1,140 grabs, 2,684 t
+  lost: cutters chased far chunks that drifted off), so 1.5 it is.
+- **The sieve out of sight (14 Nov).** Benjamin's recording: zoomed out, a
+  flock's face turned into a sieve dozens of metres deep with single
+  cells hanging in the air, cleared only when he zoomed in. Cause: out of
+  sight, cells next to new holes weren't checked for being cut free (they
+  waited, in `Bodies::waiting`, until someone looked; that list is also
+  dropped past 20,000), so chunks cutters had left hung in place. Now
+  `break_free` also checks up to FAR_STARTS (300) such cells a step out
+  of sight; what comes loose there is set straight down on the ground
+  below (as `step` already did for bodies out of sight). And cutters take
+  a speck (a cell with three or four sides open, too small to fall: under
+  `island_min_cells`) as loose debris (`is_speck` in `is_loose`): quick to
+  pick and never turned down as poor pay, so flocks clean them up.
+  Dev planet, 2,400 game s, nothing in sight: the ground round a landing
+  point went from hanging columns and strips to a clean face, and the
+  run took no longer (52.9 s against 54.8 s).
+- **Atmosphere haze (14 Nov, game/src/tiles.rs).** Each cell cut showed a
+  blank, starry hole. Now:
+  - The haze's floor is a smooth surface: the ground as generated, sunk by
+    the depth eaten in each direction (from the published heights)
+    averaged twice over 120 m either way (`air_floor`, `AIR_SMOOTH_M`). A
+    shaft or tunnel sinks it a little over a wide stretch instead of
+    pulling a sliver of haze down into it.
+  - It reaches 100 m below its floor into eaten ground, fading out
+    smoothly (`HAZE_DEEP_M`).
+  - Its height, depth and strength shrink as the body is eaten, gone at
+    half (`HAZE_GONE_AT`; strength by the square root), in 50 steps, each
+    step redrawing the tiles with air in them.
+- **Haulers carry 5,000 t (14 Nov).** `[hauler] capacity_kg` 1,000 t →
+  5,000 t (Benjamin). Dev planet, 1,200 game s: about a third the hauler
+  calls (213 against 671) and no calls left waiting (27 before), with half
+  the drop-off points (30 against 59).
+- **Loose matter out of sight settles at once (14 Nov, sandbox.rs).**
+  Benjamin: zoomed in on water, it "explodes into more water" and plays its
+  physics out as if the game had been paused. Cause: out of sight every
+  powder, liquid and gas cell that would move waited, dormant, until seen,
+  then all of it moved at once (and buried layers welling up holes cutters
+  had dug waited too: that was the extra water). Now out of sight
+  (`settle_far`, `move_far`): powder and liquid go straight down as far as
+  they can, a cell down the slope either side, and liquid runs along level
+  ground up to FAR_SPREAD (48) cells to the nearest drop, in one go, every
+  step strictly nearer the centre; gas the same way up, lost to space once
+  it rises off the body; with nowhere to go, a liquid still feels its
+  layer's push (wells and vents, whose ejecta were already set down where
+  they land out of sight). `Sandbox::far_settle` off (simbench `NOSETTLE`)
+  gives the old freeze. Dev planet, 1,200 game s, nothing in sight: 64,652
+  cells were left waiting to play out; now none, for about 1 s more
+  sandbox time over the run (2.0 s of 28 s).
+- **Zooming in on a flock (14 Nov).** Out of the cutter focus a cutter's
+  trip is worked out at once (`far_trip`): its cells are cut as it sets
+  off, and it is drawn waiting at its last cell till the trip would be
+  done, which in view looks like idle cutters hanging at the face. Now, a
+  second after a flock comes into the focus, `catch_up` (each second, from
+  `fleet_work`) sends those cutters home at once from where they wait, with
+  what they cut (a small gain, once per look, of the rest of that trip's
+  cutting time); trips from then on are flown cell by cell. simbench
+  `LOOK=n` zooms in on landing point n after the run: 852 caught up on the
+  Dev planet at 600 s. And in the game (drones.rs `Catch`), a drone whose
+  path changes under it is no longer drawn jumping onto the new one: it is
+  drawn where it was, the gap closing at flight speed (beyond 3 km it
+  jumps). That covers every path change, including idle cutters at a
+  moved drop-off point and trips worked out at once.
+
 ## What's next
 
 See ROADMAP.md "Where we are (13 Nov)" for the reassessment and the proposed

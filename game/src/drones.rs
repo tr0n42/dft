@@ -62,6 +62,42 @@ struct Meshes {
 struct DrawMem {
     flora: Vec<bool>,
     clock: Option<f64>,
+    /// Shoving in flight (see `formation`).
+    shoves: Shoves,
+    /// Drones flying back onto their path after it changed (see `Catch`).
+    catch: std::collections::HashMap<u32, Catch>,
+}
+
+/// A drone whose path changed under it (sent home early as its flock came
+/// into view, its drop-off point moved, a trip worked out at once out of
+/// sight): rather than jump to the new path, it is drawn `off` from it at
+/// game time `t0`, closing the gap at flight speed, so it flies there.
+#[derive(Clone, Copy)]
+struct Catch {
+    off: (f64, f64),
+    t0: f64,
+    speed: f64,
+}
+
+impl Catch {
+    /// Further than this off (m), it is drawn on its new path at once.
+    const MAX_M: f64 = 3000.0;
+
+    fn left(&self) -> f64 {
+        (self.off.0 * self.off.0 + self.off.1 * self.off.1).sqrt()
+    }
+
+    /// The offset still to fly at game time t.
+    fn at(&self, t: f64) -> (f64, f64) {
+        let d0 = self.left();
+        let gone = ((t - self.t0).max(0.0) * self.speed).min(d0);
+        let k = if d0 > 1e-9 { (d0 - gone) / d0 } else { 0.0 };
+        (self.off.0 * k, self.off.1 * k)
+    }
+
+    fn done(&self, t: f64) -> bool {
+        (t - self.t0) * self.speed >= self.left()
+    }
 }
 
 /// The smallest a drone is drawn, in pixels across.
@@ -139,11 +175,15 @@ const HOVER_CLEAR_M: f64 = 4.5 + 1.0 + TENTACLE_LONG.1 as f64 + 2.0;
 /// Haulers are kept at least this far apart (middle to middle).
 const HAULER_GAP_M: f64 = 14.0;
 
+/// A working hauler's hold is drawn filling over at least this long after
+/// it arrives (the fleet's load_min_s).
+const LOAD_SHOW_S: f64 = 5.0;
+
 /// How settled a hauler is over its flock (0 to 1): settling once it has
 /// arrived to be loaded, gathering itself up as it lifts off.
 fn settle(hl: &dft_sim::swarm::HaulerView, now: f64) -> f32 {
     (match hl.state {
-        dft_sim::swarm::HaulerState::Working => ((now - hl.t1) / SETTLE_S).clamp(0.0, 1.0),
+        dft_sim::swarm::HaulerState::Working => ((now - hl.since) / SETTLE_S).clamp(0.0, 1.0),
         dft_sim::swarm::HaulerState::Lifting => 1.0 - ((now - hl.t0) / SETTLE_S).clamp(0.0, 1.0),
         _ => 0.0,
     }) as f32
@@ -380,12 +420,34 @@ fn draw(
         let mut out = run.0.out.lock();
         if let Some(v) = out.leg_full.take() {
             fleet.legs = v;
+            mem.catch.clear();
         }
         let changes = std::mem::take(&mut out.leg_changes);
         for (i, leg) in changes {
             let i = i as usize;
             if i >= fleet.legs.len() {
-                fleet.legs.resize(i + 1, Leg { from: (0.0, 0.0), to: (0.0, 0.0), t0: 0.0, speed: 0.0, state: Leg::GONE });
+                fleet.legs.resize(i + 1, Leg { from: (0.0, 0.0), to: (0.0, 0.0), t0: 0.0, speed: 0.0, state: Leg::GONE, cloud: 0 });
+            }
+            // Where it was last drawn, against where its new path has it:
+            // it flies the difference rather than jumping.
+            let old = fleet.legs[i];
+            let id = i as u32;
+            match mem.clock {
+                Some(tc) if old.state <= 2 && leg.state <= 2 => {
+                    let was = paths.at(&old, tc);
+                    let off = mem.catch.get(&id).map_or((0.0, 0.0), |c| c.at(tc));
+                    let now = paths.at(&leg, tc);
+                    let d = (was.0 + off.0 - now.0, was.1 + off.1 - now.1);
+                    let c = Catch { off: d, t0: tc, speed: leg.speed.max(10.0) };
+                    if c.left() > 1.0 && c.left() < Catch::MAX_M {
+                        mem.catch.insert(id, c);
+                    } else {
+                        mem.catch.remove(&id);
+                    }
+                }
+                _ => {
+                    mem.catch.remove(&id);
+                }
             }
             fleet.legs[i] = leg;
         }
@@ -442,6 +504,22 @@ fn draw(
     let chunk = 16384;
     let mut lists: [Vec<[f32; 3]>; 6] = std::array::from_fn(|i| meshes.get_mut(&meshes_r.kinds[i]).map(|mut mm| take_positions(&mut *mm)).unwrap_or_default());
     let shape = &shape;
+    // (Drones done flying back onto their paths are on them again.)
+    mem.catch.retain(|_, c| !c.done(now));
+    let catch = &mem.catch;
+    let caught = |id: usize, p: (f64, f64)| -> (f64, f64) {
+        if catch.is_empty() {
+            return p;
+        }
+        match catch.get(&(id as u32)) {
+            Some(c) => {
+                let o = c.at(now);
+                (p.0 + o.0, p.1 + o.1)
+            }
+            None => p,
+        }
+    };
+    let caught = &caught;
     if tiny {
         // Approximate: mark the cells, then draw each marked cell once.
         let (gw, gh) = ((v.w as f32 / MIN_PX).ceil() as usize + 2, (v.h as f32 / MIN_PX).ceil() as usize + 2);
@@ -453,12 +531,12 @@ fn draw(
             }
         }
         let cells = &grid.cells;
-        fleet.legs.par_chunk_map(pool, chunk, |_, legs| {
-            for leg in legs {
+        fleet.legs.par_chunk_map(pool, chunk, |ci, legs| {
+            for (j, leg) in legs.iter().enumerate() {
                 if leg.state > 2 {
                     continue;
                 }
-                let (x, y) = leg.at(now);
+                let (x, y) = caught(ci * chunk + j, leg.at(now));
                 if x < l || x > r || y < b || y > t {
                     continue;
                 }
@@ -501,21 +579,47 @@ fn draw(
         // Big enough on screen to show each one's shape (cells 2 px or more)?
         let detailed = real_half * 2.0 >= 6.0;
         let recent = &recent;
-        let parts = fleet.legs.par_chunk_map(pool, chunk, |ci, legs| {
+        // 1: where each drone that may show is, on its leg and in its swirl.
+        let seen: Vec<Seen> = fleet
+            .legs
+            .par_chunk_map(pool, chunk, |ci, legs| {
+                let mut v = Vec::new();
+                for (j, leg) in legs.iter().enumerate() {
+                    if leg.state > 2 {
+                        continue;
+                    }
+                    // (Far outside the window either end: it can't show.)
+                    let off = |p: (f64, f64)| p.0 < l - 400.0 || p.0 > r + 400.0 || p.1 < b - 400.0 || p.1 > t + 400.0;
+                    if off(leg.from) && off(leg.to) {
+                        continue;
+                    }
+                    let id = (ci * chunk + j) as u64;
+                    let (x, y) = caught(id as usize, paths.at(leg, now));
+                    let (ox, oy) = swirl(leg, id, now, real_t, x, y);
+                    let (x, y) = (x + ox, y + oy);
+                    // (Formation pulls are at most FORM_MAX_M.)
+                    if x < l - FORM_MAX_M || x > r + FORM_MAX_M || y < b - FORM_MAX_M || y > t + FORM_MAX_M {
+                        continue;
+                    }
+                    let (dx, dy) = (leg.to.0 - leg.from.0, leg.to.1 - leg.from.1);
+                    let dl = (dx * dx + dy * dy).sqrt().max(1e-9);
+                    v.push(Seen { id: id as u32, x, y, state: leg.state, env: flight_env(leg, now) as f32, dir: ((dx / dl) as f32, (dy / dl) as f32), flock: flock_key(leg) });
+                }
+                v
+            })
+            .into_iter()
+            .flatten()
+            .collect();
+        // 2: drones in flight close together pull into formation (see
+        // `formation`).
+        let pulls = formation(&seen, pool, real_t, &mut mem.shoves);
+        // 3: drawn.
+        let parts = seen.par_chunk_map(pool, chunk, |ci, part| {
             let mut out: [Vec<[f32; 3]>; 6] = Default::default();
             let mut det: [(Vec<[f32; 3]>, Vec<[f32; 4]>); 2] = Default::default();
-            for (j, leg) in legs.iter().enumerate() {
-                if leg.state > 2 {
-                    continue;
-                }
-                // (Far outside the window either end: it can't show.)
-                let off = |p: (f64, f64)| p.0 < l - 400.0 || p.0 > r + 400.0 || p.1 < b - 400.0 || p.1 > t + 400.0;
-                if off(leg.from) && off(leg.to) {
-                    continue;
-                }
-                let (x, y) = paths.at(leg, now);
-                let (ox, oy) = swirl(leg, (ci * chunk + j) as u64, now, real_t, x, y);
-                let (x, y) = (x + ox, y + oy);
+            for (j, d) in part.iter().enumerate() {
+                let (px, py) = pulls.get(ci * chunk + j).copied().unwrap_or((0.0, 0.0));
+                let (x, y) = (d.x + px, d.y + py);
                 if x < l || x > r || y < b || y > t {
                     continue;
                 }
@@ -523,9 +627,9 @@ fn draw(
                 let inside = shape.inside(x, y, 2.0) as usize;
                 if detailed {
                     let (dp, dc) = &mut det[inside];
-                    cutter(dp, dc, p.x, p.y, real_half, (ci * chunk + j) as u64, leg.state, lc, crate::lights::Lights::pulse(real_t, y.atan2(x)), recent);
+                    cutter(dp, dc, p.x, p.y, real_half, d.id as u64, d.state, lc, crate::lights::Lights::pulse(real_t, y.atan2(x)), recent);
                 } else {
-                    square(&mut out[leg.state as usize + 3 * inside], p.x, p.y, half);
+                    square(&mut out[d.state as usize + 3 * inside], p.x, p.y, half);
                 }
             }
             (out, det)
@@ -669,6 +773,13 @@ fn draw(
             }
             let ext = settle(hl, now);
             let (mut x, mut y) = (x, y);
+            // Waiting at its point: floating slowly up and down.
+            if ext > 0.0 {
+                let r0 = (x * x + y * y).sqrt().max(1.0);
+                let f = 1.0 + ext as f64 * 1.6 * (real_t * 0.75 + hl.id as f64 * 1.37).sin() / r0;
+                x *= f;
+                y *= f;
+            }
             let rr = (x * x + y * y).sqrt().max(1.0);
             if let Some(g) = ground(y.atan2(x)) {
                 // (Never below the hover height, so it comes down to it and
@@ -731,7 +842,10 @@ fn draw(
             // of what it carries.
             let mix: crate::cargo::Mix = hl.mix.iter().filter(|e| e.1 > 0.0).map(|e| (body.0.mats.get(e.0).colour, e.1 as f64)).collect();
             let ore = crate::cargo::ore_cells(&mix, HOLD_W, HOLD_H, hl.id as u64 * 7919);
-            let full = (hl.fill.clamp(0.0, 1.0) * hold_n as f32).round() as usize;
+            // (Its hold fills over the loading time at least, however fast
+            // the loads came: the fleet's load_min_s.)
+            let shown = if hl.state == dft_sim::swarm::HaulerState::Working { hl.fill.min(((now - hl.since) / LOAD_SHOW_S).clamp(0.0, 1.0) as f32) } else { hl.fill };
+            let full = (shown.clamp(0.0, 1.0) * hold_n as f32).round() as usize;
             for (row, line) in HAULER.iter().enumerate() {
                 for (colm, ch) in line.bytes().enumerate() {
                     let g = dft_sim::noise::unit(dft_sim::noise::hash(hl.id as u64, colm as i64, row as i64, 0x4A01)) as f32;
@@ -1054,6 +1168,265 @@ fn boom_life(size_m: f32) -> f64 {
     (1.4 + 0.06 * size_m as f64).min(6.0)
 }
 
+/// A drone that may show this frame: where its leg and swirl put it, and how
+/// far into a flight it is (`flight_env`: 0 at either end, 1 mid-flight).
+struct Seen {
+    id: u32,
+    x: f64,
+    y: f64,
+    state: u8,
+    env: f32,
+    /// Its way of flight (a unit vector).
+    dir: (f32, f32),
+    /// Its flock (`flock_key`).
+    flock: u64,
+}
+
+/// Which flock a drone's flight belongs to: its hauler's end of the flight
+/// (where it set off, flying out; where it is going, flying home).
+fn flock_key(leg: &Leg) -> u64 {
+    let hub = if leg.state == 2 { leg.to } else { leg.from };
+    dft_sim::noise::hash((hub.0 * 0.25).round() as i64 as u64, (hub.1 * 0.25).round() as i64, 0, 0x6A11)
+}
+
+/// A drone in flight shoved out of the stream by another (real time `t`,
+/// shoved along `dir`, flying along `way`).
+#[derive(Clone, Copy)]
+struct Knock {
+    t: f64,
+    dir: (f64, f64),
+    way: (f64, f64),
+}
+
+/// A drone lunging at another (real time `t`; `hit` once it has landed).
+#[derive(Clone, Copy)]
+struct Lunge {
+    t: f64,
+    victim: u32,
+    hit: bool,
+}
+
+/// Shoving in flight, remembered from frame to frame: lunges under way,
+/// drones knocked out lately, and each flock's last shove (by its cycle).
+#[derive(Default)]
+struct Shoves {
+    lunges: std::collections::HashMap<u32, Lunge>,
+    knocks: std::collections::HashMap<u32, Knock>,
+    fired: std::collections::HashMap<u64, u64>,
+}
+
+/// Shoving in flight (cutters racing each other to the rock): about once
+/// every SHOVE_EVERY_S in each flock (seconds of real time, varying by
+/// flock; rare but noticeable), one of its drones in flight lunges at the
+/// nearest beside it (within LUNGE_M); the one hit is knocked aside, drops
+/// back along the stream and works its way in again further back, over
+/// KNOCK_S.
+const SHOVE_EVERY_S: (f64, f64) = (12.0, 18.0);
+const LUNGE_S: f64 = 0.3;
+const LUNGE_M: f64 = 3.0;
+const KNOCK_S: f64 = 2.6;
+/// How far the one hit is knocked aside, and how far back it drops (m).
+const KNOCK_SIDE_M: f64 = 2.2;
+const KNOCK_BACK_M: f64 = 4.0;
+
+/// A swell that rises to 1 at `peak` seconds and dies away after.
+fn swell(tau: f64, peak: f64) -> f64 {
+    if tau <= 0.0 {
+        return 0.0;
+    }
+    let u = tau / peak;
+    u * (1.0 - u).exp()
+}
+
+/// 0 at either end of a flight (and while not flying), rising to 1 in the
+/// middle: formation fades in after take-off and out before arrival, so
+/// every drone still reaches its cell exactly. Short hops barely gather.
+fn flight_env(leg: &Leg, t: f64) -> f64 {
+    if leg.state != 1 && leg.state != 2 {
+        return 0.0;
+    }
+    let (dx, dy) = (leg.to.0 - leg.from.0, leg.to.1 - leg.from.1);
+    let dist = (dx * dx + dy * dy).sqrt();
+    if dist < 1e-6 {
+        return 0.0;
+    }
+    let k = ((t - leg.t0) * leg.speed / dist).clamp(0.0, 1.0);
+    (k * std::f64::consts::PI).sin() * (dist / 40.0).min(1.0)
+}
+
+/// How far a drone is ever pulled out of its own line (m).
+const FORM_MAX_M: f64 = 3.0;
+/// How far a flying drone feels its neighbours (m), and the spacing it keeps.
+const FORM_R: f64 = 7.0;
+const FORM_SEP: f64 = 1.6;
+/// It heeds at most this many neighbours (starlings heed about seven; a
+/// few more keep it smooth as neighbours come and go).
+const FORM_NEIGHBOURS: usize = 12;
+/// More drones in flight in view than this: no formation (too small to see
+/// apart anyway, and it would cost).
+const FORM_MOST: usize = 60_000;
+
+/// Flocking for drones in flight, drawing only (the simulation's flights are
+/// legs; this bends them for the eye). Reynolds' boids with smooth weights
+/// so nothing jumps from frame to frame: each flying drone is drawn toward
+/// the middle of its neighbours flying the same way (cohesion: loose
+/// streams gather into ribbons) and pushed off any too close (separation),
+/// all faded by `flight_env` so take-off and arrival stay exact. Neighbours
+/// come from a grid of FORM_R squares (Reynolds' spatial hashing). Returns
+/// the pull for each of `seen`, in metres (empty: none).
+fn formation(seen: &[Seen], pool: &ComputeTaskPool, real_t: f64, sh: &mut Shoves) -> Vec<(f64, f64)> {
+    sh.knocks.retain(|_, k| real_t - k.t < KNOCK_S && real_t >= k.t);
+    sh.lunges.retain(|_, l| real_t - l.t < LUNGE_S && real_t >= l.t);
+    if sh.fired.len() > 20_000 {
+        sh.fired.clear();
+    }
+    let flying: Vec<u32> = (0..seen.len() as u32).filter(|&i| seen[i as usize].env > 0.02).collect();
+    if flying.len() < 2 || flying.len() > FORM_MOST {
+        return Vec::new();
+    }
+    let key = |x: f64, y: f64| ((x / FORM_R).floor() as i64, (y / FORM_R).floor() as i64);
+    let mut grid: std::collections::HashMap<(i64, i64), Vec<u32>> = std::collections::HashMap::with_capacity(flying.len() / 2);
+    for &i in &flying {
+        let d = &seen[i as usize];
+        grid.entry(key(d.x, d.y)).or_default().push(i);
+    }
+    let grid = &grid;
+    // (its pull, and the nearest beside it within LUNGE_M)
+    let pulls: Vec<(u32, (f64, f64), Option<u32>)> = flying
+        .par_chunk_map(pool, 4096, |_, part| {
+            let mut out = Vec::with_capacity(part.len());
+            for &i in part {
+                let d = &seen[i as usize];
+                let (kx, ky) = key(d.x, d.y);
+                let (mut cx, mut cy, mut w_sum) = (0.0, 0.0, 0.0);
+                let (mut sx, mut sy) = (0.0, 0.0);
+                let mut heeded = 0;
+                // The nearest beside it flying the same way (for a lunge).
+                let mut nearest: Option<(f64, u32)> = None;
+                'look: for gy in ky - 1..=ky + 1 {
+                    for gx in kx - 1..=kx + 1 {
+                        for &j in grid.get(&(gx, gy)).into_iter().flatten() {
+                            if j == i {
+                                continue;
+                            }
+                            let o = &seen[j as usize];
+                            if o.state != d.state {
+                                continue;
+                            }
+                            let (dx, dy) = (o.x - d.x, o.y - d.y);
+                            let dd = (dx * dx + dy * dy).sqrt();
+                            if dd >= FORM_R {
+                                continue;
+                            }
+                            if dd < LUNGE_M && nearest.is_none_or(|(nd, _)| dd < nd) {
+                                nearest = Some((dd, j));
+                            }
+                            // Smooth weights: a neighbour fades in as it comes near.
+                            let w = (1.0 - dd / FORM_R).powi(2) * o.env as f64;
+                            cx += w * dx;
+                            cy += w * dy;
+                            w_sum += w;
+                            if dd < FORM_SEP && dd > 1e-6 {
+                                let push = (1.0 - dd / FORM_SEP).powi(2) * FORM_SEP;
+                                sx -= dx / dd * push;
+                                sy -= dy / dd * push;
+                            }
+                            heeded += 1;
+                            if heeded >= FORM_NEIGHBOURS {
+                                break 'look;
+                            }
+                        }
+                    }
+                }
+                let e = d.env as f64;
+                // (Divided by 1 + the weights: a lone pair pulls gently, a
+                // crowd firmly, and never past the crowd's middle.)
+                let (mut px, mut py) = (e * (0.8 * cx / (1.0 + w_sum) + 0.7 * sx), e * (0.8 * cy / (1.0 + w_sum) + 0.7 * sy));
+                let m = (px * px + py * py).sqrt();
+                if m > FORM_MAX_M {
+                    px *= FORM_MAX_M / m;
+                    py *= FORM_MAX_M / m;
+                }
+                out.push((i, (px, py), nearest.map(|n| n.1)));
+            }
+            out
+        })
+        .into_iter()
+        .flatten()
+        .collect();
+    let mut all = vec![(0.0, 0.0); seen.len()];
+    // Each flock whose moment has come and that hasn't shoved yet this
+    // cycle: its drone in flight with one close beside it and the lowest
+    // draw this cycle lunges.
+    let cycle_of = |g: u64| {
+        let every = SHOVE_EVERY_S.0 + (SHOVE_EVERY_S.1 - SHOVE_EVERY_S.0) * dft_sim::noise::unit(g ^ 0x5B0C);
+        (real_t / every + crate::rnd::unit(g, 0x77)).floor() as u64
+    };
+    let mut pick: std::collections::HashMap<u64, (u64, u32, u32)> = std::collections::HashMap::new();
+    for &(i, p, near) in &pulls {
+        all[i as usize] = p;
+        let d = &seen[i as usize];
+        let Some(j) = near else { continue };
+        if d.env < 0.4 || sh.lunges.contains_key(&d.id) || sh.knocks.contains_key(&d.id) {
+            continue;
+        }
+        let c = cycle_of(d.flock);
+        if sh.fired.get(&d.flock) == Some(&c) {
+            continue;
+        }
+        let draw = dft_sim::noise::hash(d.id as u64, c as i64, 0, 0x5B0D);
+        if pick.get(&d.flock).is_none_or(|b| draw < b.0) {
+            pick.insert(d.flock, (draw, d.id, seen[j as usize].id));
+        }
+    }
+    for (g, (_, a, v)) in pick {
+        sh.fired.insert(g, cycle_of(g));
+        sh.lunges.insert(a, Lunge { t: real_t, victim: v, hit: false });
+    }
+    if sh.lunges.is_empty() && sh.knocks.is_empty() {
+        return all;
+    }
+    // Where the drones in a shove are this frame.
+    let mut at: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for &(i, _, _) in &pulls {
+        let id = seen[i as usize].id;
+        if sh.lunges.contains_key(&id) || sh.knocks.contains_key(&id) || sh.lunges.values().any(|l| l.victim == id) {
+            at.insert(id, i as usize);
+        }
+    }
+    // A lunge: a quick dart at its victim, which is hit at the dart's height.
+    let mut hits = Vec::new();
+    for (a, l) in sh.lunges.iter_mut() {
+        let (Some(&ia), Some(&iv)) = (at.get(a), at.get(&l.victim)) else { continue };
+        let (d, o) = (&seen[ia], &seen[iv]);
+        let (dx, dy) = (o.x - d.x, o.y - d.y);
+        let dd = (dx * dx + dy * dy).sqrt().max(1e-6);
+        let to = (dx / dd, dy / dd);
+        let u = (real_t - l.t) / LUNGE_S;
+        let dart = (u * std::f64::consts::PI).sin() * dd.min(1.5) * d.env as f64;
+        all[ia].0 += to.0 * dart;
+        all[ia].1 += to.1 * dart;
+        if u > 0.5 && !l.hit {
+            l.hit = true;
+            hits.push((l.victim, Knock { t: real_t, dir: to, way: (o.dir.0 as f64, o.dir.1 as f64) }));
+        }
+    }
+    for (v, k) in hits {
+        sh.knocks.entry(v).or_insert(k);
+    }
+    // Knocked lately: aside fast, dropping back slower, then in again.
+    for (v, k) in &sh.knocks {
+        let Some(&iv) = at.get(v) else { continue };
+        let e = seen[iv].env as f64;
+        let tau = real_t - k.t;
+        let side = KNOCK_SIDE_M * swell(tau, 0.25);
+        let back = KNOCK_BACK_M * swell(tau, 0.8) * (1.0 - tau / KNOCK_S).max(0.0);
+        all[iv].0 += (k.dir.0 * side - k.way.0 * back) * e;
+        all[iv].1 += (k.dir.1 * side - k.way.1 * back) * e;
+    }
+    all
+}
+
 /// How far a drone strays from its simulated path, for the look of a
 /// swarm up close (drawing only; the simulation never sees it). Three
 /// motions, each strongest where it fits:
@@ -1062,6 +1435,10 @@ fn boom_life(size_m: f32) -> f64 {
 /// - cutting, it hovers and darts about the cell.
 /// A slow flow field, the same for drones near each other, is added to all
 /// of it, so the cloud boils as one rather than each drone jittering alone.
+/// How far from a drop-off point a cutter flying to it starts making for its
+/// own place in the cloud there (m).
+const CLOUD_EASE_M: f64 = 40.0;
+
 fn swirl(leg: &Leg, id: u64, t_game: f64, t: f64, x: f64, y: f64) -> (f64, f64) {
     let h = dft_sim::noise::hash(id, 0, 0, 0x5717);
     let u1 = dft_sim::noise::unit(h);
@@ -1074,19 +1451,48 @@ fn swirl(leg: &Leg, id: u64, t_game: f64, t: f64, x: f64, y: f64) -> (f64, f64) 
     let dist = (dx * dx + dy * dy).sqrt();
     let k = if dist < 1e-6 { 1.0 } else { ((t_game - leg.t0).max(0.0) * leg.speed / dist).min(1.0) };
     let phase = u1 * std::f64::consts::TAU;
-    let (ox, oy) = if leg.state == 0 {
-        // A loose cloud about the hauler: each drone on its own slow orbit,
-        // some close in, some further out.
-        let r = 3.0 + 9.0 * u2 * u2;
+    // A loose cloud about its drop-off point, high in clear air (out to the
+    // fleet's wait_cloud_m, 30 m): each drone on its own slow orbit, some
+    // close in, some further out.
+    let orbit = || {
+        let r = 4.5 + 25.5 * u2 * u2;
         let w = (0.25 + 0.5 * u3) * if u1 < 0.5 { 1.0 } else { -1.0 };
         let a = phase + t * w;
         let wob = 1.0 + 0.25 * (t * (0.7 + u2) + phase).sin();
         (a.cos() * r * wob, a.sin() * r * wob * 0.8)
+    };
+    // Flying to (or from) a drop-off point, it heads for (or leaves) its own
+    // place in the cloud there over the last (first) CLOUD_EASE_M, so
+    // arriving cutters spread out round the point rather than pile onto it.
+    let mut join = 0.0;
+    if leg.state == 1 || leg.state == 2 {
+        let ease = CLOUD_EASE_M.min(0.5 * dist);
+        let s = |x: f64| {
+            let x = x.clamp(0.0, 1.0);
+            x * x * (3.0 - 2.0 * x)
+        };
+        if leg.cloud & 2 != 0 {
+            join = if ease < 1e-6 { 1.0 } else { 1.0 - s((1.0 - k) * dist / ease) };
+        }
+        if leg.cloud & 1 != 0 && ease > 1e-6 {
+            join = f64::max(join, 1.0 - s(k * dist / ease));
+        }
+    }
+    let (mut ox, mut oy) = if leg.state == 0 {
+        orbit()
     } else if k < 1.0 {
         // In flight: weave across the line of flight, fading in and out.
         let env = (k * std::f64::consts::PI).sin();
         let amp = (dist * 0.08).min(4.0) * (0.4 + 0.6 * u2) * env;
-        let s = (t * (1.5 + 2.0 * u3) + phase).sin() * amp;
+        // Mostly a wave shared by every drone of its flock (keyed by the
+        // flock's end of the flight), running back along the stream, so a
+        // flock's drones snake together like a ribbon; a little of its own.
+        let g = flock_key(leg);
+        let (gp, gw) = (dft_sim::noise::unit(g) * std::f64::consts::TAU, 0.9 + 0.6 * crate::rnd::unit(g, 0x1F));
+        let along = k * dist;
+        let wave = (t * gw - along * 0.15 + gp).sin();
+        let own = (t * (1.5 + 2.0 * u3) + phase).sin();
+        let s = (0.75 * wave + 0.25 * own) * amp;
         (-dy / dist * s, dx / dist * s)
     } else if leg.state == 1 {
         // Cutting: hovering and darting about the cell.
@@ -1096,6 +1502,11 @@ fn swirl(leg: &Leg, id: u64, t_game: f64, t: f64, x: f64, y: f64) -> (f64, f64) 
     } else {
         (0.0, 0.0)
     };
+    if join > 0.0 {
+        let (cx, cy) = orbit();
+        ox += cx * join;
+        oy += cy * join;
+    }
     // Less of the shared flow while cutting, so drones stay at their cell.
     let f = if leg.state == 1 && k >= 1.0 { 0.2 } else { 1.0 };
     (ox + flow.0 * f, oy + flow.1 * f)

@@ -105,3 +105,46 @@ fn the_director_keeps_cutters_from_waiting() {
     assert!(mean < 0.2 * s.drone_count() as f64, "too many cutters left waiting: {mean:.0}");
     assert!(!s.director_log.is_empty());
 }
+
+/// Haulers working at a drop-off point never jump: when the point moves
+/// they fly after it at the fleet's drift speed (Benjamin, 14 Nov: they
+/// were teleporting); and the loads counted on their way to the points
+/// are exactly those in cutters flying there.
+#[test]
+fn working_haulers_follow_their_point_smoothly() {
+    let planet = dft_sim::load_body(&data(), "rubble-asteroid").unwrap();
+    let mut s = Sim::new(World::new(planet), eco());
+    s.free_drones = Some(3000);
+    let drift = s.eco.fleet.drift_m_s;
+    // Each working hauler by when it came to its point (and its flock).
+    let mut last: std::collections::HashMap<(u64, usize), (f64, f64)> = std::collections::HashMap::new();
+    let _ = HaulerState::Idle;
+    let (mut checked, mut worst) = (0u64, 0.0f64);
+    for sec in 1..=900 {
+        s.run(sec as f64);
+        let now = s.time();
+        let mut seen = std::collections::HashMap::new();
+        for h in s.hauler_views() {
+            if h.state != HaulerState::Working {
+                continue;
+            }
+            // (Which hauler: when it came, to which point of which flock.)
+            let hl = &s.haulers[h.id as usize];
+            let key = (hl.since, hl.site * 64 + hl.dock);
+            let p = h.at(now);
+            seen.insert(key, p);
+            if let Some(q) = last.get(&key) {
+                let d = ((p.0 - q.0).powi(2) + (p.1 - q.1).powi(2)).sqrt();
+                worst = worst.max(d);
+                checked += 1;
+            }
+        }
+        last = seen;
+        // What's counted as on its way to the drop-off points is what's flying there.
+        let (counted, flying) = s.incoming_check();
+        assert!((counted - flying).abs() <= 1e-3 * flying.max(1.0), "{counted} counted, {flying} flying");
+    }
+    println!("checked {checked} hauler-seconds; the biggest move in a second {worst:.2} m (drift {drift} m/s)");
+    assert!(checked > 1000);
+    assert!(worst <= 2.0 * drift + 0.5, "a working hauler jumped {worst:.1} m in a second");
+}

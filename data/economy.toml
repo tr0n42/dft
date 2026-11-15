@@ -51,17 +51,28 @@ cold_ref_k = 250             # below this, cold ground makes it cut faster and w
 cold_gain = 0.6              # ...by up to this much more at absolute zero
 
 [hauler]                     # big drones over each flock: fill up from the cutters, carry it up to the mother swarm
-capacity_kg = 1000000        # lifts off when this full (1,000 t)...
+capacity_kg = 5000000        # lifts off when this full (5,000 t)...
 max_stay_s = 600             # ...or after this long at its flock
 speed = 40.0                 # metres per second
 unload_s = 30                # seconds unloading at the mother swarm
 life_s = 3600                # seconds of service before it breaks down
 mass_cost = 2000
 energy_cost = 1000
-max_per_flock = 12
-wait_trigger = 6             # another hauler is sent when this many cutters wait with nowhere to unload
-wait_share = 0.1             # (or this share of the flock, if more)
+wait_trigger = 6             # no more cutters are sent to a flock while this many of its cutters wait for a hauler
 mother_alt_m = 400           # the mother swarm circles this high above the highest ground on the body; haulers unload at its nearest point
+
+[fleet]                      # the fleet commander: air traffic control for haulers (units/fleet.rs)
+dock_hover_m = 60            # drop-off points hang this high over the ground, in clear air over the ground traffic...
+dock_gap_m = 24              # ...at least this far apart middle to middle (a hauler's length clear between two)...
+dock_stack_max_m = 300       # ...stacked higher where there's no room, up to this high...
+dock_spread_m = 60           # ...and a flock's several points this far apart along its face
+fill_min_s = 180             # a flock gets another drop-off point while one hauler would fill faster than this...
+max_docks = 4                # ...up to this many
+call_margin_s = 20           # a relief is called this long before the hauler at a point would be full when it got there
+idle_recycle_s = 600         # a hauler idle at the mother swarm this long is recycled
+wait_cloud_m = 30            # waiting cutters gather this far around their drop-off point
+load_min_s = 5               # a hauler takes loads at least this long before it lifts, however fast it fills...
+drift_m_s = 6                # ...and follows its drop-off point at this speed when the point moves
 
 [flock]                      # how flocks decide among themselves (every 5 s)
 memory_s = 60                # how long a flock remembers where and how fast it cut
@@ -75,7 +86,6 @@ dry_merge = 3                # a flock whose searches keep coming up empty merge
 hard_factor = 2.0            # hard going: this many times slower per tonne than a neighbour...
 help_share = 0.2             # ...and the neighbour sends this share of its cutters to help
 calm_s = 60                  # after a split, merge or help, a flock waits this long before the next
-spare_hauler_s = 120         # a spare hauler standing empty this long blows itself up
 
 [scout]
 unlock_cost = 50000000       # kg of Mass to unlock the class (50 kt)
@@ -238,6 +248,11 @@ bay = [
   { unit = "forester", n = 1, build_s = 45 },
   { unit = "abductor", n = 1, build_s = 45 },
 ]
+# The specialists the game builds for now. Benjamin, 14 Nov: only the units
+# we are working on or have finished; the rest stay out of the game (tests,
+# benches and tools still have them all). Add one here when its turn comes:
+# "sapper", "tunneler", "heatsink", "forester", "abductor".
+game_deploys = []
 
 [units.sapper]
 energy_cost = 400

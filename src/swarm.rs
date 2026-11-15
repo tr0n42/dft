@@ -30,6 +30,8 @@ mod platform;
 mod cutter;
 #[path = "units/hauler.rs"]
 mod hauler;
+#[path = "units/fleet.rs"]
+mod fleet;
 #[path = "units/sapper.rs"]
 mod sapper;
 #[path = "units/tunneler.rs"]
@@ -45,6 +47,7 @@ mod fauna;
 pub use fauna::AnimalView;
 #[allow(unused_imports)]
 use {abductor::*, cutter::*, fauna::*, forester::*, heatsink::*, platform::*, sapper::*, tunneler::*};
+pub use fleet::{Call, FleetBooks};
 pub use hauler::{Hauler, HaulerState, HaulerView};
 pub use platform::{Skills, UnitView};
 
@@ -266,8 +269,6 @@ pub struct FlockStats {
     dry: f64,
     /// Seconds since this flock last split, moved help, or was made.
     calm_s: f64,
-    /// Seconds its spare hauler has stood empty.
-    idle_hauler_s: f64,
     /// Merged into another flock, or left with no cutters: no longer used.
     dead: bool,
     /// Seconds it has had no cutters.
@@ -639,6 +640,50 @@ pub struct Sim {
     /// (Profiling) finer timings: break_free_big, break_free, bodies step,
     /// rock landed, sandbox step, sandbox changes applied, blast tick, the rest.
     pub prof2: [f64; 12],
+    /// Where cutters are simulated cell by cell (see `set_focus`): None
+    /// everywhere (tests and tools); Some(None) nowhere (zoomed out); else
+    /// flocks whose hauler is in this rectangle of cells. Elsewhere a cutter's
+    /// whole trip is worked out at once (`far_trip`).
+    pub(super) focus: crate::sandbox::Attention,
+    /// Cutter trips worked out at once, and cell by cell (for the F1 panel).
+    pub far_trips: u64,
+    pub near_trips: u64,
+    /// For each flock, the tick it came into the focus (None: out of it),
+    /// and whether its cutters have been caught up since (see `catch_up`).
+    pub(super) focus_since: Vec<Option<u64>>,
+    pub(super) caught_up: Vec<bool>,
+    /// Cutters brought home early by `catch_up` (for the bench).
+    pub caught: u64,
+    /// The only specialists the replicator orders (None: any with a bay).
+    /// The game sets it from economy.toml's `game_deploys`; not saved.
+    pub deploy_only: Option<Vec<crate::production::Unit>>,
+    /// Build units the moment they're ordered, straight from the stockpile
+    /// (raw or refined: refining is taken as done) and energy, with no
+    /// fabricator or bay times (`build_now`). The game, until production
+    /// is put together; not saved.
+    pub instant_build: bool,
+    /// The fleet commander's (units/fleet.rs): each flock's drop-off
+    /// points, the calls for haulers waiting (newest last, answered first),
+    /// and its books. Worked out again from the flocks, not saved.
+    pub(super) docks: Vec<Vec<(f64, f64)>>,
+    pub(super) calls: Vec<Call>,
+    /// kg on its way to each drop-off point (flock, point) in cutters'
+    /// holds (see `Drone::promised`): a hauler that these would fill is
+    /// no longer a place to go. Not saved (loaded drones start idle).
+    pub(super) incoming: HashMap<(usize, usize), f64>,
+    pub fleet_books: FleetBooks,
+    /// Bodies adrift near each flock that no cutter has gone for yet
+    /// (sorted each second; see units/cutter.rs `sort_adrift`).
+    pub(super) adrift: Vec<Vec<crate::bodies::Adrift>>,
+    /// Bodies a cutter is on its way to grab (drone -> body), and the
+    /// bodies claimed so.
+    pub(super) grabs: HashMap<u32, u64>,
+    pub(super) claimed: std::collections::HashSet<u64>,
+    /// Bodies cutters have taken out of the air.
+    pub grabbed: u64,
+    /// Whether cutters go for loose bodies adrift at all (on; benches
+    /// switch it off to compare).
+    pub grab_adrift: bool,
     /// (Profiling) seconds spent in each unit's own code (units/*.rs), named
     /// in UNIT_NAMES, so each unit's cost shows on its own.
     pub unit_prof: [f64; 7],
@@ -971,6 +1016,23 @@ impl Sim {
             fauna_prof: 0.0,
             prof: [0.0; 8],
             prof2: [0.0; 12],
+            focus: None,
+            far_trips: 0,
+            focus_since: Vec::new(),
+            caught_up: Vec::new(),
+            caught: 0,
+            near_trips: 0,
+            deploy_only: None,
+            instant_build: false,
+            docks: Vec::new(),
+            calls: Vec::new(),
+            incoming: HashMap::new(),
+            fleet_books: FleetBooks::default(),
+            adrift: Vec::new(),
+            grabs: HashMap::new(),
+            claimed: Default::default(),
+            grabbed: 0,
+            grab_adrift: true,
             unit_prof: [0.0; 7],
             counts: [0; 6],
             free_drones: None,
@@ -1857,10 +1919,9 @@ impl Sim {
         n
     }
 
-    /// Once a second, every flock checks its hauler's spot: if lava has come
+    /// Once a second, every flock checks its landing point: if lava has come
     /// close (around it or rising from below), the flock moves to the nearest
     /// safe open spot, preferring higher ground and the side its work is on.
-    /// The hauler flies there and the waiting cutters follow.
     fn site_safety(&mut self) {
         for h in 0..self.hubs.len() {
             if self.flock.get(h).is_none_or(|f| f.dead) || self.hubs[h].kind != HubKind::Seed {
@@ -1897,30 +1958,8 @@ impl Sim {
             self.hubs[h].y = p.1;
             self.hubs_moved = true;
             self.site_moves += 1;
-            // Its working haulers fly over (arriving, they take the waiting
-            // cutters' loads as usual).
-            let speed = self.eco.hauler.speed.max(1.0);
-            let way = self.hauler_way(old, p);
-            for hl in self.haulers.iter_mut() {
-                if hl.alive && hl.site == h && hl.state == HaulerState::Working {
-                    hl.state = HaulerState::Returning;
-                    hl.from = old;
-                    hl.to = p;
-                    hl.t0 = self.tick;
-                    hl.t1 = self.tick + ((way / speed) / self.eco.tick_s).ceil() as u64;
-                }
-            }
-            // The waiting cutters fly along with their loads.
-            for id in std::mem::take(&mut self.site_wait[h]) {
-                let d = &self.drones[id as usize];
-                if !d.alive || d.home != h || d.phase != Phase::Waiting {
-                    continue;
-                }
-                self.drones[id as usize].trip_start = self.tick;
-                self.on_trip_count += 1;
-                self.head_home(id, old);
-                self.leg_changed(id);
-            }
+            // (Its drop-off points follow it: the fleet commander places
+            // them over its work every few seconds.)
         }
     }
 
@@ -1980,7 +2019,7 @@ impl Sim {
         self.site_wait.push(Vec::new());
         self.flock.push(FlockStats::default());
         let h = self.hubs.len() - 1;
-        self.send_hauler(h);
+        // (Its drop-off point calls for a hauler: see units/fleet.rs.)
         self.happen(Happening::NewFlock, (x, y));
         h
     }
@@ -2025,8 +2064,9 @@ impl Sim {
                 // It takes its load to the new flock's hauler.
                 self.drones[id].phase = Phase::Idle;
                 self.on_trip_count += 1;
-                let here = self.site_pos(from);
+                let here = self.dock_pos(from, self.drones[id].dock as usize);
                 self.head_home(id as u32, here);
+                self.drones[id].off_dock = true;
                 self.leg_changed(id as u32);
             }
         }
@@ -2039,14 +2079,14 @@ impl Sim {
     }
 
     /// The flocks talk among themselves every few seconds:
-    /// - each flock's hauler drifts to hover over where its cutters work;
+    /// - each flock's landing point drifts toward where its cutters work
+    ///   (its drop-off points follow: units/fleet.rs);
     /// - a flock grown too big splits, the new one going to cover fresh
     ///   ground along the surface, away from the others;
     /// - a flock that has run out of work, or has drifted onto another,
     ///   merges into its nearest neighbour;
     /// - a flock stuck on hard ground calls for help, and easier-going
-    ///   neighbours send some of their cutters;
-    /// - a spare hauler that stands empty is blown up.
+    ///   neighbours send some of their cutters.
     fn flock_work(&mut self) {
         let dt = self.ticks(5.0) as f64 * self.eco.tick_s;
         let spec = self.eco.flock.clone();
@@ -2114,24 +2154,10 @@ impl Sim {
             self.merges += 1;
             let pb = self.site_pos(b);
             self.happen(Happening::Merge, pb);
-            // Its haulers join the other flock, as many as it can use; the
-            // rest blow up.
-            let mut have = self.haulers.iter().filter(|hl| hl.alive && hl.site == b).count() as u32;
+            // Its haulers go up to unload, free for the fleet commander.
             for k in 0..self.haulers.len() {
-                if !self.haulers[k].alive || self.haulers[k].site != a {
-                    continue;
-                }
-                if have < self.eco.hauler.max_per_flock && self.haulers[k].state != HaulerState::Working {
-                    self.haulers[k].site = b;
-                    self.haulers_moved = true;
-                    have += 1;
-                } else if have < self.eco.hauler.max_per_flock && self.haulers[k].load > 0.0 {
-                    // A loaded one lifts off to unload, then serves the other flock.
-                    self.haulers[k].site = b;
-                    self.haulers_moved = true;
-                    have += 1;
-                } else {
-                    self.retire_hauler(k);
+                if self.haulers[k].alive && self.haulers[k].site == a && matches!(self.haulers[k].state, HaulerState::Working | HaulerState::Returning) {
+                    self.release_hauler(k);
                 }
             }
         }
@@ -2160,9 +2186,6 @@ impl Sim {
                 }
             }
             let Some((p, _)) = best else { continue };
-            if self.free_drones.is_none() && !self.pay_hauler() {
-                continue;
-            }
             let new = self.new_flock(p.0, p.1);
             moves.push((h, new, 2));
             self.flock[h].calm_s = 0.0;
@@ -2203,21 +2226,6 @@ impl Sim {
         let moved = self.move_cutters(&moves);
         for i in helps {
             self.helpers_sent += moved[i];
-        }
-        // Spare haulers: one standing empty while another serves the flock.
-        for &h in &live {
-            let working: Vec<usize> = (0..self.haulers.len()).filter(|&k| self.haulers[k].alive && self.haulers[k].site == h && self.haulers[k].state == HaulerState::Working).collect();
-            let total = self.haulers.iter().filter(|hl| hl.alive && hl.site == h).count();
-            let empty = working.iter().copied().find(|&k| self.haulers[k].load <= 0.0);
-            if total >= 2 && total as u32 > self.flock[h].want && self.site_wait[h].is_empty() && empty.is_some() {
-                self.flock[h].idle_hauler_s += dt;
-                if self.flock[h].idle_hauler_s >= spec.spare_hauler_s {
-                    self.retire_hauler(empty.unwrap());
-                    self.flock[h].idle_hauler_s = 0.0;
-                }
-            } else {
-                self.flock[h].idle_hauler_s = 0.0;
-            }
         }
         self.haulers.retain(|hl| hl.alive);
         self.haulers_moved = true;
@@ -2507,9 +2515,6 @@ impl Sim {
             // more would only wait too. And a few at a time, so its haulers
             // and the director can keep up.)
             .filter(|&h| self.site_wait[h].len() < self.eco.hauler.wait_trigger as usize)
-            // (Nor to one already needing as many haulers as a flock may
-            // have: what it cuts can't be carried away any faster.)
-            .filter(|&h| self.flock[h].want < self.eco.hauler.max_per_flock)
             .filter_map(|h| {
                 let free = self.capacity[h].min(POOL_SEND_MAX);
                 (free > 0).then_some((free, h))
@@ -2537,7 +2542,7 @@ impl Sim {
                 d.fails = 0;
                 d.last = None;
                 // (Down from the mother swarm over the next few seconds.)
-                self.events.push(Reverse((self.tick + (i as u64 % 40), id)));
+                self.schedule(id, self.tick + (i as u64 % 40));
                 self.leg_changed(id);
                 sent += 1;
                 // (Until its field is swept again, that room is taken.)
@@ -2666,115 +2671,6 @@ impl Sim {
             eprintln!("open_flocks t={:.0}: buckets {} cands {} no_open {} close {} danger {} opened {}", self.time(), self.buckets.len(), ncands, no_open, close, danger, opened.len());
         }
         opened.len()
-    }
-
-    /// The swarm director, once a second: works out how many haulers each
-    /// flock really needs and decides whether another is worth building.
-    ///
-    /// Need: one hauler at the flock filling while the others make the trip:
-    /// one, plus one for each time it would fill during a round trip (a gap
-    /// of up to a quarter of its filling time is let be), from the last few
-    /// minutes (a moment's crowd isn't chronic demand); one more if cutters
-    /// have been left waiting all the same.
-    ///
-    /// Worth: a hauler frees the cutters waiting for one to cut again, so it
-    /// earns what they would cut; spent on cutters instead, the same mass
-    /// earns what new cutters cut. The director builds the hauler when it
-    /// pays at least as well per kilogram (with the economy off, haulers are
-    /// free and it always does). A flock with no hauler at all, or with
-    /// cutters waiting and none at it or on its way, gets one at once.
-    /// Several can be on their way. The last few calls, and why, are kept
-    /// for the F1 panel.
-    fn direct(&mut self) {
-        let dt = self.ticks(1.0) as f64 * self.eco.tick_s;
-        let spec = self.eco.hauler.clone();
-        let fade = (-dt / DIRECTOR_MEMORY_S).exp();
-        let cap = spec.capacity_kg * self.up_cached_cargo;
-        // What a working cutter brings in, and what one costs.
-        let per_cutter = self.rate_per_drone.max(1e-6);
-        let cutter_mass = self.eco.harvester.mass_cost.max(1.0);
-        for site in 0..self.hubs.len() {
-            let waiting = self.site_wait[site].len();
-            {
-                let f = &mut self.flock[site];
-                f.wait_cs = f.wait_cs * fade + waiting as f64 * dt;
-                f.filled *= fade;
-            }
-            if self.flock[site].dead || self.hubs[site].kind != HubKind::Seed {
-                continue;
-            }
-            let (mut n, mut here, mut coming) = (0u32, 0u32, 0u32);
-            for hl in self.haulers.iter().filter(|h| h.alive && h.site == site) {
-                n += 1;
-                match hl.state {
-                    HaulerState::Working => here += 1,
-                    HaulerState::Returning => coming += 1,
-                    _ => {}
-                }
-            }
-            // (Those on order from the factory are on their way too.)
-            let ordered = self.prod.haulers_for(site);
-            n += ordered;
-            coming += ordered;
-            let f = self.flock[site];
-            // Rates over the remembered stretch (a sum fading by `fade` each
-            // second settles at rate x DIRECTOR_MEMORY_S).
-            let fill_rate = f.filled / DIRECTOR_MEMORY_S;
-            let waiting_avg = f.wait_cs / DIRECTOR_MEMORY_S;
-            let trip = if f.trip_s > 0.0 {
-                f.trip_s
-            } else {
-                // No trip timed yet: up to the mother swarm and back, plus unloading.
-                2.0 * dist2(self.site_pos(site), self.rendezvous(site)).sqrt() / spec.speed.max(1.0) + spec.unload_s as f64
-            };
-            // How long one takes to fill (it leaves after max_stay_s anyway),
-            // and so how many are away at once while one fills: a gap of a
-            // quarter of the filling time or less is let be.
-            let fill_s = (cap / fill_rate.max(1e-6)).min(spec.max_stay_s as f64).max(1.0);
-            let mut want = 1 + (trip / fill_s + 0.75).floor() as u32;
-            // (Only while none is already on its way: one sent takes a while
-            // to come, and asking for more meanwhile only piles them up.)
-            if waiting_avg >= spec.wait_trigger as f64 && coming == 0 {
-                want = want.max(n + 1);
-            }
-            let want = want.clamp(1, spec.max_per_flock);
-            self.flock[site].want = want;
-            let urgent = (n == 0 && self.active(site) > 0) || (here == 0 && coming == 0 && waiting >= spec.wait_trigger as usize);
-            if n >= spec.max_per_flock || (n >= want && !urgent) {
-                continue;
-            }
-            let why = if n == 0 {
-                "it has none".to_string()
-            } else if urgent {
-                format!("{waiting} cutters waiting, none at it or on the way")
-            } else {
-                format!("needs {want}: {:.1} t/s in, {:.0} s round trip, {:.0} waiting on average", fill_rate / 1000.0, trip, waiting_avg)
-            };
-            if self.free_drones.is_none() {
-                // Worth it? What the waiting cutters would cut, per kg of
-                // hauler, against what cutters bought instead would.
-                let hauler_pays = waiting_avg.max(waiting as f64) * per_cutter / spec.mass_cost.max(1.0);
-                let cutters_pay = per_cutter / cutter_mass;
-                if !urgent && hauler_pays < cutters_pay {
-                    // (Only worth a note when cutters are actually waiting.)
-                    if waiting_avg >= 1.0 {
-                        self.director_note(site, format!("flock {site}: no hauler ({why}), cutters pay more"));
-                    }
-                    continue;
-                }
-                if !self.pay_hauler() {
-                    self.director_note(site, format!("flock {site}: hauler wanted ({why}), can't afford it"));
-                    continue;
-                }
-            }
-            self.send_hauler(site);
-            if self.factory() {
-                self.director_log_push(format!("flock {site}: hauler {} ordered ({why})", n + 1));
-            } else {
-                self.haulers_built += 1;
-                self.director_log_push(format!("flock {site}: hauler {} ({why})", n + 1));
-            }
-        }
     }
 
     /// A call the director didn't act on, noted at most once a minute per flock.
@@ -3002,6 +2898,10 @@ impl Sim {
         // energy above the reserve.
         let available = self.energy - 5.0 * self.upkeep();
         self.energy -= self.fuser.work(&self.eco.fuser, &self.world.planet.mats.elements, &mut self.stock, dt, available);
+        if self.instant_build {
+            self.build_now();
+            return;
+        }
         self.fabricate(dt);
         // Orders for flocks gone since are dropped.
         let flock = &self.flock;
@@ -3168,14 +3068,47 @@ impl Sim {
         }
     }
 
-    /// Bay b starts on the first order for its kind of unit, if its parts
-    /// are in stock and there is the energy to build it. Returns whether it did.
-    fn start_unit(&mut self, b: usize) -> bool {
-        use crate::production::{Job, Unit};
-        let unit = self.prod.bays[b].unit;
-        let Some(k) = self.prod.orders.iter().position(|o| o.unit() == unit) else { return false };
+    /// Every order built now, in turn, while the stockpile and energy last:
+    /// the elements its parts are made of taken straight from the stockpile
+    /// (refined first, then raw, as if refined on the spot), its energy
+    /// paid, and the unit out at once (see `instant_build`). An order that
+    /// can't be paid for waits; the rest go on.
+    fn build_now(&mut self) {
+        use crate::production::Unit;
+        let mut k = 0;
+        while k < self.prod.orders.len() {
+            let order = self.prod.orders[k];
+            let unit = order.unit();
+            let energy = self.unit_energy(unit);
+            // (A hauler waiting goes first: cutters are no use without one.)
+            let held = if unit != Unit::Hauler && self.prod.orders.iter().any(|o| o.unit() == Unit::Hauler) { self.eco.hauler.energy_cost } else { 0.0 };
+            if self.energy - energy - held <= 5.0 * self.upkeep() {
+                k += 1;
+                continue;
+            }
+            let r = &self.eco.recipe;
+            let counts = r.counts(&self.recipe_now(unit));
+            let need: Vec<(&crate::recipes::Component, f64)> = (0..r.part.len()).filter(|&i| counts[i] > 0).flat_map(|i| { let n = counts[i] as f64; r.part[i].make.iter().map(move |c| (c, c.kg * n)) }).collect();
+            let Some(take) = self.stock.plan(&self.world.planet.mats.elements, &need) else {
+                k += 1;
+                continue;
+            };
+            if unit == Unit::Sapper && !self.cast_charge() {
+                k += 1;
+                continue;
+            }
+            self.stock_spent += self.stock.take(&take);
+            self.energy -= energy;
+            self.prod.orders.remove(k);
+            self.finish_unit(order);
+        }
+    }
+
+    /// The energy to build one `unit`.
+    fn unit_energy(&self, unit: crate::production::Unit) -> f64 {
+        use crate::production::Unit;
         let us = &self.eco.units;
-        let energy = match unit {
+        match unit {
             Unit::Cutter => self.eco.harvester.energy_cost * self.perk_energy / self.up("fabrication") * crate::noise::powi(self.eco.harvester.energy_cost_growth, self.harvesters_alive().min(i32::MAX as u64) as i32),
             Unit::Hauler => self.eco.hauler.energy_cost,
             Unit::Sapper => us.sapper.energy_cost,
@@ -3183,7 +3116,16 @@ impl Sim {
             Unit::HeatSink => us.heatsink.energy_cost,
             Unit::Forester => us.forester.energy_cost,
             Unit::Abductor => us.abductor.energy_cost,
-        };
+        }
+    }
+
+    /// Bay b starts on the first order for its kind of unit, if its parts
+    /// are in stock and there is the energy to build it. Returns whether it did.
+    fn start_unit(&mut self, b: usize) -> bool {
+        use crate::production::{Job, Unit};
+        let unit = self.prod.bays[b].unit;
+        let Some(k) = self.prod.orders.iter().position(|o| o.unit() == unit) else { return false };
+        let energy = self.unit_energy(unit);
         // (Specialists wait while a hauler waits on a free bay: a flock
         // without one can't work at all.)
         let swarm_waiting = !matches!(unit, Unit::Cutter | Unit::Hauler) && self.prod.queued(Unit::Hauler) > 0 && self.prod.building(Unit::Hauler) < self.prod.bays_of(Unit::Hauler);
@@ -3244,6 +3186,13 @@ impl Sim {
         use crate::production::{Order, Unit};
         if !self.factory() {
             return vec!["no factory: units are built at once".into()];
+        }
+        if self.instant_build {
+            let b = &self.prod.built;
+            return vec![
+                "no fabricator or bays yet: each unit is built the moment it is ordered, from the stockpile (refined or raw) and energy".into(),
+                format!("built   {} cutters, {} haulers · waiting on stock or energy: {}", b[0], b[1], self.prod.orders.len()),
+            ];
         }
         let mut v = Vec::new();
         let r = &self.eco.recipe;
@@ -3766,7 +3715,7 @@ impl Sim {
 
     fn leg_of(&self, d: &Drone, speed: f64) -> Leg {
         if !d.alive {
-            return Leg { from: (0.0, 0.0), to: (0.0, 0.0), t0: 0.0, speed: 0.0, state: Leg::GONE };
+            return Leg { from: (0.0, 0.0), to: (0.0, 0.0), t0: 0.0, speed: 0.0, state: Leg::GONE, cloud: 0 };
         }
         let t0 = d.leg_start as f64 * self.eco.tick_s;
         let centre = |c: (i64, i64)| (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
@@ -3775,18 +3724,26 @@ impl Sim {
             // mother swarm, not drawn as one of a cloud round its hauler.
             Phase::Idle if d.fails >= 1 => {
                 let h = &self.hubs[d.home.min(self.hubs.len() - 1)];
-                Leg { from: (h.x, h.y), to: (h.x, h.y), t0, speed, state: Leg::RESTING }
+                Leg { from: (h.x, h.y), to: (h.x, h.y), t0, speed, state: Leg::RESTING, cloud: 0 }
             }
             Phase::Idle | Phase::Waiting => {
-                let h = &self.hubs[d.home.min(self.hubs.len() - 1)];
-                Leg { from: (h.x, h.y), to: (h.x, h.y), t0, speed, state: 0 }
+                let p = self.dock_pos(d.home.min(self.hubs.len() - 1), d.dock as usize);
+                Leg { from: p, to: p, t0, speed, state: 0, cloud: 0 }
             }
-            Phase::Outbound { cell, from, .. } => Leg { from, to: centre(cell), t0, speed, state: 1 },
+            Phase::Outbound { cell, from, .. } => Leg { from, to: centre(cell), t0, speed, state: 1, cloud: d.off_dock as u8 },
             Phase::Inbound { hub, from } => {
-                let to = (self.hubs[hub].x, self.hubs[hub].y);
+                let to = self.dock_pos(hub, d.dock as usize);
                 // Dropping from the mother swarm: as fast as it takes.
-                let speed = if d.trip_start == d.leg_start && d.hold <= 0.0 { speed.max(dist2(from, to).sqrt() / DROP_S) } else { speed };
-                Leg { from, to, t0, speed, state: 2 }
+                let way = dist2(from, to).sqrt();
+                let speed = if d.trip_start == d.leg_start && d.hold <= 0.0 {
+                    speed.max(way / DROP_S)
+                } else {
+                    // Timed to arrive when it does (its way home round
+                    // through open space is longer than the straight line).
+                    let fly_s = d.due.saturating_sub(d.leg_start) as f64 * self.eco.tick_s;
+                    if fly_s > 0.0 { (way / fly_s).clamp(0.35 * speed, speed) } else { speed }
+                };
+                Leg { from, to, t0, speed, state: 2, cloud: 2 | d.off_dock as u8 }
             }
         }
     }
@@ -3840,6 +3797,12 @@ impl Sim {
         (self.sandbox.stats.clone(), self.sandbox.load())
     }
 
+    /// Where cutters work cell by cell, flight by flight (the game: about
+    /// twice the screen; Some(None) when zoomed out too far to see one).
+    pub fn set_focus(&mut self, f: crate::sandbox::Attention) {
+        self.focus = f;
+    }
+
     pub fn set_attention(&mut self, a: crate::sandbox::Attention) {
         self.sandbox.set_attention(a);
         self.bodies.set_attention(a);
@@ -3876,7 +3839,7 @@ impl Sim {
             .map(|h| {
                 let mut st = [0u32; 4];
                 for hl in self.haulers.iter().filter(|x| x.alive && x.site == h) {
-                    st[match hl.state { HaulerState::Working => 0, HaulerState::Lifting => 1, HaulerState::Unloading => 2, HaulerState::Returning => 3 }] += 1;
+                    st[match hl.state { HaulerState::Working => 0, HaulerState::Lifting => 1, HaulerState::Unloading => 2, HaulerState::Returning | HaulerState::Idle => 3 }] += 1;
                 }
                 (h, self.site_wait[h].len(), st, self.active(h))
             })
@@ -3933,6 +3896,9 @@ pub struct Leg {
     pub t0: f64,
     pub speed: f64,
     pub state: u8,
+    /// Drawn joining the cloud waiting at a drop-off point: 1, it sets off
+    /// from its place in one; 2, it ends in one.
+    pub cloud: u8,
 }
 
 /// Drones whose flight leg changed (see `Sim::take_leg_changes`).
@@ -4100,7 +4066,7 @@ impl Sim {
         o.u32(self.haulers.len() as u32);
         for h in &self.haulers {
             o.u64(h.site as u64);
-            o.u8(match h.state { HaulerState::Working => 0, HaulerState::Lifting => 1, HaulerState::Unloading => 2, HaulerState::Returning => 3 });
+            o.u8(match h.state { HaulerState::Working => 0, HaulerState::Lifting => 1, HaulerState::Unloading => 2, HaulerState::Returning => 3, HaulerState::Idle => 4 } + 8 * h.dock.min(31) as u8);
             for v in [h.load, h.credited, h.from.0, h.from.1, h.to.0, h.to.1, h.life_left] {
                 o.f64(v);
             }
@@ -4331,22 +4297,24 @@ impl Sim {
             }
             let id = s.drones.len() as u32;
             s.hub_load[home] += 1;
-            s.drones.push(Drone { alive: true, home, phase: Phase::Idle, life_left, trip_start: s.tick, leg_start: s.tick, last, fails: 0, hold, hold_cr, tank, heat_k });
+            s.drones.push(Drone { alive: true, home, phase: Phase::Idle, life_left, trip_start: s.tick, leg_start: s.tick, last, fails: 0, hold, hold_cr, tank, heat_k, dock: 0, due: 0, promised: 0.0, promised_to: (0, 0), off_dock: false });
             s.alive_count += 1;
             // Back to work over the first second, not all on one tick.
-            s.events.push(Reverse((s.tick + (id as u64 % 10), id)));
+            s.schedule(id, s.tick + (id as u64 % 10));
         }
         s.site_wait = vec![Vec::new(); nh];
         for _ in 0..r.u32()? {
             let site = r.u64()? as usize;
-            let state = match r.u8()? { 0 => HaulerState::Working, 1 => HaulerState::Lifting, 2 => HaulerState::Unloading, _ => HaulerState::Returning };
+            let b = r.u8()?;
+            let dock = (b / 8) as usize;
+            let state = match b % 8 { 0 => HaulerState::Working, 1 => HaulerState::Lifting, 2 => HaulerState::Unloading, 4 => HaulerState::Idle, _ => HaulerState::Returning };
             let v: Vec<f64> = (0..7).map(|_| r.f64()).collect::<Result<_, _>>()?;
             let (t0, t1) = (r.u64()?, r.u64()?);
             if site >= nh {
                 return Err(bad("a hauler's flock"));
             }
             s.haulers_moved = true;
-            s.haulers.push(Hauler { site, state, load: v[0], credited: v[1], from: (v[2], v[3]), to: (v[4], v[5]), t0, t1, life_left: v[6], alive: true, lift_at: 0, mix: Default::default() });
+            s.haulers.push(Hauler { site, dock, state, load: v[0], credited: v[1], from: (v[2], v[3]), to: (v[4], v[5]), t0, t1, life_left: v[6], alive: true, lift_at: 0, since: t1, mix: Default::default() });
         }
         s.starved = r.u64()?;
         s.haulers_lost = r.u64()?;

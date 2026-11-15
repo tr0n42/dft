@@ -53,9 +53,14 @@ fn main() {
         let mut e = eco();
         f(&mut e);
         let mut s = Sim::new(World::new(planet()), e);
+        s.grab_adrift = std::env::var("NOGRAB").is_err();
+        s.sandbox.far_settle = std::env::var("NOSETTLE").is_err();
         // As the game zoomed out: loose matter moves nowhere ("all": everywhere).
         if args.get(4).map(|a| a.as_str()) != Some("all") {
             s.set_attention(Some(None));
+            if std::env::var("NOFOCUS").is_err() {
+                s.set_focus(Some(None));
+            }
         }
         let t0 = Instant::now();
         let verbose = std::env::var("VERBOSE").is_ok();
@@ -80,6 +85,21 @@ fn main() {
                 );
             }
         }
+        // LOOK=n: then zoom in on landing point n (as the game would) and
+        // run on 3 seconds: its cutters should be caught up.
+        if let Some(n) = std::env::var("LOOK").ok().and_then(|v| v.parse::<usize>().ok()) {
+            let mut hp = Vec::new();
+            s.hub_points(&mut hp);
+            if let Some(h) = hp.chunks(3).filter(|c| c[2] == 0.0).nth(n) {
+                let (hx, hy) = (h[0] as i64, h[1] as i64);
+                let r = [hx - 300, hx + 300, hy - 200, hy + 200];
+                s.set_attention(Some(Some(r)));
+                s.set_focus(Some(Some([r[0] - 300, r[1] + 300, r[2] - 200, r[3] + 200])));
+                let before = s.caught;
+                s.run(until + 3.0);
+                println!("    looked at landing point {n}: {} cutters caught up (came home from a trip worked out at once)", s.caught - before);
+            }
+        }
         let real = t0.elapsed().as_secs_f64();
         let per = |v: f64| v / until * 1000.0;
         let (blasts, _, frozen, plants, fires) = s.specialist_totals();
@@ -89,6 +109,49 @@ fn main() {
             frozen / 1000.0,
             plants / 1000.0
         );
+        for l in s.fleet_lines() {
+            println!("    {l}");
+        }
+        // MAP=n: the ground round landing point n as text (# rock, . open).
+        if let Some(n) = std::env::var("MAP").ok().and_then(|v| v.parse::<usize>().ok()) {
+            let mut hp = Vec::new();
+            s.hub_points(&mut hp);
+            if let Some(h) = hp.chunks(3).filter(|c| c[2] == 0.0).nth(n) {
+                let (hx, hy) = (h[0] as i64, h[1] as i64);
+                println!("    ground round landing point {n} at ({hx}, {hy}), x across, y up:");
+                for y in (hy - 70..hy + 30).rev() {
+                    let row: String = (hx - 80..hx + 80).map(|x| if s.material(x, y) == dft_sim::materials::VACUUM { '.' } else { '#' }).collect();
+                    println!("    {row}");
+                }
+            }
+        }
+        // Speckle: rock cells with three or four open sides, round every
+        // landing point (a sieve-eaten face shows many).
+        {
+            let mut hp = Vec::new();
+            s.hub_points(&mut hp);
+            let (mut speck, mut solid) = (0u64, 0u64);
+            let mut seen = std::collections::HashSet::new();
+            for h in hp.chunks(3).filter(|c| c[2] == 0.0) {
+                let (hx, hy) = (h[0] as i64, h[1] as i64);
+                for y in hy - 200..hy + 200 {
+                    for x in hx - 200..hx + 200 {
+                        if !seen.insert((x, y)) || s.material(x, y) == dft_sim::materials::VACUUM {
+                            continue;
+                        }
+                        solid += 1;
+                        let open = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().filter(|d| s.material(x + d.0, y + d.1) == dft_sim::materials::VACUUM).count();
+                        if open >= 3 {
+                            speck += 1;
+                        }
+                    }
+                }
+            }
+            println!("    speckle: {speck} rock cells with 3+ open sides of {solid} round the landing points");
+        }
+        let vented: f64 = s.world.ledger.vented.iter().sum();
+        println!("    bodies in the air {} · lost to space (vented) {:.0} t", s.bodies.count(), vented / 1000.0);
+        println!("    sandbox: {} cells dormant (waiting to be seen) · {} settled out of sight · {} moves in all", s.sandbox.dormant(), s.sandbox.stats.far_moves, s.sandbox.stats.moves);
         println!("    {}", STAGES.iter().zip(s.prof).map(|(n, v)| format!("{n} {:.2}", per(v) )).collect::<Vec<_>>().join(" · "));
     }
 }

@@ -790,6 +790,12 @@ impl World {
         Some(m)
     }
 
+    /// A flying cell taken out of the air by a drone: booked as mined.
+    pub fn mine_aloft(&mut self, m: MatId) {
+        self.ledger.aloft[m as usize] -= self.planet.mats.get(m).density;
+        self.ledger.mine(&self.planet.mats, m, 1.0);
+    }
+
     /// A flying cell drifted off into space for good: booked as vented.
     pub fn lose_aloft(&mut self, m: MatId) {
         let d = self.planet.mats.get(m).density;

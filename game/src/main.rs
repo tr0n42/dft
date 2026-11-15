@@ -356,7 +356,7 @@ fn main() {
         }
     };
     let Start { planet, sim, source, restore } = start;
-    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, full_detail: o.full_detail, quit: false };
+    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, focus: None, full_detail: o.full_detail, quit: false };
     let script = match o.camera.as_deref().map(bench::parse) {
         Some(Ok(steps)) => Some(bench::Script::new(steps)),
         Some(Err(e)) => {
@@ -436,9 +436,21 @@ fn attention(view: Res<view::View>, run: Res<Run>) {
     } else {
         None
     };
+    // Cutters work cell by cell over twice the screen (half a screen more
+    // each side), and only while one is big enough to see.
+    let f = if view.mpp <= 2.0 {
+        let (l, b, r, t) = view.bounds();
+        let (w, h) = (0.5 * (r - l), 0.5 * (t - b));
+        Some([(l - w).floor() as i64, (r + w).ceil() as i64, (b - h).floor() as i64, (t + h).ceil() as i64])
+    } else {
+        None
+    };
     let mut c = run.0.control.lock();
     if c.attention != Some(a) {
         c.attention = Some(a);
+    }
+    if c.focus != Some(f) {
+        c.focus = Some(f);
     }
 }
 

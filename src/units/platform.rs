@@ -305,7 +305,7 @@ impl Sim {
             return;
         }
         for u in Unit::SPECIALISTS {
-            if self.prod.bays_of(u) == 0 {
+            if self.prod.bays_of(u) == 0 || self.deploy_only.as_ref().is_some_and(|l| !l.contains(&u)) {
                 continue;
             }
             let want = match u {

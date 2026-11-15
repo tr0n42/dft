@@ -1,6 +1,8 @@
-//! Haulers: big drones that hover over a flock, take the cutters' loads,
-//! lift full to the mother swarm, unload and come back down. Also how many
-//! a flock gets, and what the screen draws of them (`HaulerView`).
+//! Haulers: big drones that hang at a flock's drop-off point, take the
+//! cutters' loads, lift full to the mother swarm, unload, and wait there to
+//! be sent again. Where they go and how many there are is the fleet
+//! commander's (units/fleet.rs). Also what the screen draws of them
+//! (`HaulerView`).
 //!
 //! Unit file: the hauler's own behaviour; the platform calls `hauler_work`
 //! once a game second.
@@ -10,19 +12,23 @@ use super::*;
 /// What a hauler is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HaulerState {
-    /// Hovering over its flock, taking loads.
+    /// Hanging at its drop-off point, taking loads.
     Working,
     /// Flying up to the mother swarm, full.
     Lifting,
     Unloading,
-    /// Flying back down to its flock (or down for the first time).
+    /// Flying to the drop-off point it was sent to.
     Returning,
+    /// Free at the mother swarm, waiting for a call.
+    Idle,
 }
 
-/// A hauler: a big drone serving one flock (`site`, a landing point).
+/// A hauler: a big drone sent to one drop-off point at a time (`dock` of
+/// flock `site`).
 #[derive(Debug, Clone)]
 pub struct Hauler {
     pub site: usize,
+    pub dock: usize,
     pub state: HaulerState,
     /// kg aboard, and what it is worth credited.
     pub load: f64,
@@ -36,6 +42,8 @@ pub struct Hauler {
     pub alive: bool,
     /// When it last lifted off for the mother swarm (tick), to time its trip.
     pub lift_at: u64,
+    /// When it came to its drop-off point (tick): its stay is timed from it.
+    pub since: u64,
     /// What its load is made of (for drawing).
     pub mix: Mix6,
 }
@@ -50,6 +58,8 @@ pub struct HaulerView {
     pub cruise: f64,
     pub t0: f64,
     pub t1: f64,
+    /// When it came to its drop-off point (game seconds), working.
+    pub since: f64,
     pub fill: f32,
     pub state: HaulerState,
     /// What its load is made of, and which hauler it is (for drawing).
@@ -61,6 +71,10 @@ impl HaulerView {
     pub fn at(&self, t: f64) -> (f64, f64) {
         let k = if self.t1 > self.t0 { ((t - self.t0) / (self.t1 - self.t0)).clamp(0.0, 1.0) } else { 1.0 };
         let k = k * k * (3.0 - 2.0 * k);
+        if self.state == HaulerState::Working {
+            // Drifting after its drop-off point: straight, eased.
+            return (self.from.0 + (self.to.0 - self.from.0) * k, self.from.1 + (self.to.1 - self.from.1) * k);
+        }
         route_at(self.from, self.to, self.cruise, k)
     }
 }
@@ -69,8 +83,9 @@ impl Sim {
     /// A working hauler at site h with the most room, if any.
     pub(super) fn hauler_at(&self, h: usize) -> Option<usize> {
         let mut best: Option<(usize, f64)> = None;
+        let cap = self.eco.hauler.capacity_kg * self.up_cached_cargo;
         let mut look = |i: usize, hl: &Hauler| {
-            if hl.alive && hl.site == h && hl.state == HaulerState::Working && best.is_none_or(|(_, l)| hl.load < l) {
+            if hl.alive && hl.site == h && hl.state == HaulerState::Working && hl.load < cap && best.is_none_or(|(_, l)| hl.load < l) {
                 best = Some((i, hl.load));
             }
         };
@@ -92,7 +107,12 @@ impl Sim {
         let (kg, cr) = (d.hold, d.hold_cr);
         d.hold = 0.0;
         d.hold_cr = 0.0;
+        let cap = self.eco.hauler.capacity_kg * self.up_cached_cargo;
+        let was = self.haulers[k].load;
         self.haulers[k].load += kg;
+        if was < cap && self.haulers[k].load >= cap {
+            self.hauler_filled(k);
+        }
         self.haulers[k].credited += cr;
         self.window_delivered += kg;
         // Its cargo, made of what its flock has been cutting.
@@ -111,25 +131,6 @@ impl Sim {
         if let Some(f) = self.flock.get_mut(site) {
             f.filled += kg;
         }
-    }
-
-    /// Blow up a hauler that isn't needed any more.
-    pub(super) fn retire_hauler(&mut self, k: usize) {
-        let (top, tick) = (self.world.planet.max_radius, self.tick);
-        let lost = std::mem::take(&mut self.haulers[k].load);
-        self.transit.take(lost, None);
-        self.mats_take(lost, false);
-        let hl = &mut self.haulers[k];
-        hl.alive = false;
-        let at = if hl.state == HaulerState::Working {
-            (self.hubs[hl.site].x, self.hubs[hl.site].y)
-        } else {
-            let t = if hl.t1 > hl.t0 { (tick.saturating_sub(hl.t0) as f64 / (hl.t1 - hl.t0) as f64).clamp(0.0, 1.0) } else { 1.0 };
-            route_at(hl.from, hl.to, route_cruise(hl.from, hl.to, top), t * t * (3.0 - 2.0 * t))
-        };
-        self.haulers_retired += 1;
-        let n = (self.eco.hauler.mass_cost / 100.0).round() as u32;
-        self.explode(at, n.clamp(1, 40), 12.0);
     }
 
     /// Where a hauler from flock h unloads: the nearest point of the mother
@@ -195,20 +196,27 @@ impl Sim {
         }
     }
 
-    /// A new hauler leaves the mother swarm for flock h.
+    /// A new hauler leaves the factory, free at the mother swarm over flock
+    /// h for the fleet commander to send. (The seed swarm sets down with
+    /// its first hauler already at its first flock's drop-off point.)
     pub(super) fn launch_hauler(&mut self, h: usize) {
-        let from = self.rendezvous(h);
-        let to = self.site_pos(h);
-        let t1 = self.tick + self.ticks(self.hauler_way(from, to) / self.eco.hauler.speed);
-        // The seed swarm sets down with its first hauler already in place.
-        let state = if self.tick == 0 { HaulerState::Working } else { HaulerState::Returning };
-        let t1 = if self.tick == 0 { 0 } else { t1 };
+        let at = self.rendezvous(h);
         self.haulers_moved = true;
-        self.haulers.push(Hauler { site: h, state, load: 0.0, credited: 0.0, from, to, t0: self.tick, t1, life_left: self.eco.hauler.life_s, alive: true, lift_at: 0, mix: Default::default() });
+        self.haulers.push(Hauler { site: h, dock: 0, state: HaulerState::Idle, load: 0.0, credited: 0.0, from: at, to: at, t0: self.tick, t1: self.tick, life_left: self.eco.hauler.life_s, alive: true, lift_at: 0, since: self.tick, mix: Default::default() });
+        if self.tick == 0 {
+            self.place_docks();
+            let k = self.haulers.len() - 1;
+            let p = self.dock_pos(h, 0);
+            let hl = &mut self.haulers[k];
+            hl.state = HaulerState::Working;
+            hl.from = p;
+            hl.to = p;
+        }
     }
 
-    /// One second of hauler work: lift off when full, unload, come back;
-    /// wear out; and send more haulers where cutters are left waiting.
+    /// One second of hauler work: lift off when full (or relieved), unload,
+    /// wait free at the mother swarm; wear out. Then the fleet commander's
+    /// second (`fleet_work`).
     pub(super) fn hauler_work(&mut self) {
         let dt = self.ticks(1.0) as f64 * self.eco.tick_s;
         // (What was brought lately fades: a few minutes' worth.)
@@ -223,39 +231,40 @@ impl Sim {
             if !self.haulers[k].alive {
                 continue;
             }
-            let site = self.haulers[k].site;
+            let site = self.haulers[k].site.min(self.hubs.len() - 1);
             if self.flock.get(site).is_some_and(|f| f.dead) && matches!(self.haulers[k].state, HaulerState::Working | HaulerState::Returning) {
-                // Its flock is gone: nothing left for it to do.
-                self.retire_hauler(k);
+                // Its flock is gone: up to unload, then free for another call.
+                self.release_hauler(k);
                 continue;
             }
-            let here = self.site_pos(site);
+            let here = self.dock_pos(site, self.haulers[k].dock);
+            let cur = self.hauler_pos(k);
+            let fleet = self.eco.fleet.clone();
             let hot_here = self.contact_k((here.0.floor() as i64, here.1.floor() as i64)) > self.eco.harvester.melt_k;
             let now = self.tick;
-            let mother = self.rendezvous(site);
-            let top = self.world.planet.max_radius;
             let hl = &mut self.haulers[k];
             hl.life_left -= dt;
             match hl.state {
                 HaulerState::Working => {
-                    hl.from = here;
-                    hl.to = here;
+                    // Its point moved: it follows, flying over at its own pace.
+                    if dist2(hl.to, here) > 0.25 {
+                        let way = dist2(cur, here).sqrt();
+                        hl.from = cur;
+                        hl.to = here;
+                        hl.t0 = now;
+                        hl.t1 = now + ((way / fleet.drift_m_s.max(0.1)) / self.eco.tick_s).ceil().max(1.0) as u64;
+                    }
                     // Lava (or anything hotter than it can stand) over its
                     // spot: it melts where it stands, cargo and all.
                     if hot_here {
                         hl.life_left = 0.0;
                     }
-                    let stayed = (now - hl.t1) as f64 * self.eco.tick_s;
-                    if hl.load >= cap || (hl.load > 0.0 && stayed >= spec.max_stay_s) {
+                    let stayed = (now - hl.since) as f64 * self.eco.tick_s;
+                    if (hl.load >= cap && stayed >= fleet.load_min_s) || (hl.load > 0.0 && stayed >= spec.max_stay_s) {
                         if self.happenings.len() < 400 {
                             self.happenings.push((Happening::HaulerLift, here.0, here.1));
                         }
-                        hl.state = HaulerState::Lifting;
-                        hl.lift_at = now;
-                        hl.from = here;
-                        hl.to = mother;
-                        hl.t0 = now;
-                        hl.t1 = now + ((route_len(here, mother, route_cruise(here, mother, top)) / spec.speed) / self.eco.tick_s).ceil() as u64;
+                        self.release_hauler(k);
                     }
                 }
                 HaulerState::Lifting if now >= hl.t1 => {
@@ -270,6 +279,14 @@ impl Sim {
                     hl.from = hl.to;
                     hl.t0 = now;
                     hl.t1 = now + (spec.unload_s / self.eco.tick_s).ceil() as u64;
+                    if hl.lift_at > 0 {
+                        // Its trip from lifting off to free again, for the director.
+                        let trip = (hl.t1 - hl.lift_at) as f64 * self.eco.tick_s;
+                        hl.lift_at = 0;
+                        if let Some(f) = self.flock.get_mut(site) {
+                            f.trip_s = if f.trip_s <= 0.0 { trip } else { f.trip_s * 0.7 + trip * 0.3 };
+                        }
+                    }
                     // Delivered to the mother swarm.
                     self.energy += kg / 1000.0 * self.eco.seed_swarm.processing_energy_per_tonne * self.up("processing yield");
                     self.mass += cr;
@@ -283,61 +300,77 @@ impl Sim {
                     }
                 }
                 HaulerState::Unloading if now >= hl.t1 => {
-                    hl.state = HaulerState::Returning;
-                    hl.to = here;
+                    // Free, waiting at the mother swarm for a call.
+                    hl.state = HaulerState::Idle;
                     hl.t0 = now;
-                    hl.t1 = now + ((route_len(hl.from, here, route_cruise(hl.from, here, top)) / spec.speed) / self.eco.tick_s).ceil() as u64;
+                    hl.t1 = now;
                 }
                 HaulerState::Returning if now >= hl.t1 => {
-                    if hl.lift_at > 0 {
-                        let trip = (now - hl.lift_at) as f64 * self.eco.tick_s;
-                        if let Some(f) = self.flock.get_mut(site) {
-                            f.trip_s = if f.trip_s <= 0.0 { trip } else { f.trip_s * 0.7 + trip * 0.3 };
-                        }
-                        hl.lift_at = 0;
-                    }
                     hl.state = HaulerState::Working;
-                    hl.from = here;
-                    hl.to = here;
+                    hl.from = hl.to;
+                    hl.t0 = now;
                     hl.t1 = now;
-                    arrived.push((k, site));
+                    hl.since = now;
+                    arrived.push((k, site, hl.dock));
                 }
                 _ => {}
             }
             if self.haulers[k].life_left <= 0.0 {
-                // Broken down: it falls where it is, with whatever it carried.
+                // Broken down: it self-destructs where it is, cargo and all.
+                let at = self.hauler_pos(k);
                 let hl = &mut self.haulers[k];
                 hl.alive = false;
                 let lost = std::mem::take(&mut hl.load);
                 self.transit.take(lost, None);
                 self.mats_take(lost, false);
-                let hl = &mut self.haulers[k];
-                let t = if hl.t1 > hl.t0 { ((now - hl.t0) as f64 / (hl.t1 - hl.t0) as f64).clamp(0.0, 1.0) } else { 1.0 };
-                let at = route_at(hl.from, hl.to, route_cruise(hl.from, hl.to, top), t * t * (3.0 - 2.0 * t));
                 self.haulers_lost += 1;
-                // Worn out: it self-destructs where it is, cargo and all.
                 let n = (self.eco.hauler.mass_cost / 100.0).round() as u32;
                 self.explode(at, n.clamp(1, 40), 12.0);
             }
         }
-        // Cutters waiting where a hauler just arrived unload and go back to work.
-        for (k, site) in arrived {
+        for (k, site, dock) in arrived {
             if !self.haulers[k].alive {
                 continue;
             }
-            for (i, id) in std::mem::take(&mut self.site_wait[site]).into_iter().enumerate() {
-                if self.drones[id as usize].alive && self.drones[id as usize].home == site && self.drones[id as usize].phase == Phase::Waiting {
+            // A relief: the one it relieves goes up to unload.
+            let old: Vec<usize> = (0..self.haulers.len()).filter(|&j| j != k && self.haulers[j].alive && self.haulers[j].site == site && self.haulers[j].dock == dock && self.haulers[j].state == HaulerState::Working).collect();
+            for j in old {
+                self.release_hauler(j);
+                self.fleet_books.reliefs += 1;
+            }
+            // Cutters waiting at this flock: those at this point unload and
+            // go back to work; those at a point with no hauler fly over.
+            let waiting = std::mem::take(&mut self.site_wait[site]);
+            let mut keep = Vec::new();
+            for (i, id) in waiting.into_iter().enumerate() {
+                let d = &self.drones[id as usize];
+                if !(d.alive && d.home == site && d.phase == Phase::Waiting) {
+                    continue;
+                }
+                let at = d.dock as usize;
+                if at == dock {
                     self.unload_into(id, k);
                     self.drones[id as usize].phase = Phase::Idle;
                     self.leg_changed(id);
                     // (Back to work over a few seconds, not all in one step.)
-                    self.events.push(Reverse((self.tick + (i as u64 % 30), id)));
+                    self.schedule(id, self.tick + (i as u64 % 30));
+                } else if self.hauler_at_dock(site, at).is_none() {
+                    let from = self.dock_pos(site, at);
+                    self.drones[id as usize].phase = Phase::Idle;
+                    self.drones[id as usize].trip_start = self.tick;
+                    self.on_trip_count += 1;
+                    self.head_home_to(id, from, dock, 0);
+                    self.drones[id as usize].off_dock = true;
+                    self.leg_changed(id);
+                } else {
+                    keep.push(id);
                 }
             }
+            self.site_wait[site].extend(keep);
         }
         self.haulers.retain(|h| h.alive);
         self.haulers_moved = true;
-        self.direct();
+        self.fleet_work();
     }
 
     /// Every hauler, for drawing.
@@ -348,8 +381,10 @@ impl Sim {
             .enumerate()
             .filter(|(_, h)| h.alive)
             .map(|(k, h)| {
-                let (from, to) = if h.state == HaulerState::Working { let p = self.site_pos(h.site); (p, p) } else { (h.from, h.to) };
-                HaulerView { from, to, cruise: route_cruise(from, to, self.world.planet.max_radius), t0: h.t0 as f64 * self.eco.tick_s, t1: h.t1 as f64 * self.eco.tick_s, fill: (h.load / cap).min(1.0) as f32, state: h.state, mix: h.mix, id: k as u32 }
+                let (from, to) = (h.from, h.to);
+                // (Working, it drifts after its point the short way, never climbing.)
+                let cruise = if h.state == HaulerState::Working { len(from).max(len(to)) } else { route_cruise(from, to, self.world.planet.max_radius) };
+                HaulerView { from, to, cruise, t0: h.t0 as f64 * self.eco.tick_s, t1: h.t1 as f64 * self.eco.tick_s, since: h.since as f64 * self.eco.tick_s, fill: (h.load / cap).min(1.0) as f32, state: h.state, mix: h.mix, id: k as u32 }
             })
             .collect()
     }

@@ -88,6 +88,9 @@ const NECK_CELLS_PER_HARDNESS: f64 = 60.0;
 const GOUGE_M_S: f64 = 3.0;
 /// Most small bodies in the air at once (pieces beyond it are set down).
 const MAX_LOOSE: usize = 400;
+/// Cells out of sight checked for having been cut free each step.
+const FAR_STARTS: usize = 300;
+
 /// Most cells waiting for the big-chunk search looked at in one step.
 const BIG_SCAN: usize = 4096;
 
@@ -208,6 +211,8 @@ fn orphan_push(c: Cell, speed: f64, cells: usize) -> ((f64, f64), f64) {
 
 /// A loose body and the cells it is made of.
 struct Loose {
+    /// Its name (for a drone sent to grab it).
+    id: u64,
     /// The frame it moves in.
     frame: Cell,
     /// The cell its local (0, 0) was cut from (each cell keeps the texture
@@ -228,6 +233,16 @@ struct Loose {
     gouge_left: usize,
     /// Ticks since it was launched (its first moments aren't knocks).
     age: u32,
+}
+
+/// A body in the air a drone could pick up: its name, middle, velocity
+/// (m/s) and mass (kg).
+#[derive(Clone, Copy, Debug)]
+pub struct Adrift {
+    pub id: u64,
+    pub at: (f64, f64),
+    pub vel: (f64, f64),
+    pub kg: f64,
 }
 
 /// What happened to bodies during a tick.
@@ -274,6 +289,8 @@ fn frame_of(c: Cell) -> Cell {
 }
 
 pub struct Bodies {
+    /// The next body's name.
+    next_id: u64,
     frames: std::collections::BTreeMap<Cell, Frame>,
     dt: Real,
     loose: Vec<Loose>,
@@ -340,7 +357,7 @@ fn is_rock(w: &World, m: MatId) -> bool {
 impl Bodies {
     pub fn new(world: &World) -> Self {
         let dt = 1.0 / world.planet.mats.physics.ticks_per_s as Real;
-        Bodies { frames: Default::default(), dt, loose: Vec::new(), drops: Vec::new(), soft_stale: CellSet::default(), dirty: Default::default(), dirty_seen: Default::default(), big_cursor: None, untouched_vox: CellMap::default(), slabs: Vec::new(), big_dirty: Default::default(), big_tokens: 0.0, far_tokens: 0.0, tick: 0, stats: Stats::default(), attention: None, waiting: Default::default() }
+        Bodies { next_id: 0, frames: Default::default(), dt, loose: Vec::new(), drops: Vec::new(), soft_stale: CellSet::default(), dirty: Default::default(), dirty_seen: Default::default(), big_cursor: None, untouched_vox: CellMap::default(), slabs: Vec::new(), big_dirty: Default::default(), big_tokens: 0.0, far_tokens: 0.0, tick: 0, stats: Stats::default(), attention: None, waiting: Default::default() }
     }
 
     /// The frame with key k, made on first use.
@@ -376,6 +393,37 @@ impl Bodies {
     /// Bodies in the air right now.
     pub fn count(&self) -> usize {
         self.loose.len() + self.slabs.len()
+    }
+
+    /// Every body in the air that a drone could pick up (see `grab`).
+    pub fn adrift(&self, w: &World) -> Vec<Adrift> {
+        let mut out = Vec::with_capacity(self.loose.len());
+        for l in &self.loose {
+            let n = l.cells.len().max(1) as Real;
+            let (mx, my) = l.cells.iter().fold((0.0, 0.0), |a, ((i, j), _)| (a.0 + *i as Real + 0.5, a.1 + *j as Real + 0.5));
+            let at = self.world_point(l, Vector::new(mx / n, my / n));
+            let v = self.frames[&l.frame].phys.bodies[l.handle].linvel();
+            let kg = l.cells.iter().map(|c| w.planet.mats.get(c.1).density).sum();
+            out.push(Adrift { id: l.id, at, vel: (v.x as f64, v.y as f64), kg });
+        }
+        out
+    }
+
+    /// A drone takes body `id` out of the air, whole: its cells' materials
+    /// (booked as mined), or none if it's gone (landed, or drifted off).
+    pub fn grab(&mut self, w: &mut World, id: u64) -> Vec<MatId> {
+        let Some(i) = self.loose.iter().position(|l| l.id == id) else { return Vec::new() };
+        let l = self.loose.remove(i);
+        self.frames.get_mut(&l.frame).unwrap().phys.remove_body(l.handle);
+        for &(_, m) in &l.cells {
+            if l.wreck {
+                // (Scrap was booked as deposited, not aloft.)
+                w.ledger.mine(&w.planet.mats, m, 1.0);
+            } else {
+                w.mine_aloft(m);
+            }
+        }
+        l.cells.into_iter().map(|c| c.1).collect()
     }
 
     /// Drops of liquid in flight right now.
@@ -527,7 +575,9 @@ impl Bodies {
         );
         let speed = (vel.x * vel.x + vel.y * vel.y).sqrt() as f64;
         let gouge_left = local.len() / 3;
-        self.loose.push(Loose { frame: fk, origin, handle, cells: local, still_s: 0.0, wreck, soft, last_speed: speed, gouge_left, age: 0 });
+        let id = self.next_id;
+        self.next_id += 1;
+        self.loose.push(Loose { id, frame: fk, origin, handle, cells: local, still_s: 0.0, wreck, soft, last_speed: speed, gouge_left, age: 0 });
     }
 
     /// The ground covering cell c changed a little: rebuild it within a second.
@@ -681,10 +731,20 @@ impl Bodies {
             self.dirty.remove(&c);
             starts.push(c);
         }
+        // Out of sight, as many again are checked the same way (what comes
+        // loose there is set straight down on the ground below it, see
+        // `step`, so nothing hangs in the air until someone looks); beyond
+        // that they wait to be seen.
         let mut aside = 0;
-        while starts.len() < MAX_STARTS && aside < 20 * MAX_STARTS {
+        let mut far = 0;
+        while starts.len() < 2 * MAX_STARTS && aside < 20 * MAX_STARTS {
             let Some(c) = self.dirty.pop_first() else { break };
             if !crate::sandbox::in_attention(self.attention, c) {
+                if far < FAR_STARTS {
+                    far += 1;
+                    starts.push(c);
+                    continue;
+                }
                 self.waiting.add(c);
                 self.big_dirty.insert(c);
                 aside += 1;
@@ -696,11 +756,6 @@ impl Bodies {
         let mut attached = CellSet::default();
         let mut lifted = Vec::new();
         for s in starts {
-            if !crate::sandbox::in_attention(self.attention, s) {
-                self.waiting.add(s);
-                self.big_dirty.insert(s);
-                continue;
-            }
             if !attached.contains(&s) {
                 // (It may be part of a chunk too big for this quick search.)
                 self.big_dirty.insert(s);

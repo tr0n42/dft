@@ -21,7 +21,7 @@
 //!   game_s: game seconds per stage (default 1200)
 //! Environment: BODY (default living-world), KM (default 35), DRONES
 //! (default 500000), NOTE (a word for the history row), NOSAVE=1 (don't
-//! write the history).
+//! write the history), NOFOCUS=1 (cutters flown cell by cell everywhere).
 
 use dft_sim::economy::Economy;
 use dft_sim::production::Unit;
@@ -137,6 +137,11 @@ fn main() {
         s.free_units = team.clone();
         // Zoomed out, as the player mostly is.
         s.set_attention(Some(None));
+        // ...so cutters' trips are worked out at once (NOFOCUS=1: flown
+        // cell by cell everywhere, as before 14 Nov).
+        if std::env::var("NOFOCUS").is_err() {
+            s.set_focus(Some(None));
+        }
         let names: Vec<String> = team.iter().map(|(u, n)| format!("{n} {}", u.name())).collect();
         println!("\nstage {stage}: {} ({})", STAGES[stage - 1], if names.is_empty() { "no specialists".into() } else { names.join(", ") });
         let t0 = Instant::now();
@@ -155,9 +160,11 @@ fn main() {
             let (_, waiting, out, home) = s.phase_counts();
             let top: Vec<String> = cols.iter().zip(&c).filter(|(_, v)| **v >= 0.5).map(|(n, v)| format!("{n} {v:.0}")).collect();
             println!(
-                "  t {t:5.0}: {:6.1} s per game min · {:6} working · ms per game s: {}",
+                "  t {t:5.0}: {:6.1} s per game min · {:6} working ({} waiting) · {:.0} kt mined · ms per game s: {}",
                 w.elapsed().as_secs_f64() / ((t - from) / 60.0),
                 waiting + out + home,
+                waiting,
+                s.world.ledger.mined_kg() / 1e6,
                 top.join(", ")
             );
         }

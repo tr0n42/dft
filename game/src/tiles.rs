@@ -50,10 +50,18 @@ const REBUILD_UNDER_S: f64 = 1.0;
 /// Tiles just off screen (built ahead so panning shows no pop) are rebuilt
 /// less often while the ground under them keeps changing.
 const REBUILD_AHEAD_S: f64 = 0.5;
-/// The atmosphere follows the ground down once it has been eaten more than
-/// this far below where it stood (less, and the old surface is kept: the
-/// published heights are too coarse to follow small dips).
-const AIR_SINK_M: f64 = 8.0;
+/// The atmosphere's floor is a smooth surface over the ground as it stood,
+/// sunk by how much matter is missing beneath it: the depth eaten in each
+/// direction (from the published heights), averaged over this far either
+/// way (m), twice (a soft bell). A shaft or tunnel sinks it a little over a
+/// wide stretch rather than pulling a sliver of haze down into it.
+const AIR_SMOOTH_M: f64 = 120.0;
+/// The haze reaches this far down into eaten ground below its floor (m),
+/// thinning out, so a freshly cut cell shows haze rather than a blank hole.
+const HAZE_DEEP_M: f64 = 100.0;
+/// The atmosphere thins (its height, depth and strength) as the body is
+/// eaten, gone when this share of it is.
+const HAZE_GONE_AT: f64 = 0.5;
 /// How far past the screen tiles are built ahead: this many screen widths
 /// (and heights) of extra ground around the view, half on each side.
 const AHEAD_SCREENS: f64 = 1.0;
@@ -233,6 +241,8 @@ pub struct Tiles {
     heights: Option<(u64, Arc<Vec<f32>>)>,
     /// The heights the tiles were last brought up to date with.
     heights_seen: Option<Arc<Vec<f32>>>,
+    /// How far the atmosphere has thinned (0 whole, 1 gone), in steps.
+    thin: f64,
     /// When each 64-cell block last changed (seconds): zoomed-in tiles, many
     /// to a block, check it rather than being marked one by one.
     block_changed: HashMap<(i64, i64), f64>,
@@ -407,9 +417,9 @@ fn keys_in_view(view: &View, level: i8, margin: i64, under: bool) -> Vec<Key> {
 
 /// Build a tile's pixels (RGBA, top row first), or None if it's all empty
 /// space. `live`: the running world, read where the swarm has been.
-fn build(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, heights: Option<Arc<Vec<f32>>>) -> Option<(Vec<u8>, bool, Vec<SwayCell>)> {
+fn build(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, heights: Option<Arc<Vec<f32>>>, thin: f64) -> Option<(Vec<u8>, bool, Vec<SwayCell>)> {
     let t0 = std::time::Instant::now();
-    let r = build_inner(p, k, live, collapse, heights.as_deref().map(|v| v.as_slice()));
+    let r = build_inner(p, k, live, collapse, heights.as_deref().map(|v| v.as_slice()), thin);
     BUILDS.fetch_add(1, Relaxed);
     BUILD_NS.fetch_add(t0.elapsed().as_nanos() as u64, Relaxed);
     r
@@ -473,7 +483,36 @@ pub fn collapse_radius(p: &Planet, eaten: f64) -> f64 {
     (r / full * 400.0).ceil() / 400.0 * full
 }
 
-fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, heights: Option<&[f32]>) -> Option<(Vec<u8>, bool, Vec<SwayCell>)> {
+/// The atmosphere's floor in each published direction (see AIR_SMOOTH_M),
+/// from the ground's published heights `h`.
+fn air_floor(p: &Planet, h: &[f32]) -> Vec<f32> {
+    let n = h.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let tau = std::f64::consts::TAU;
+    let ground: Vec<f64> = (0..n).map(|i| {
+        let a = tau * i as f64 / n as f64;
+        p.surface_radius(a.cos(), a.sin())
+    }).collect();
+    let mut d: Vec<f64> = (0..n).map(|i| (ground[i] - h[i] as f64).max(0.0)).collect();
+    let arc = tau * p.max_radius / n as f64;
+    let w = ((AIR_SMOOTH_M / arc.max(1e-6)).round() as usize).clamp(0, (n - 1) / 2);
+    if w > 0 {
+        for _ in 0..2 {
+            let mut out = vec![0.0; n];
+            let mut sum: f64 = (0..=2 * w).map(|j| d[(j + n - w) % n]).sum();
+            for (i, o) in out.iter_mut().enumerate() {
+                *o = sum / (2 * w + 1) as f64;
+                sum += d[(i + w + 1) % n] - d[(i + n - w) % n];
+            }
+            d = out;
+        }
+    }
+    (0..n).map(|i| (ground[i] - d[i]) as f32).collect()
+}
+
+fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, heights: Option<&[f32]>, thin: f64) -> Option<(Vec<u8>, bool, Vec<SwayCell>)> {
     use dft_sim::texture::{self as tx, Sides};
     let span = span_cells(k.level);
     // Texel size in cells, and texels per cell.
@@ -580,7 +619,11 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
     let mut ghosts: HashMap<(i64, i64), [u8; 3]> = HashMap::new();
     let mut ghost = |g: (i64, i64)| *ghosts.entry(g).or_insert_with(|| tx::ghost(p, g.0 + 1, g.1 + 1));
     let gm = tx::GHOST_M;
-    let atm = p.spec.atmosphere_m;
+    // The atmosphere as the body is eaten: lower, shallower and fainter.
+    let whole = 1.0 - thin;
+    let atm = p.spec.atmosphere_m * whole;
+    let deep = HAZE_DEEP_M * whole;
+    let faint = 0.55 * whole.sqrt();
     let band = CRUMBLE * p.max_radius;
     let debris = (p.max_radius / 300.0).max(2.0);
     let mut has_ghost = false;
@@ -619,7 +662,7 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
                         let i = t.floor() as usize % nh;
                         let f = t - t.floor();
                         let top = h[i] as f64 * (1.0 - f) + h[(i + 1) % nh] as f64 * f;
-                        if top < ground - AIR_SINK_M { top } else { ground }
+                        top
                     }
                     _ => ground,
                 };
@@ -627,7 +670,20 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
                 if r < ground + atm {
                     has_ghost = true;
                 }
-                let underground = r < now && !p.in_crater(fx, fy);
+                // (Haze reaches `deep` below the floor: eaten ground there
+                // is hazy, not a hole.)
+                let below = now - r;
+                let underground = below > deep && !p.in_crater(fx, fy);
+                if !underground && below > 0.0 && !p.in_crater(fx, fy) {
+                    if atm <= 0.0 || deep <= 0.0 {
+                        continue;
+                    }
+                    let u = (1.0 - below / deep).clamp(0.0, 1.0);
+                    let a = faint * u * u * (3.0 - 2.0 * u);
+                    let c = p.palette.atmosphere;
+                    px[o..o + 4].copy_from_slice(&[c[0], c[1], c[2], (a * 255.0) as u8]);
+                    continue;
+                }
                 // The ghost crumbles at the collapse's edge: each block of
                 // debris holds on until the edge passes its own depth.
                 let hold = if underground {
@@ -710,7 +766,7 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
                     if atm <= 0.0 || h >= atm {
                         continue;
                     }
-                    let a = 0.55 * (1.0 - h / atm);
+                    let a = faint * (1.0 - h / atm);
                     let c = p.palette.atmosphere;
                     [c[0], c[1], c[2], (a * 255.0) as u8]
                 }
@@ -782,8 +838,12 @@ fn request(mut tiles: ResMut<Tiles>, view: Res<View>, body: Res<crate::Body>, ru
         let c = collapse_radius(&body.0, eaten);
         let new_heights = heights.as_ref().map(|h| h.0) != tiles.heights.as_ref().map(|h| h.0);
         if new_heights {
-            tiles.heights = heights;
+            // (Kept as the atmosphere's floor, which is all the tiles use.)
+            tiles.heights = heights.map(|(v, h)| (v, Arc::new(air_floor(&body.0, &h))));
         }
+        let thin = ((eaten / HAZE_GONE_AT).clamp(0.0, 1.0) * 50.0).round() / 50.0;
+        let thinned = thin != tiles.thin;
+        tiles.thin = thin;
         // Which directions round the body the ground's height changed in.
         let mut moved: Option<Vec<bool>> = None;
         if new_heights {
@@ -796,8 +856,8 @@ fn request(mut tiles: ResMut<Tiles>, view: Res<View>, body: Res<crate::Body>, ru
                 tiles.heights_seen = Some(h.clone());
             }
         }
-        if (GHOST && c != tiles.collapse) || moved.as_ref().is_some_and(|m| m.iter().any(|&x| x)) {
-            let all = GHOST && c != tiles.collapse;
+        if (GHOST && c != tiles.collapse) || thinned || moved.as_ref().is_some_and(|m| m.iter().any(|&x| x)) {
+            let all = (GHOST && c != tiles.collapse) || thinned;
             tiles.collapse = c;
             for (k, s) in tiles.slots.iter_mut() {
                 if s.ghost && (all || moved.as_ref().is_some_and(|m| k.faces_moved(m))) {
@@ -895,7 +955,8 @@ fn request(mut tiles: ResMut<Tiles>, view: Res<View>, body: Res<crate::Body>, ru
         let live = if touched { run.as_ref().map(|r| r.0.clone()) } else { None };
         let collapse = tiles.collapse;
         let heights = tiles.heights.as_ref().map(|h| h.1.clone());
-        let task = AsyncComputeTaskPool::get().spawn(async move { build(&p, k, live, collapse, heights) });
+        let thin = tiles.thin;
+        let task = AsyncComputeTaskPool::get().spawn(async move { build(&p, k, live, collapse, heights, thin) });
         tiles.building += 1;
         if fresh {
             tiles.slots.insert(k, Slot { shown: Shown::Pending, task: Some(task), plants: Arc::new(Vec::new()), stale: false, built_at: now, image_from: now, changed_at: 0.0, seen: frame, ghost: false, away: false });

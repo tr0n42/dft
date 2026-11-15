@@ -179,19 +179,57 @@ pub struct HaulerSpec {
     pub life_s: f64,
     pub mass_cost: f64,
     pub energy_cost: f64,
-    /// At most this many haulers serve one flock.
-    pub max_per_flock: u32,
-    /// Another hauler is sent for when this many cutters wait at a flock
-    /// with nowhere to unload (or this share of the flock, if more).
+    /// No more cutters are sent to a flock while this many of its cutters
+    /// wait with nowhere to unload.
     pub wait_trigger: u32,
-    pub wait_share: f64,
     /// The mother swarm's height above the highest ground on the body (metres).
     pub mother_alt_m: f64,
 }
 
 impl Default for HaulerSpec {
     fn default() -> Self {
-        HaulerSpec { capacity_kg: 1_000_000.0, max_stay_s: 600.0, speed: 40.0, unload_s: 30.0, life_s: 3600.0, mass_cost: 2000.0, energy_cost: 1000.0, max_per_flock: 4, wait_trigger: 6, wait_share: 0.1, mother_alt_m: 400.0 }
+        HaulerSpec { capacity_kg: 5_000_000.0, max_stay_s: 600.0, speed: 40.0, unload_s: 30.0, life_s: 3600.0, mass_cost: 2000.0, energy_cost: 1000.0, wait_trigger: 6, mother_alt_m: 400.0 }
+    }
+}
+
+/// The fleet commander (air traffic control for haulers; see
+/// units/fleet.rs): where each flock's drop-off points hang, and when
+/// haulers are called, sent, built and recycled.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct FleetSpec {
+    /// Drop-off points hang this high over the ground below them (m), in
+    /// clear air over the flock's ground traffic...
+    pub dock_hover_m: f64,
+    /// ...at least this far apart, middle to middle (m: a hauler's length
+    /// clear between two)...
+    pub dock_gap_m: f64,
+    /// ...stacked higher where there's no room, up to this high (m)...
+    pub dock_stack_max_m: f64,
+    /// ...and a flock's several points this far apart along its face (m).
+    pub dock_spread_m: f64,
+    /// A flock gets another drop-off point while one hauler would fill
+    /// faster than this (seconds)...
+    pub fill_min_s: f64,
+    /// ...up to this many.
+    pub max_docks: usize,
+    /// A relief is called this many seconds before the hauler at a point
+    /// would be full by the time it gets there.
+    pub call_margin_s: f64,
+    /// A hauler idle at the mother swarm this long is recycled (seconds).
+    pub idle_recycle_s: f64,
+    /// Waiting cutters gather this far around their drop-off point (m).
+    pub wait_cloud_m: f64,
+    /// A hauler takes loads at least this long before it lifts, however
+    /// fast it fills (seconds)...
+    pub load_min_s: f64,
+    /// ...and follows its drop-off point at this speed when it moves (m/s).
+    pub drift_m_s: f64,
+}
+
+impl Default for FleetSpec {
+    fn default() -> Self {
+        FleetSpec { dock_hover_m: 60.0, dock_gap_m: 24.0, dock_stack_max_m: 300.0, dock_spread_m: 60.0, fill_min_s: 180.0, max_docks: 4, call_margin_s: 20.0, idle_recycle_s: 600.0, wait_cloud_m: 30.0, load_min_s: 5.0, drift_m_s: 6.0 }
     }
 }
 
@@ -219,13 +257,11 @@ pub struct FlockSpec {
     pub help_share: f64,
     /// A flock waits this long after a split, merge or help before the next.
     pub calm_s: f64,
-    /// A spare hauler standing empty this long blows up.
-    pub spare_hauler_s: f64,
 }
 
 impl Default for FlockSpec {
     fn default() -> Self {
-        FlockSpec { memory_s: 60.0, follow: 0.3, hover_m: 8.0, split_cutters: 300, split_m: 200.0, merge_m: 40.0, comm_m: 500.0, dry_merge: 3.0, hard_factor: 2.0, help_share: 0.2, calm_s: 60.0, spare_hauler_s: 120.0 }
+        FlockSpec { memory_s: 60.0, follow: 0.3, hover_m: 8.0, split_cutters: 300, split_m: 200.0, merge_m: 40.0, comm_m: 500.0, dry_merge: 3.0, hard_factor: 2.0, help_share: 0.2, calm_s: 60.0 }
     }
 }
 
@@ -392,6 +428,8 @@ pub struct Economy {
     #[serde(default)]
     pub hauler: HaulerSpec,
     #[serde(default)]
+    pub fleet: FleetSpec,
+    #[serde(default)]
     pub flock: FlockSpec,
     pub scout: Scout,
     pub refiner: Refiner,
@@ -430,6 +468,10 @@ pub struct UnitsSpec {
     /// Its bays, one kind of specialist each (bays for a kind the body has
     /// no use for are left out).
     pub bay: Vec<crate::production::BaySpec>,
+    /// The specialists the game builds for now (None: all with a bay).
+    /// Only the game reads this (into `Sim::deploy_only`); tests and tools
+    /// build them all.
+    pub game_deploys: Option<Vec<crate::production::Unit>>,
     pub sapper: SapperSpec,
     pub tunneler: TunnelerUnitSpec,
     pub heatsink: HeatSinkSpec,

@@ -443,7 +443,7 @@ fn finish_switch(
             if let Ok(mut w) = windows.single_mut() {
                 w.title = crate::title(&planet);
             }
-            let control = Control { speed: old.speed, paused: false, pause_at: None, free_drones: old.free_drones, attention: old.attention, full_detail: old.full_detail, quit: false };
+            let control = Control { speed: old.speed, paused: false, pause_at: None, free_drones: old.free_drones, attention: old.attention, focus: old.focus, full_detail: old.full_detail, quit: false };
             if let Some(r) = restore {
                 tiles.all_touched = true;
                 apply(r, &mut view, &mut fog, &planet, &mut cam, time.elapsed_secs_f64());

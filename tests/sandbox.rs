@@ -35,6 +35,43 @@ fn loose_rubble_caves_in_and_mass_is_kept() {
     assert!(w.ledger.imbalance(&w.remaining_kg()) < 1e-6 * initial);
 }
 
+/// Out of sight (zoomed out), loose matter doesn't wait to be looked at:
+/// rubble and water go straight to about where they'd come to rest, in far
+/// fewer moves than flowing a cell a tick, and nothing is made or lost.
+#[test]
+fn out_of_sight_rubble_and_water_settle_at_once() {
+    let (mut w, mut sb, inside) = demo();
+    sb.set_attention(Some(None));
+    let before = total_kg(&w);
+    for _ in 0..300 {
+        sb.step(&mut w);
+    }
+    let regolith = w.planet.mats.id("regolith").unwrap();
+    let fallen = (-14..=14).filter(|&x| (inside.1 - 10..inside.1 + 10).any(|y| w.material(x, y) == regolith)).count();
+    assert!(fallen > 10, "only {fallen} columns of the cavity have rubble in them: {:?}", sb.stats);
+    assert!(sb.stats.far_moves > 100, "{:?}", sb.stats);
+    // Nothing left hanging to play out when someone looks, but gas.
+    let water = w.planet.mats.id("water").unwrap();
+    let held = sb.dormant_cells().iter().filter(|c| w.planet.mats.get(w.material(c.0, c.1)).state != dft_sim::materials::State::Gas).count();
+    assert_eq!(held, 0, "{} cells wait to be seen", sb.dormant());
+    // Water out of sight comes to rest: nothing with open space under it.
+    let hanging = (-200..200)
+        .flat_map(|x| (-200..200).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            if w.material(x, y) != water {
+                return false;
+            }
+            let r = ((x * x + y * y) as f64).sqrt().max(1.0);
+            let (dx, dy) = ((-(x as f64) / r).round() as i64, (-(y as f64) / r).round() as i64);
+            w.material(x + dx, y + dy) == dft_sim::materials::VACUUM
+        })
+        .count();
+    assert!(hanging < 3, "{hanging} water cells hang over open space");
+    assert!((total_kg(&w) - before).abs() < 1e-6 * before);
+    let initial: f64 = w.ledger.initial.iter().sum();
+    assert!(w.ledger.imbalance(&w.remaining_kg()) < 1e-6 * initial);
+}
+
 #[test]
 fn exposed_lava_crusts_over_and_water_boils_against_it() {
     let (mut w, mut sb, _) = demo();

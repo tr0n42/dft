@@ -14,12 +14,15 @@
 //! 4. motion: powders fall toward the centre, liquids fall and spread, gases
 //!    rise, and gas that rises off the body is lost to space.
 //!
-//! Motion only happens where someone could see it. With an attention area
-//! set (the game sets it to what's on screen, when cells there are big
-//! enough to see), a cell outside it that would fall, flow or rise instead
-//! waits, dormant, and moves once the area comes over it. Heat, phase changes
-//! and reactions carry on everywhere. With no attention area (tests, tools)
-//! everything moves everywhere.
+//! Motion is only worked out a cell a tick where someone could see it. With
+//! an attention area set (the game sets it to what's on screen, when cells
+//! there are big enough to see), a cell outside it that would fall, flow or
+//! rise instead goes at once to about where it would come to rest (powder
+//! and liquid down, liquid spreading along level ground to its drops, gas up
+//! and off into space; see `Sandbox::settle_far`), so nothing is left
+//! hanging to play out when someone looks. Heat, phase changes, reactions
+//! and buried layers welling up holes carry on everywhere. With no attention
+//! area (tests, tools) everything moves cell by cell everywhere.
 //!
 //! Mass never changes: cells move by swapping, and every phase change and
 //! reaction keeps the cells' total mass (checked when the tables load).
@@ -103,6 +106,8 @@ pub struct Stats {
     pub moves_powder: u64,
     /// Cells of liquid blasted out of vents.
     pub erupted: u64,
+    /// Moves out of sight, each straight to about where it comes to rest.
+    pub far_moves: u64,
 }
 
 pub struct Sandbox {
@@ -138,6 +143,9 @@ pub struct Sandbox {
     /// For each material: the reactions it takes part in, and whether as input `a`.
     by_mat: Vec<Vec<(usize, bool)>>,
     pub stats: Stats,
+    /// Out of sight, powder and liquid settle at once (see `settle_far`);
+    /// off, they wait dormant until seen, as gas does (for comparison).
+    pub far_settle: bool,
     /// Where motion is simulated: cell rectangle (x0, x1, y0, y1), ends
     /// exclusive; Some(None) nowhere; None everywhere.
     attention: Attention,
@@ -374,6 +382,20 @@ const SUN_STEP_S: f64 = 2.0;
 /// Most cells a falling grain or drop moves in one tick through open space.
 const FALL_MAX: usize = 8;
 
+/// Where a cell out of sight settles (see `Sandbox::settle_far`).
+enum FarTo {
+    Cell(Cell),
+    /// Gas risen off the body: lost to space.
+    Vent,
+}
+
+/// Out of sight (see `Sandbox::settle_far`): most rounds of fall, slide and
+/// spread worked out for one cell in one go, most cells it falls in one
+/// round, and how far liquid runs along level ground looking for a drop.
+const FAR_ROUNDS: usize = 64;
+const FAR_FALL: usize = 4096;
+const FAR_SPREAD: i64 = 48;
+
 /// Which way is down at a cell: toward the centre, rounded to one of eight directions.
 fn down_index(c: Cell) -> usize {
     let (gx, gy) = (-(c.0 as f64 + 0.5), -(c.1 as f64 + 0.5));
@@ -409,7 +431,7 @@ impl Sandbox {
             by_mat[r.a as usize].push((i, true));
             by_mat[r.b as usize].push((i, false));
         }
-        Sandbox { next: CellQueue::default(), warm: CellQueue::default(), slow: CellQueue::default(), far: CellQueue::default(), latent: CellMap::default(), temps: CellMap::default(), tick: 0, time_s: 0.0, sun: None, sun_cache: CellMap::default(), ambient: Default::default(), shallow: Default::default(), sun_sensitive, sun_step: -1, seed: world.planet.spec.seed ^ 0x5A4D_B0C5, by_mat, stats: Stats::default(), attention: None, dormant: Waiting::default(), vents: CellMap::default(), ejecta: Vec::new() }
+        Sandbox { next: CellQueue::default(), warm: CellQueue::default(), slow: CellQueue::default(), far: CellQueue::default(), latent: CellMap::default(), temps: CellMap::default(), tick: 0, time_s: 0.0, sun: None, sun_cache: CellMap::default(), ambient: Default::default(), shallow: Default::default(), sun_sensitive, sun_step: -1, seed: world.planet.spec.seed ^ 0x5A4D_B0C5, by_mat, stats: Stats::default(), attention: None, far_settle: true, dormant: Waiting::default(), vents: CellMap::default(), ejecta: Vec::new() }
     }
 
     /// Where motion is simulated (see `Attention`; None, everywhere, is the
@@ -464,6 +486,11 @@ impl Sandbox {
     /// warming out of sight (for logs).
     pub fn queue_sizes(&self) -> (usize, usize, usize, usize) {
         (self.next.len(), self.warm.len(), self.slow.len(), self.far.len())
+    }
+
+    /// The cells waiting, dormant, to be seen (for tests).
+    pub fn dormant_cells(&self) -> Vec<Cell> {
+        self.dormant.map.values().flat_map(|q| q.iter().copied()).collect()
     }
 
     /// The awake cells (for diagnostics).
@@ -734,6 +761,135 @@ impl Sandbox {
     }
 
     /// Step every awake cell once. Returns every cell whose contents changed.
+    /// Out of sight, where powder or liquid at c would come to rest, in one
+    /// go (Benjamin: off screen may be approximated; on screen it flows a
+    /// cell a tick): straight down through open space (or gas, or, for
+    /// powder, liquid), then a cell down the slope either side; liquid also
+    /// runs along level ground either way, up to FAR_SPREAD cells, to the
+    /// nearest place it can drop from, so a heap spreads out into a pool.
+    /// Every step takes it strictly nearer the centre, so it always ends.
+    /// Gas the same way up, through open space only, and is lost to space
+    /// once it rises off the body (`FarTo::Vent`). None if it has nowhere
+    /// lower (higher) to go.
+    fn settle_far(&self, world: &World, touched: &CellQueue, c: Cell, state: State) -> Option<FarTo> {
+        let rise = state == State::Gas;
+        let r2 = |q: Cell| (2 * q.0 + 1) * (2 * q.0 + 1) + (2 * q.1 + 1) * (2 * q.1 + 1);
+        let lower = |q: Cell, p: Cell| if rise { r2(q) > r2(p) } else { r2(q) < r2(p) };
+        let down_index = |q: Cell| if rise { (down_index(q) + 4) % 8 } else { down_index(q) };
+        let gone = |q: Cell| {
+            rise && (!world.in_bounds(q.0, q.1) || {
+                let (fx, fy) = (q.0 as f64, q.1 as f64);
+                (fx * fx + fy * fy).sqrt() > world.planet.max_radius + 64.0
+            })
+        };
+        let open = |q: Cell| {
+            if touched.contains(&q) || !world.in_bounds(q.0, q.1) {
+                return false;
+            }
+            let nm = world.material(q.0, q.1);
+            nm == VACUUM || {
+                let s = world.planet.mats.get(nm).state;
+                !rise && (s == State::Gas || (state == State::Powder && s == State::Liquid))
+            }
+        };
+        let h = hash(self.seed, c.0, c.1, self.tick);
+        let mut p = c;
+        'down: for _ in 0..FAR_ROUNDS {
+            let di = down_index(p);
+            // Straight down as far as it goes.
+            let mut fell = false;
+            for _ in 0..FAR_FALL {
+                let q = add(p, DIRS[down_index(p)]);
+                if gone(q) {
+                    return Some(FarTo::Vent);
+                }
+                if !open(q) || !lower(q, p) {
+                    break;
+                }
+                p = q;
+                fell = true;
+            }
+            if fell {
+                continue;
+            }
+            // Down the slope, one cell.
+            let (a, b) = if h & 1 == 1 { (7, 1) } else { (1, 7) };
+            for k in [a, b] {
+                let q = add(p, DIRS[(di + k) % 8]);
+                if open(q) && lower(q, p) {
+                    p = q;
+                    continue 'down;
+                }
+            }
+            if state == State::Powder {
+                break;
+            }
+            // Along the level to the nearest drop, either side.
+            let sides = if h & 2 == 0 { [DIRS[(di + 2) % 8], DIRS[(di + 6) % 8]] } else { [DIRS[(di + 6) % 8], DIRS[(di + 2) % 8]] };
+            let mut blocked = [false, false];
+            for k in 1..=FAR_SPREAD {
+                for j in 0..2 {
+                    if blocked[j] {
+                        continue;
+                    }
+                    let q = (p.0 + sides[j].0 * k, p.1 + sides[j].1 * k);
+                    if !open(q) {
+                        blocked[j] = true;
+                        continue;
+                    }
+                    let below = add(q, DIRS[down_index(q)]);
+                    if gone(below) {
+                        return Some(FarTo::Vent);
+                    }
+                    if open(below) && lower(below, p) {
+                        p = below;
+                        continue 'down;
+                    }
+                }
+                if blocked == [true, true] {
+                    break;
+                }
+            }
+            break;
+        }
+        (p != c).then_some(FarTo::Cell(p))
+    }
+
+    /// Move powder or liquid m from c to n (out of sight, see `settle_far`),
+    /// swapping with whatever was there; its heat goes with it.
+    #[allow(clippy::too_many_arguments)]
+    fn move_far(&mut self, world: &mut World, changes: &mut Vec<Change>, touched: &mut CellQueue, c: Cell, n: Cell, m: MatId, state: State) {
+        let nm = world.material(n.0, n.1);
+        world.swap_cells(c, n);
+        changes.push(Change { cell: c, from: m, to: nm });
+        changes.push(Change { cell: n, from: nm, to: m });
+        let (tc, tn) = (self.temps.remove(&c), self.temps.remove(&n));
+        if let Some(v) = tc {
+            self.temps.insert(n, v);
+        }
+        if let Some(v) = tn {
+            self.temps.insert(c, v);
+        }
+        let (lc, ln) = (self.latent.remove(&c), self.latent.remove(&n));
+        if let Some(v) = lc {
+            self.latent.insert(n, v);
+        }
+        if let Some(v) = ln {
+            self.latent.insert(c, v);
+        }
+        // (The open sea closes up behind, as on screen.)
+        if state == State::Liquid && nm == VACUUM && world.planet.sea().is_some_and(|(sm, _)| sm == m) && world.planet.in_sea(c.0, c.1) {
+            world.deposit_cell(c.0, c.1, m);
+            changes.push(Change { cell: c, from: VACUUM, to: m });
+        }
+        self.stats.moves += 1;
+        self.stats.far_moves += 1;
+        touched.insert(c);
+        touched.insert(n);
+        self.wake_around_filled(world, c);
+        self.wake_around_filled(world, n);
+    }
+
     pub fn step(&mut self, world: &mut World) -> Vec<Change> {
         self.tick += 1;
         // Where the Sun is: moved on a step, last step's shadows are stale.
@@ -997,12 +1153,30 @@ impl Sandbox {
                 continue;
             }
 
-            // 4. Motion (only where someone could see it; elsewhere the
-            // cell waits until they look).
+            // 4. Motion. Out of sight, powder and liquid go at once to about
+            // where they would come to rest (see `settle_far`) rather than
+            // flowing a cell a tick; gas waits, dormant, until someone looks.
             let mat = world.planet.mats.get(m);
             let state = mat.state;
-            if state != State::Solid && !self.sees(c) {
+            let far = state != State::Solid && !self.sees(c);
+            let settle = if far && self.far_settle { self.settle_far(world, &touched, c, state) } else { None };
+            if far && !self.far_settle {
                 self.dormant.add(c);
+            } else if let Some(FarTo::Cell(n)) = settle {
+                self.move_far(world, &mut changes, &mut touched, c, n, m, state);
+                continue;
+            } else if let Some(FarTo::Vent) = settle {
+                world.vent_cell(c.0, c.1);
+                changes.push(Change { cell: c, from: m, to: VACUUM });
+                self.temps.remove(&c);
+                self.latent.remove(&c);
+                self.stats.vented += 1;
+                self.stats.far_moves += 1;
+                touched.insert(c);
+                self.wake_around(c);
+                continue;
+            } else if far && state == State::Gas {
+                // (Trapped gas, with nowhere higher to go, rests.)
             } else if state != State::Solid {
                 let di = down_index(c);
                 let flip = h & 1 == 1;
@@ -1023,6 +1197,9 @@ impl Sandbox {
                 // can trade cells back and forth forever.
                 let r2 = |q: Cell| (2 * q.0 + 1) * (2 * q.0 + 1) + (2 * q.1 + 1) * (2 * q.1 + 1);
                 let rc = r2(c);
+                // (Out of sight, with nowhere to settle: only the push of a
+                // buried layer below is left to look at.)
+                let order = if far { Vec::new() } else { order };
                 for i in order {
                     let n = add(c, DIRS[i]);
                     if touched.contains(&n) {

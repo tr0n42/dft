@@ -85,6 +85,33 @@ fn books_balance_and_mass_is_accounted_for() {
     assert!(s.samples.iter().all(|x| x.energy >= 0.0));
 }
 
+/// Out of sight a cutter's trip is worked out at once (`far_trip`): the
+/// books still balance, it digs about as fast as cutters flown cell by
+/// cell, and moving the focus about mid-run (flocks going in and out of it)
+/// breaks nothing.
+#[test]
+fn cutters_out_of_sight_dig_alike_and_keep_the_books() {
+    let mut near = sim(eco());
+    near.run(900.0);
+    let mut far = sim(eco());
+    far.set_focus(Some(None));
+    far.run(450.0);
+    // Half the body in focus for a while, then none again.
+    far.set_focus(Some(Some([0, 4000, -4000, 4000])));
+    far.run(700.0);
+    far.set_focus(Some(None));
+    far.run(900.0);
+    assert!(far.far_trips > 1000 && far.near_trips > 100, "far {} near {}", far.far_trips, far.near_trips);
+    let w = &far.world;
+    let initial: f64 = w.ledger.initial.iter().sum();
+    assert!(w.ledger.imbalance(&w.remaining_kg()) < 1e-6 * initial);
+    let expect = far.delivered_credited + far.recovered_mass - far.spent_mass;
+    assert!((far.mass - expect).abs() < 1e-6 * far.delivered_credited.max(1.0), "{} vs {expect}", far.mass);
+    let (a, b) = (near.world.ledger.mined_kg(), far.world.ledger.mined_kg());
+    println!("mined in 15 min: flown cell by cell {:.0} t, worked out at once {:.0} t; drones {} / {}", a / 1000.0, b / 1000.0, near.harvesters_alive(), far.harvesters_alive());
+    assert!(b > 0.8 * a && b < 1.35 * a);
+}
+
 #[test]
 fn the_swarm_always_keeps_building() {
     // No energy from anything: only the guaranteed free Harvester keeps it going.
