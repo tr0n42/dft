@@ -1510,6 +1510,19 @@ impl Sim {
     /// searches from its hauler for (its field gives the real flights);
     /// None for a short hop from a cell just cut, or the packet.
     pub(super) fn pick_target(&mut self, hx: f64, hy: f64, reach_m: f64, packet: bool, peel: bool, picky: bool, home: Option<usize>) -> Option<(i64, i64)> {
+        // (A face found empty is dropped and the search made again: many of
+        // them where ground was eaten out of sight, so a loop, not a call
+        // within a call.)
+        loop {
+            match self.pick_target_once(hx, hy, reach_m, packet, peel, picky, home) {
+                Err(()) => continue,
+                Ok(c) => return c,
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn pick_target_once(&mut self, hx: f64, hy: f64, reach_m: f64, packet: bool, peel: bool, picky: bool, home: Option<usize>) -> Result<Option<(i64, i64)>, ()> {
         let mut cands = std::mem::take(&mut self.cands);
         let field = home.and_then(|h| self.field_for(h, (hx, hy)));
         let reach = self.weigh(hx, hy, reach_m, packet, peel, picky, field.as_deref(), &mut cands);
@@ -1531,13 +1544,14 @@ impl Sim {
         }
         self.counts[3] += cands.len() as u64;
         self.cands = cands;
-        let c = best?;
+        let Some(c) = best else { return Ok(None) };
         if self.world.material(c.0, c.1) == VACUUM {
-            // Taken by a packet since it was found: drop it and look again.
+            // Taken since it was found (by a packet, or eaten out of sight):
+            // drop it and look again.
             self.remove_face(c);
-            return self.pick_target(hx, hy, reach_m, packet, peel, picky, home);
+            return Err(());
         }
         *self.reserved.entry(c).or_insert(0) += 1;
-        Some(c)
+        Ok(Some(c))
     }
 }

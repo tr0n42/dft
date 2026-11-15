@@ -1821,14 +1821,19 @@ impl Sim {
     /// strides, refined to 0.5 m at the end: slivers thinner than a stride
     /// can be passed over, which only matters for the very first look.
     /// Returns whether the cell found is solid ground (not liquid).
-    fn survey_dir_fast(&mut self, ux: f64, uy: f64) -> bool {
+    fn survey_dir_fast(&mut self, ux: f64, uy: f64, bare: bool) -> bool {
         let top = self.world.planet.max_radius + 1.0;
         // (Over ground eaten out of sight: from just above its level, not
         // the ground as it was, which may be far above now.)
-        let hint = self.world.planet.ground_hint(ux, uy).min(self.world.far.level_at(ux, uy) + crate::world::FAR_RAMP_M);
+        let hint = self.world.planet.ground_hint(ux, uy).min(self.world.far.top_at(ux, uy));
         let skip = ((top - (hint + 3.0)) / 0.5).floor().max(0.0);
         let mut r = top - skip * 0.5;
-        let solid = |w: &World, r: f64| w.material((ux * r).floor() as i64, (uy * r).floor() as i64) != VACUUM;
+        // (bare: the ground itself, plants left out, for ground eaten out of
+        // sight, where plants are long gone anyway.)
+        let solid = |w: &World, r: f64| {
+            let (x, y) = ((ux * r).floor() as i64, (uy * r).floor() as i64);
+            (if bare { w.material_bare(x, y) } else { w.material(x, y) }) != VACUUM
+        };
         while r > 4.0 && !solid(&self.world, r) && !solid(&self.world, r - 4.0) {
             r -= 4.0;
         }
@@ -1869,11 +1874,11 @@ impl Sim {
     /// at the same spacing as a whole-body survey.
     /// Returns how many solid (diggable) cells it found.
     fn survey_zone(&mut self, ux: f64, uy: f64) -> usize {
-        self.survey_arc(ux, uy, self.eco.seed_swarm.zone_m)
+        self.survey_arc(ux, uy, self.eco.seed_swarm.zone_m, false)
     }
 
     /// `survey_zone` over `half_m` either side.
-    fn survey_arc(&mut self, ux: f64, uy: f64, half_m: f64) -> usize {
+    fn survey_arc(&mut self, ux: f64, uy: f64, half_m: f64, bare: bool) -> usize {
         let n = self.survey_n();
         let (c, s) = turn(n);
         let ground = self.world.planet.surface_radius(ux, uy).max(1.0);
@@ -1888,7 +1893,7 @@ impl Sim {
         }
         let mut solid = 0;
         for _ in 0..=2 * half {
-            if self.survey_dir_fast(vx, vy) {
+            if self.survey_dir_fast(vx, vy, bare) {
                 solid += 1;
             }
             let (nx, ny) = (vx * c - vy * s, vx * s + vy * c);
@@ -1969,7 +1974,8 @@ impl Sim {
         let mut n = 0;
         let mut look = |x: f64, y: f64, open: bool| {
             let c = (x.floor() as i64, y.floor() as i64);
-            let m = self.world.material(c.0, c.1);
+            // (Plants are never hot liquid: the bare ground is enough.)
+            let m = self.world.material_bare(c.0, c.1);
             if m == VACUUM || self.world.planet.mats.get(m).state != State::Liquid || self.sandbox.temp(&self.world, c, m) <= hot {
                 return;
             }

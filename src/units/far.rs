@@ -520,7 +520,7 @@ impl Sim {
             // The sector's ground, open to its cutters (once, all of it).
             if !homes.is_empty() {
                 let a = 0.5 * (a0 + a1);
-                self.survey_arc(a.cos(), a.sin(), 0.5 * (a1 - a0) * r + 50.0);
+                self.survey_arc(a.cos(), a.sin(), 0.5 * (a1 - a0) * r + 50.0, true);
             }
             if homes.is_empty() {
                 // Nowhere to land here: they go to work far sectors.
@@ -1129,7 +1129,9 @@ impl Sim {
         }
         f.eaten_kg = r.f64()?;
         f.total = f.cutters.iter().sum();
-        self.world.far = crate::world::FarCut { any: levels.iter().any(|l| l.is_finite()), levels, version: self.world.far.version + 1, asleep: Vec::new() };
+        let low = levels.iter().filter(|l| l.is_finite()).fold(f64::INFINITY, |a, &l| a.min(l as f64));
+        let floor2 = if low.is_finite() { (low - crate::world::FAR_PIT_M - 1.0).max(0.0).powi(2) } else { f64::INFINITY };
+        self.world.far = crate::world::FarCut { any: levels.iter().any(|l| l.is_finite()), levels, version: self.world.far.version + 1, floor2, asleep: Vec::new() };
         self.far = f;
         Ok(())
     }

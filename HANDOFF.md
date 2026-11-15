@@ -803,11 +803,27 @@ that many cutters would cut (hold, dig time of the rock at the top, pace
 Before: the living world with 1.35M working ran at about 1x; Earth and 4x
 Earth couldn't be covered at all.
 
-**In the game (living world, 1.5M, 10x, stress-big-swarm.bat):** whole
-planet, mid zoom and close up all hold 10x; zooming in costs 20-40 ms a
-game second while it comes down; a fast pan along the surface still dips to
-about 7x (sectors unfolding in turn, and the water and magma the flocks
-break into, which is real physics in view).
+**In the game, 10x asked (stress-big-swarm.bat; sim speed and frames per
+shot):**
+
+| Body, cutters | Whole body | Mid zoom | Close up | Fast pan |
+|---|---|---|---|---|
+| Living world, 1.5M | 10x, 50 fps | 9.5x | 9.3-10x, 60 fps | 7.2x |
+| Earth, ~240M | 10x, 60 fps | 9.9x, 57 fps | 10x, 47-55 fps | 10x, 52 fps |
+
+Zoomed out the sim spends 2-7 ms a game second. At mid zoom on the living
+world 133k cutters come down (19 sectors on and around the screen) and it
+still holds 9.5x. The benchmark's first 100 s run at 4-5x while it makes
+millions of cutters at once (not something the game ever does).
+
+What it took in the game: the mother swarm's currents were worked out along
+the whole 40,000 km of it every frame (0.4 fps), far bites flooded the tile
+redraws, and the fog charted every flock that ever was; unfolded cutters
+found nothing to do (flow fields took eaten ground for rock, the first
+search before a flock's field marked it dry for good, landing points left
+hanging high over eaten ground), and a sector's level ran away when one
+held millions (now no more work than its surface has room for, the rest
+spread to other sectors; no sector more than 300 m under a neighbour).
 
 **Camera (Benjamin's suggestion):** the wheel's zoom now glides (at most 4x
 a second, eased) with the point under the cursor held still, and the sim is
@@ -815,10 +831,11 @@ told where the view is heading (a zoom's end, a pan a second on), so the
 sectors there are flocks before they come into sight (`view::Glide`,
 `view::Heading`). Drags stay one to one.
 
-**Open:** the zoomed-out game spends about 50 ms a game second against 15
-headless (not profiled yet); a fast pan; the economy's growth is far too
-slow to cover anything big (living world: 11k cutters after 4 game hours,
-held back by how fast flocks open, with 11 Mt unused in the stockpile).
+**Open:** a fast pan along the surface (half a screen a second at mid
+zoom) still dips to about 7x on the living world while sectors come down in
+turn; the economy's growth is far too slow to cover anything big (living
+world: 11k cutters after 4 game hours, held back by how fast flocks open,
+with 11 Mt unused in the stockpile): a design question.
 
 ## What's next
 

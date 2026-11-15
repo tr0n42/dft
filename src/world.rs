@@ -129,6 +129,9 @@ pub struct FarCut {
     /// Bumped whenever a level changes (for a renderer's copy). Not part of
     /// the world's state.
     pub version: u64,
+    /// Squared distance from the centre under which nothing is cut (the
+    /// lowest level less the deepest pit), for a quick answer.
+    pub floor2: f64,
     /// Sectors far from the camera now (the swarm there works as a count,
     /// and loose matter there waits until someone looks: see the sandbox).
     /// Not part of the world's state.
@@ -154,7 +157,7 @@ impl FarCut {
     /// Sectors round a body this big: about `width_m` of surface each.
     pub fn new(radius_m: f64, width_m: f64) -> Self {
         let n = ((std::f64::consts::TAU * radius_m / width_m.max(1.0)).round() as usize).max(16);
-        FarCut { levels: vec![f32::INFINITY; n], any: false, version: 0, asleep: Vec::new() }
+        FarCut { levels: vec![f32::INFINITY; n], any: false, version: 0, floor2: f64::INFINITY, asleep: Vec::new() }
     }
 
     /// The sector holding direction (x, y) from the centre.
@@ -173,6 +176,23 @@ impl FarCut {
             return f64::INFINITY;
         }
         self.levels[self.sector_of(x, y)] as f64
+    }
+
+    /// The highest anything stands in direction (x, y) of a cut sector (its
+    /// level, or where a ramp up to a neighbour reaches; INFINITY: not cut).
+    #[inline]
+    pub fn top_at(&self, x: f64, y: f64) -> f64 {
+        if !self.any {
+            return f64::INFINITY;
+        }
+        let n = self.levels.len();
+        let k = self.sector_of(x, y);
+        let own = self.levels[k] as f64;
+        if !own.is_finite() {
+            return f64::INFINITY;
+        }
+        let (l, r) = (self.levels[(k + n - 1) % n] as f64, self.levels[(k + 1) % n] as f64);
+        own.max(l.max(r).min(own + FAR_RAMP_M))
     }
 
     /// Whether cell (x, y) lies in a sector far from the camera.
@@ -194,17 +214,28 @@ impl FarCut {
     /// neighbours.
     #[inline]
     pub fn cut(&self, x: i64, y: i64) -> bool {
+        self.state(x, y) == 2
+    }
+
+    /// Cell (x, y) as the far field leaves it: 0 in a sector not cut (or
+    /// below anything cut), 1 left standing in a cut sector (its plants
+    /// went with the surface eaten above it), 2 eaten.
+    #[inline]
+    pub fn state(&self, x: i64, y: i64) -> u8 {
         if !self.any {
-            return false;
+            return 0;
         }
         let (fx, fy) = (x as f64 + 0.5, y as f64 + 0.5);
+        if fx * fx + fy * fy < self.floor2 {
+            return 0;
+        }
         let n = self.levels.len();
         let t = fy.atan2(fx) / std::f64::consts::TAU;
         let t = (if t < 0.0 { t + 1.0 } else { t }) * n as f64;
         let k = (t as usize).min(n - 1);
         let own = self.levels[k] as f64;
         if !own.is_finite() {
-            return false;
+            return 0;
         }
         let r2 = fx * fx + fy * fy;
         // (Quick answers well clear of the face: above where a ramp up to
@@ -212,11 +243,11 @@ impl FarCut {
         let (l, r) = (self.levels[(k + n - 1) % n] as f64, self.levels[(k + 1) % n] as f64);
         let top = own.max(l.max(r).min(own + FAR_RAMP_M));
         if r2 > top * top {
-            return true;
+            return 2;
         }
         let low = own - FAR_PIT_M;
         if r2 < low * low {
-            return false;
+            return 1;
         }
         let f = t - k as f64;
         let (j, w) = if f < 0.5 { ((k + n - 1) % n, (0.5 - f) * 2.0) } else { ((k + 1) % n, (f - 0.5) * 2.0) };
@@ -227,7 +258,7 @@ impl FarCut {
         // side of a sector's edge), bowls and bites of several sizes.
         let s = t / n as f64 * std::f64::consts::TAU * own.max(1.0);
         let pit = FAR_PIT_M * (0.45 * value_noise(s / 300.0, 1) + 0.3 * value_noise(s / 80.0, 2) + 0.17 * value_noise(s / 15.0, 3) + 0.08 * value_noise(s / 4.0, 4));
-        r2.sqrt() > lvl - pit
+        if r2.sqrt() > lvl - pit { 2 } else { 1 }
     }
 }
 
@@ -466,7 +497,6 @@ impl World {
     }
 
     fn material_with(&self, x: i64, y: i64, bare: bool) -> MatId {
-        let generated = |x: i64, y: i64| if bare { self.planet.base_material(x, y) } else { self.gen_cache.get(x, y, || self.planet.material(x, y)) };
         // Fast path: most lookups land in a leaf that already has its own
         // entry (near the digging). A leaf entry only exists while every
         // ancestor is split, so it is the answer.
@@ -479,7 +509,7 @@ impl World {
                     }
                     State::Empty => return VACUUM,
                     State::Uniform(m) => return if self.far.cut(x, y) { VACUUM } else { *m },
-                    State::Untouched => return if self.far.cut(x, y) { VACUUM } else { generated(x, y) },
+                    State::Untouched => return self.untouched(x, y, bare),
                     State::Split => {}
                 }
             }
@@ -491,7 +521,7 @@ impl World {
                 None => return VACUUM,
             };
             match self.nodes.get(&key(n)).map(|e| &e.state) {
-                None | Some(State::Untouched) => return if self.far.cut(x, y) { VACUUM } else { generated(x, y) },
+                None | Some(State::Untouched) => return self.untouched(x, y, bare),
                 Some(State::Empty) => return VACUUM,
                 Some(State::Uniform(m)) => return if self.far.cut(x, y) { VACUUM } else { *m },
                 Some(State::Dense(c)) => {
@@ -500,6 +530,19 @@ impl World {
                 }
                 Some(State::Split) => level -= 1,
             }
+        }
+    }
+
+    /// An untouched cell: as generated (plants and all unless `bare`), less
+    /// what the far field ate (and, in a sector it cut, without plants:
+    /// they went with the surface).
+    #[inline]
+    fn untouched(&self, x: i64, y: i64, bare: bool) -> MatId {
+        match self.far.state(x, y) {
+            2 => VACUUM,
+            1 => self.planet.base_material(x, y),
+            _ if bare => self.planet.base_material(x, y),
+            _ => self.gen_cache.get(x, y, || self.planet.material(x, y)),
         }
     }
 
@@ -750,7 +793,11 @@ impl World {
                     let y = y0 + row as i64;
                     for (i, o) in out.iter_mut().enumerate() {
                         let x = x0 + i as i64;
-                        *o = if far.cut(x, y) { VACUUM } else { planet.material(x, y) };
+                        *o = match far.state(x, y) {
+                            2 => VACUUM,
+                            1 => planet.base_material(x, y),
+                            _ => planet.material(x, y),
+                        };
                     }
                 });
                 c.into_boxed_slice()
@@ -844,6 +891,8 @@ impl World {
         self.far.levels[k] = to as f32;
         self.far.any = true;
         self.far.version += 1;
+        let low = (to - FAR_PIT_M - 1.0).max(0.0);
+        self.far.floor2 = self.far.floor2.min(low * low);
         // The band's box: the sector's two edges and middle, at both radii,
         // and half its neighbours (whose ramps lean on its level).
         let tau = std::f64::consts::TAU;
