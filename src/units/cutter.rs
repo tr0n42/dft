@@ -1271,6 +1271,11 @@ impl Sim {
         let hold = self.hold_cap();
         let search_m = reach_m;
         let mut weighed = 0usize;
+        // (Counted here, added to the shared tallies once at the end; and
+        // a speck's neighbours read through one reader, which keeps the
+        // leaf it last read: most are in the same one.)
+        let mut passed = [0u64; 5];
+        let mut rd = self.world.reader();
         for ring in 0..max_ring {
             if last_ring.is_some_and(|l| ring > l) {
                 break;
@@ -1289,7 +1294,7 @@ impl Sim {
                         let (ddx, ddy) = (c.0 as f64 + 0.5 - hx, c.1 as f64 + 0.5 - hy);
                         let dist = (ddx * ddx + ddy * ddy).sqrt();
                         if dist > search_m {
-                            self.passed[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            passed[0] += 1;
                             continue;
                         }
 
@@ -1301,7 +1306,7 @@ impl Sim {
                         let left = mat.density - self.progress.get(&c).copied().unwrap_or(0.0);
                         let loads = ((left / hold).ceil() as u8).clamp(1, 4);
                         if reserved.get(&c).copied().unwrap_or(0) >= loads {
-                            self.passed[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            passed[1] += 1;
                             continue;
                         }
                         // With the flock's field: the flight is the way
@@ -1311,7 +1316,7 @@ impl Sim {
                             Some(f) => match f.reach_m(c) {
                                 Some(d) => d.max(dist),
                                 None => {
-                                    self.passed[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    passed[2] += 1;
                                     continue;
                                 }
                             },
@@ -1322,7 +1327,7 @@ impl Sim {
                         let (cx, cy) = (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
                         // Rock cracked by a Tunneler: open access (no depth
                         // penalty) and quicker to cut.
-                        let loose = self.is_loose(c, f.mat);
+                        let loose = self.loose_mat.get(f.mat as usize).copied().unwrap_or(false) || (!self.loose.is_empty() && self.loose.contains(&c)) || [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().filter(|d| rd.get(c.0 + d.0, c.1 + d.1) == VACUUM).count() >= 3;
                         let cracked = loose || (any_cracked && self.fractured.contains(&c));
                         if cracked && packet {
                             continue;
@@ -1341,11 +1346,11 @@ impl Sim {
                         // much worse than ordinary rock would (hard ore it can't
                         // cut well yet stays standing as terrain).
                         if score < patience * typ_kg / (travel + typ_dig) {
-                            self.passed[3].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            passed[3] += 1;
                             continue;
                         }
                         cands.push((c, score, dist));
-                        self.passed[4].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        passed[4] += 1;
                         weighed += 1;
                     }
                 }
@@ -1359,6 +1364,11 @@ impl Sim {
             if weighed >= CANDIDATES || found_at.is_some_and(|f| ring >= f + extra) {
                 last_ring = Some(ring);
                 reach = ((ring - 1).max(0) * BUCKET) as f64;
+            }
+        }
+        for (k, n) in passed.iter().enumerate() {
+            if *n > 0 {
+                self.passed[k].fetch_add(*n, std::sync::atomic::Ordering::Relaxed);
             }
         }
         reach

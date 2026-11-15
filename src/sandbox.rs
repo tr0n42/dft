@@ -145,8 +145,8 @@ pub struct Sandbox {
     sun_cache: CellMap<f32>,
     /// The body's own heat at cells looked up so far, and whether each is
     /// near the surface (no weight above to hold melting points up).
-    ambient: std::sync::Mutex<CellMap<f64>>,
-    shallow: std::sync::Mutex<CellMap<bool>>,
+    ambient: Shards<f64>,
+    shallow: Shards<bool>,
     /// Materials the Sun can melt or boil (only these are warmed by it).
     sun_sensitive: Vec<bool>,
     sun_step: i64,
@@ -387,6 +387,39 @@ impl Waiting {
             }
         }
         out
+    }
+}
+
+/// A cache by cell shared by the sandbox's threads, split in parts each
+/// with its own lock (one lock for all had the threads queueing), the value
+/// worked out outside the lock. Each part is emptied when full.
+struct Shards<V: Copy> {
+    parts: Vec<std::sync::Mutex<CellMap<V>>>,
+}
+
+const SHARDS: usize = 64;
+const SHARD_MAX: usize = 4_000_000 / SHARDS;
+
+impl<V: Copy> Default for Shards<V> {
+    fn default() -> Self {
+        Shards { parts: (0..SHARDS).map(|_| Default::default()).collect() }
+    }
+}
+
+impl<V: Copy> Shards<V> {
+    fn get(&self, c: Cell, make: impl FnOnce() -> V) -> V {
+        let h = (c.0.wrapping_mul(0x9E37_79B9) ^ c.1.wrapping_mul(0x85EB_CA6B)) as u64;
+        let p = &self.parts[((h >> 9) as usize) % SHARDS];
+        if let Some(&v) = p.lock().unwrap().get(&c) {
+            return v;
+        }
+        let v = make();
+        let mut g = p.lock().unwrap();
+        if g.len() >= SHARD_MAX {
+            g.clear();
+        }
+        g.insert(c, v);
+        v
     }
 }
 
@@ -648,16 +681,7 @@ impl Sandbox {
     /// The body's own heat at cell c. It never changes (sunlight is applied
     /// separately), so it is worked out once per cell and kept.
     fn ambient_k(&self, world: &World, c: Cell) -> f64 {
-        let mut cache = self.ambient.lock().unwrap();
-        if let Some(&t) = cache.get(&c) {
-            return t;
-        }
-        if cache.len() > 4_000_000 {
-            cache.clear();
-        }
-        let t = world.planet.ambient_k(c.0, c.1);
-        cache.insert(c, t);
-        t
+        self.ambient.get(c, || world.planet.ambient_k(c.0, c.1))
     }
 
     /// The body's heat at cell c as far as pressure goes: deep down, the
@@ -666,15 +690,11 @@ impl Sandbox {
     /// ice on a warm world melts like ice. (0 there: nothing is held.)
     fn held_ambient(&self, world: &World, c: Cell) -> f64 {
         let amb = self.ambient_k(world, c);
-        let mut cache = self.shallow.lock().unwrap();
-        let shallow = *cache.entry(c).or_insert_with(|| {
+        let shallow = self.shallow.get(c, || {
             let (x, y) = (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
             let r = (x * x + y * y).sqrt().max(1e-9);
             world.planet.surface_radius(x / r, y / r) - r < HOLD_DEPTH_M
         });
-        if cache.len() > 4_000_000 {
-            cache.clear();
-        }
         if shallow { 0.0 } else { amb }
     }
 
@@ -820,11 +840,20 @@ impl Sandbox {
                 (fx * fx + fy * fy).sqrt() > world.planet.max_radius + 64.0
             })
         };
+        // (Its neighbours nearly always lie in its own leaf: read through
+        // one reader, which keeps the leaf it last read.)
+        let rd = std::cell::RefCell::new(world.reader());
         let open = |q: Cell| {
-            if touched.contains(&q) || !world.in_bounds(q.0, q.1) {
+            if !world.in_bounds(q.0, q.1) {
                 return false;
             }
-            let nm = world.material(q.0, q.1);
+            let nm = rd.borrow_mut().get(q.0, q.1);
+            if nm != VACUUM && world.planet.mats.get(nm).state != State::Gas && !(state == State::Powder && world.planet.mats.get(nm).state == State::Liquid) {
+                return false;
+            }
+            if touched.contains(&q) {
+                return false;
+            }
             nm == VACUUM || {
                 let s = world.planet.mats.get(nm).state;
                 !rise && (s == State::Gas || (state == State::Powder && s == State::Liquid))

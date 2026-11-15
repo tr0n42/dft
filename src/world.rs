@@ -102,6 +102,50 @@ pub struct World {
     /// by leaf, then by cell. Gone when the cell changes. Not part of the
     /// world's state or its hash (the simulation saves them).
     pub looks: HashMap<(i64, i64), HashMap<(i64, i64), u8>>,
+    /// What the generator gave for untouched cells looked up lately (it is
+    /// the slow part of a lookup there, and the same cells are asked about
+    /// over and over: water resting in a lake, ground round a flock). An
+    /// untouched cell always generates the same, so this never goes stale.
+    /// Not part of the world's state or its hash.
+    pub gen_cache: GenCache,
+}
+
+/// See `World::gen_cache`: split in parts by cell, each with its own lock,
+/// so the sandbox's threads rarely wait on one another.
+pub struct GenCache {
+    parts: Vec<std::sync::Mutex<crate::swarm::CellMap<MatId>>>,
+}
+
+impl Default for GenCache {
+    fn default() -> Self {
+        GenCache { parts: (0..GEN_PARTS).map(|_| Default::default()).collect() }
+    }
+}
+
+/// Parts of the generator cache, and the most cells each keeps (it is
+/// emptied when full: about 40 MB in all).
+const GEN_PARTS: usize = 16;
+const GEN_PART_MAX: usize = 1 << 17;
+
+impl GenCache {
+    fn part(&self, x: i64, y: i64) -> &std::sync::Mutex<crate::swarm::CellMap<MatId>> {
+        let h = (x.wrapping_mul(0x9E37_79B9) ^ y.wrapping_mul(0x85EB_CA6B)) as u64;
+        &self.parts[((h >> 7) as usize) % GEN_PARTS]
+    }
+
+    fn get(&self, x: i64, y: i64, make: impl FnOnce() -> MatId) -> MatId {
+        let p = self.part(x, y);
+        if let Some(&m) = p.lock().unwrap().get(&(x, y)) {
+            return m;
+        }
+        let m = make();
+        let mut g = p.lock().unwrap();
+        if g.len() >= GEN_PART_MAX {
+            g.clear();
+        }
+        g.insert((x, y), m);
+        m
+    }
 }
 
 /// How a cell looks beyond its material, as the sapper proving ground draws
@@ -189,7 +233,7 @@ impl World {
         let initial_kg = est.iter().enumerate().map(|(i, c)| c * planet.mats.get(i as crate::materials::MatId).density).collect();
         let mut nodes = NodeMap::default();
         nodes.insert(key(root), Entry { state: State::Untouched, totals: est });
-        World { ledger: Ledger::new(initial_kg), planet, tree, nodes, track: None, life_watch: Vec::new(), life_notes: LifeNotes::default(), looks: HashMap::new() }
+        World { ledger: Ledger::new(initial_kg), planet, tree, nodes, track: None, life_watch: Vec::new(), life_notes: LifeNotes::default(), looks: HashMap::new(), gen_cache: GenCache::default() }
     }
 
     /// Note that cell (x, y) changed (if anyone is keeping track).
@@ -301,7 +345,7 @@ impl World {
     }
 
     fn material_with(&self, x: i64, y: i64, bare: bool) -> MatId {
-        let generated = |x: i64, y: i64| if bare { self.planet.base_material(x, y) } else { self.planet.material(x, y) };
+        let generated = |x: i64, y: i64| if bare { self.planet.base_material(x, y) } else { self.gen_cache.get(x, y, || self.planet.material(x, y)) };
         // Fast path: most lookups land in a leaf that already has its own
         // entry (near the digging). A leaf entry only exists while every
         // ancestor is split, so it is the answer.

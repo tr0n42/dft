@@ -160,6 +160,7 @@ fn main() {
         let mut sum = vec![0.0; cols.len()];
         let mut t = 0.0;
         let every = 200.0f64.min(until);
+        let mut mined0 = 0.0;
         while t < until {
             let w = Instant::now();
             let from = t;
@@ -170,6 +171,10 @@ fn main() {
                 sum[k] += v * (t - from);
             }
             let (_, waiting, out, home) = s.phase_counts();
+            let mined = s.world.ledger.mined_kg();
+            let per_t = w.elapsed().as_secs_f64() * 1e6 / ((mined - mined0) / 1000.0).max(1e-9);
+            mined0 = mined;
+            println!("    efficiency: {per_t:.2} us real per tonne mined");
             let top: Vec<String> = cols.iter().zip(&c).filter(|(_, v)| **v >= 0.5).map(|(n, v)| format!("{n} {v:.0}")).collect();
             println!(
                 "  t {t:5.0}: {:6.1} s per game min · {:6} working ({} waiting) · {:.0} kt mined · ms per game s: {}",

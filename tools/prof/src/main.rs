@@ -230,6 +230,41 @@ fn main() {
             println!("  {:5.1}%  {k}", **c as f64 / n * 100.0);
         }
     };
+    // CALLERS=name: who calls the functions whose names contain it (the
+    // nearest frame outside them), by share of all samples.
+    if let Ok(want) = std::env::var("CALLERS") {
+        for w in want.split(',') {
+            let mut by: HashMap<String, u64> = HashMap::new();
+            for st in &stacks {
+                let fs: Vec<String> = st.iter().enumerate().map(|(i, &pc)| names.func(if i == 0 { pc } else { pc.saturating_sub(1) })).collect();
+                if let Some(i) = fs.iter().position(|f| f.contains(w)) {
+                    let mut j = i + 1;
+                    while j < fs.len() && fs[j].contains(w) {
+                        j += 1;
+                    }
+                    let caller = fs.get(j).cloned().unwrap_or("-".into());
+                    let line = if j < st.len() { names.line(st[j].saturating_sub(1)) } else { "-".into() };
+                    *by.entry(format!("{caller}  ({line})")).or_default() += 1;
+                }
+            }
+            show(&format!("callers of {w}"), &by);
+        }
+    }
+    // LINES=name: where in the functions whose names contain it the time
+    // goes (the line of the innermost frame inside them).
+    if let Ok(want) = std::env::var("LINES") {
+        let mut by: HashMap<String, u64> = HashMap::new();
+        for st in &stacks {
+            for (i, &pc) in st.iter().enumerate() {
+                let pc = if i == 0 { pc } else { pc.saturating_sub(1) };
+                if names.func(pc).contains(&want) {
+                    *by.entry(names.line(pc)).or_default() += 1;
+                    break;
+                }
+            }
+        }
+        show(&format!("lines in {want}"), &by);
+    }
     show("inclusive (in it or under it)", &incl);
     show("self (running in it)", &selff);
     show("lines (running)", &lines);
