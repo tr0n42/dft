@@ -20,6 +20,9 @@ const FAR_CELLS: usize = 8;
 /// Out of the focus, the cutters waiting at a flock are heated or cooled
 /// this many seconds at a time (see `waiting_heat`).
 const WAIT_HEAT_EVERY: u64 = 10;
+/// Fewer drones than this due in a tick: their searches are made one by
+/// one as usual (not worth handing out).
+const PREFETCH_MIN: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Phase {
@@ -478,7 +481,8 @@ impl Sim {
                 } else {
                     let ts = clock();
                     let reach = self.eco.harvester.search_m;
-                    let found = match self.pick_target(hx, hy, reach, false, !from_shaft, true, Some(d.home)) {
+                    let ahead = self.prefetched.remove(&id).and_then(|(r, c)| self.pick_from(r, c));
+                    let found = match ahead.or_else(|| self.pick_target(hx, hy, reach, false, !from_shaft, true, Some(d.home))) {
                         Some(c) => Some(c),
                         None if self.sense_effort > 0.0 => self.pick_target(hx, hy, reach, false, !from_shaft, false, Some(d.home)),
                         None => None,
@@ -822,6 +826,78 @@ impl Sim {
             self.leg_changed(id);
             self.caught += 1;
         }
+    }
+
+    /// As the tick begins: the searches for work of the drones due now that
+    /// will look for it from their flock's point (resting at it, not too
+    /// hot, room in the hold, nothing adrift to take first, their flock not
+    /// known to be dry, its flow field to hand), made side by side on the
+    /// simulation's threads. Each only reads the world as it stands, so the
+    /// result is the same on any number of threads; when each drone's turn
+    /// comes, `pick_from` drops what the drones before it took this tick.
+    pub(super) fn prefetch_searches(&mut self, batch: &[u32]) {
+        self.prefetched.clear();
+        if batch.len() < PREFETCH_MIN {
+            return;
+        }
+        let cool_to = self.eco.harvester.damage_k.max(self.world.planet.space_k + 50.0) + 1.0;
+        let full = 0.9 * self.hold_cap();
+        let reach_m = self.eco.harvester.search_m;
+        let jobs: Vec<(u32, f64, f64, bool, std::sync::Arc<FlowField>)> = batch
+            .iter()
+            .filter_map(|&id| {
+                let d = &self.drones[id as usize];
+                if !d.alive || d.due != self.tick || !matches!(d.phase, Phase::Idle | Phase::Waiting) || d.heat_k > cool_to || d.hold >= full {
+                    return None;
+                }
+                let h = d.home;
+                if self.hub_dry.get(h).copied().unwrap_or(true) || self.adrift.get(h).is_some_and(|v| !v.is_empty()) {
+                    return None;
+                }
+                let (hx, hy) = self.site_pos(h);
+                let field = self.field_for(h, (hx, hy))?;
+                Some((id, hx, hy, self.hubs[h].kind != HubKind::Shaft, field))
+            })
+            .collect();
+        if jobs.len() < PREFETCH_MIN {
+            return;
+        }
+        use rayon::prelude::*;
+        let me: &Sim = self;
+        let done: Vec<(u32, f64, Vec<((i64, i64), f64, f64)>)> = jobs
+            .par_iter()
+            .with_min_len(8)
+            .map(|(id, hx, hy, peel, field)| {
+                let mut c = Vec::new();
+                let r = me.weigh(*hx, *hy, reach_m, false, *peel, true, Some(field), &mut c);
+                (*id, r, c)
+            })
+            .collect();
+        for (id, r, c) in done {
+            self.prefetched.insert(id, (r, c));
+        }
+    }
+
+    /// A search made ahead this tick (`prefetch_searches`), as `pick_target`
+    /// would finish it: less the cells taken since (cut out, or reserved by
+    /// as many drones as they have loads left), the best within reach,
+    /// reserved. None if nothing is left (it then searches afresh).
+    pub(super) fn pick_from(&mut self, reach: f64, mut cands: Vec<((i64, i64), f64, f64)>) -> Option<(i64, i64)> {
+        let hold = self.hold_cap();
+        cands.retain(|&(c, _, _)| {
+            let m = self.world.material(c.0, c.1);
+            if m == VACUUM {
+                return false;
+            }
+            let left = self.world.planet.mats.get(m).density - self.progress.get(&c).copied().unwrap_or(0.0);
+            let loads = ((left / hold).ceil() as u8).clamp(1, 4);
+            self.reserved.get(&c).copied().unwrap_or(0) < loads
+        });
+        let best = Self::choose(&cands, reach)?;
+        self.counts[3] += cands.len() as u64;
+        self.cands = cands;
+        *self.reserved.entry(best).or_insert(0) += 1;
+        Some(best)
     }
 
     /// A cutter's whole trip worked out at once, for a flock out of sight

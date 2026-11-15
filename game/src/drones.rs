@@ -102,6 +102,13 @@ impl Catch {
 
 /// The smallest a drone is drawn, in pixels across.
 const MIN_PX: f32 = 3.0;
+/// Zoomed out to this many metres a pixel or more, each flock is drawn as
+/// one mark rather than drone by drone (a drone is a fifth of a pixel or
+/// less: only a smear of marks could be drawn anyway), from ICON_MIN_PX
+/// across up to ICON_MAX_PX for the biggest flocks.
+pub const ICON_MPP: f64 = 5.0;
+const ICON_MIN_PX: f32 = 4.0;
+const ICON_MAX_PX: f32 = 18.0;
 
 fn empty_mesh(colours: bool) -> Mesh {
     let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD);
@@ -416,7 +423,9 @@ fn draw(
     let Some(run) = run else { return };
     // Take what changed, and the moment to draw.
     let shape = swarm.0;
-    let (now, haulers, units, chunks, new_booms, recent, heights) = {
+    // Zoomed out this far, each flock is drawn as one mark (see ICON_MPP).
+    let icons = view.mpp >= ICON_MPP;
+    let (now, haulers, units, chunks, new_booms, recent, heights, flocks) = {
         let mut out = run.0.out.lock();
         if let Some(v) = out.leg_full.take() {
             fleet.legs = v;
@@ -433,7 +442,8 @@ fn draw(
             let old = fleet.legs[i];
             let id = i as u32;
             match mem.clock {
-                Some(tc) if old.state <= 2 && leg.state <= 2 => {
+                // (Zoomed out to flock marks, no drone is drawn: none flies back.)
+                Some(tc) if !icons && old.state <= 2 && leg.state <= 2 => {
                     let was = paths.at(&old, tc);
                     let off = mem.catch.get(&id).map_or((0.0, 0.0), |c| c.at(tc));
                     let now = paths.at(&leg, tc);
@@ -489,7 +499,7 @@ fn draw(
         if out.fields_version != paths.version {
             paths.set(out.fields_version, out.fields.clone());
         }
-        (t, out.haulers.clone(), (out.units.clone(), out.animals.clone()), out.chunks.clone(), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()))
+        (t, out.haulers.clone(), (out.units.clone(), out.animals.clone()), out.chunks.clone(), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()), if icons { out.hubs.clone() } else { Vec::new() })
     };
     let lc = lights.rgb();
     let v = *view;
@@ -520,7 +530,22 @@ fn draw(
         }
     };
     let caught = &caught;
-    if tiny {
+    if icons {
+        // Each flock as one mark at its landing point, bigger the more
+        // drones call it home (by the square root, so a big flock doesn't
+        // swamp the view). No drone is looked at: with hundreds of
+        // thousands, placing each one's mark took most of a frame, and none
+        // could be told apart this far out anyway.
+        for &(x, y, kind, n) in &flocks {
+            if kind != 0 || n == 0 || x < l || x > r || y < b || y > t {
+                continue;
+            }
+            let p = v.to_screen(x, y);
+            let size = (ICON_MIN_PX + (n as f32).sqrt() * 0.3).min(ICON_MAX_PX);
+            let inside = shape.inside(x, y, 2.0) as usize;
+            square(&mut lists[1 + 3 * inside], p.x, p.y, 0.5 * size);
+        }
+    } else if tiny {
         // Approximate: mark the cells, then draw each marked cell once.
         let (gw, gh) = ((v.w as f32 / MIN_PX).ceil() as usize + 2, (v.h as f32 / MIN_PX).ceil() as usize + 2);
         if grid.cells.len() != gw * gh {
@@ -798,9 +823,31 @@ fn draw(
         // on lifting. In flight they pass freely in front of and behind each
         // other. (A stopgap: hover spots will be shared out so that no two
         // take the same one.)
+        // (Only those hovering are pushed, and only by neighbours: each
+        // pass looks in the 3 x 3 squares, HAULER_GAP_M wide, round each.
+        // Every pair was looked at before, six times a frame: with a couple
+        // of thousand haulers in view, most of a frame.)
+        let hovering: Vec<usize> = (0..placed.len()).filter(|&i| placed[i].3 > 0.0).collect();
+        let key = |x: f64, y: f64| ((x / HAULER_GAP_M).floor() as i64, (y / HAULER_GAP_M).floor() as i64);
+        let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+        let mut near_js: Vec<usize> = Vec::new();
         for _ in 0..6 {
-            for i in 0..placed.len() {
-                for j in i + 1..placed.len() {
+            grid.clear();
+            for &i in &hovering {
+                grid.entry(key(placed[i].1, placed[i].2)).or_default().push(i);
+            }
+            for &i in &hovering {
+                let (kx, ky) = key(placed[i].1, placed[i].2);
+                near_js.clear();
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        if let Some(v) = grid.get(&(kx + dx, ky + dy)) {
+                            near_js.extend(v.iter().copied().filter(|&j| j > i));
+                        }
+                    }
+                }
+                near_js.sort_unstable();
+                for &j in &near_js {
                     let w = placed[i].3.min(placed[j].3) as f64;
                     if w <= 0.0 {
                         continue;

@@ -458,7 +458,7 @@ pub struct Sim {
     haulers_moved: bool,
     /// Hubs by square of `search_m`, so `work_near` checks only the hubs
     /// near a cell. Rebuilt when `hubs_moved` or the count changes.
-    hub_grid: HashMap<(i64, i64), Vec<usize>>,
+    hub_grid: HashMap<(i64, i64), Vec<usize>, Fast>,
     hub_grid_n: usize,
     hubs_moved: bool,
     /// Drones waiting for work because every hub was dry (each at its own hub).
@@ -652,8 +652,11 @@ pub struct Sim {
     /// `hauler_filled` (may hold some no longer flying there: each is
     /// checked). Stale after drones are renumbered or a save is loaded:
     /// then rebuilt from every drone.
-    pub(super) inbound_idx: HashMap<(usize, usize), Vec<u32>>,
+    pub(super) inbound_idx: HashMap<(usize, usize), Vec<u32>, Fast>,
     pub(super) inbound_stale: bool,
+    /// This tick's searches for work made ahead, side by side (drone ->
+    /// the reach and cells weighed), see `prefetch_searches`.
+    pub(super) prefetched: HashMap<u32, (f64, Vec<((i64, i64), f64, f64)>), Fast>,
     /// (Profiling) a cut: mining the cell from the world, opening it (face,
     /// sandbox, bodies), the whole cut, the whole far trip, (spare), cells mined.
     pub prof5: [f64; 6],
@@ -688,7 +691,7 @@ pub struct Sim {
     /// kg on its way to each drop-off point (flock, point) in cutters'
     /// holds (see `Drone::promised`): a hauler that these would fill is
     /// no longer a place to go. Not saved (loaded drones start idle).
-    pub(super) incoming: HashMap<(usize, usize), f64>,
+    pub(super) incoming: HashMap<(usize, usize), f64, Fast>,
     pub fleet_books: FleetBooks,
     /// Bodies adrift near each flock that no cutter has gone for yet
     /// (sorted each second; see units/cutter.rs `sort_adrift`).
@@ -923,7 +926,7 @@ impl Sim {
             hub_gen: 0,
             hauler_by_site: Vec::new(),
             haulers_moved: true,
-            hub_grid: HashMap::new(),
+            hub_grid: HashMap::default(),
             hub_grid_n: usize::MAX,
             hubs_moved: true,
             parked: Vec::new(),
@@ -1037,8 +1040,9 @@ impl Sim {
             prof3: [0.0; 6],
             prof4: [0.0; 6],
             moved_docks: 0,
-            inbound_idx: HashMap::new(),
+            inbound_idx: HashMap::default(),
             inbound_stale: true,
+            prefetched: HashMap::default(),
             prof5: [0.0; 6],
             turned: 0,
             focus: None,
@@ -1051,7 +1055,7 @@ impl Sim {
             instant_build: false,
             docks: Vec::new(),
             calls: Vec::new(),
-            incoming: HashMap::new(),
+            incoming: HashMap::default(),
             fleet_books: FleetBooks::default(),
             adrift: Vec::new(),
             grabs: HashMap::new(),
@@ -3465,7 +3469,17 @@ impl Sim {
     pub fn step(&mut self) {
         let t0 = clock();
         self.reindex();
-        // Drone events due this tick, in (tick, id) order.
+        // Drone events due this tick, in (tick, id) order: those due as the
+        // tick begins (their searches for work made side by side first, see
+        // `prefetch_searches`), then any the first set for this same tick.
+        let batch: Vec<u32> = std::iter::from_fn(|| self.events.pop_due(self.tick)).collect();
+        self.prefetch_searches(&batch);
+        for id in batch {
+            self.counts[0] += 1;
+            self.on_event(id);
+            self.leg_changed(id);
+        }
+        self.prefetched.clear();
         while let Some(id) = self.events.pop_due(self.tick) {
             self.counts[0] += 1;
             self.on_event(id);
