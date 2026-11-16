@@ -817,8 +817,13 @@ one adapts to keep the sim near 50 ms a game second):
 
 | Body, cutters | Whole body | Mid zoom | Close up | Fast pan |
 |---|---|---|---|---|
-| Living world, 1.5M | 24x | 17x | 24.5x | 13.5x |
-| Earth, ~240M | 22-25x | 23.5x | 21.6x | 23.3x |
+| Living world, 1.5M | 21x | 13.1x | 20.4x | 12.8x |
+| Earth, ~240M | 17-19x | 18.2x | 20.3x | 18.3x |
+
+(Measured after the budget's target went to 60 ms a game second and far
+cutters' pace was matched to flown ones'. At mid zoom on the covered living
+world, the three screens' width the camera always gets as flocks holds
+about 130k cutters by itself: that alone costs about 75 ms a game second.)
 
 Zoomed out the sim spends 2-7 ms a game second. At mid zoom on the living
 world 133k cutters come down (19 sectors on and around the screen) and it
@@ -933,9 +938,10 @@ eating the ground from the top down: highest ground first, ramps between
 stretches, pitted so it reads as dug. What the camera shows is always
 real flocks; stretches come back as flocks as the camera arrives.
 
-**Top speeds (game, asked for 30x):** living world covered 17-24x, its
-fast pan 13.5x; Earth covered 22-25x in every shot. So 15x holds, with room,
-except a fast pan on the living world.
+**Top speeds (game, asked for 30x):** Earth covered 17-20x in every shot;
+living world covered 20-21x zoomed out and close up, 13x at mid zoom and in
+a fast pan (the area kept as flocks around the camera holds about 130k
+cutters there). So 15x holds except for those two on the living world.
 
 **Speeds now (game, asked for 10x):**
 - Living world covered (1.5M): 10x zoomed out, mid zoom and close up; a
