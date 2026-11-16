@@ -138,7 +138,10 @@ fn main() {
         let mats = dft_sim::materials::MaterialTable::load(&data.join("materials.toml").to_string_lossy()).unwrap();
         let planet = dft_sim::planet::Planet::new(spec, mats).unwrap();
         let mut e = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
-        e.seed_swarm.start_harvesters = drones as u32;
+        // (At most a million built at the start: the rest grow in, so a
+        // big body's swarm doesn't start as hundreds of millions of single
+        // drones.)
+        e.seed_swarm.start_harvesters = drones.min(1_000_000) as u32;
         let team = roster(stage, &e);
         // Only this stage's units exist: no bays (and so no scans for work)
         // for the others.
@@ -251,6 +254,7 @@ fn main() {
             let f = &s.far;
             println!("  far field: {} cutters in {} far sectors of {} ({} reached) · eaten {:.0} kt · folded {} flocks, unfolded {} sectors ({} cutters) · {:.1} s · budget {:.0} one by one, sim {:.0} ms per game s lately", f.total, f.is_far.iter().filter(|x| **x).count(), f.cutters.len(), f.open.iter().filter(|x| **x).count(), f.eaten_kg / 1e6, f.folded, f.unfolded, f.cutters_unfolded, f.prof, f.budget, f.cost_ms);
         }
+        println!("  sizes: {:?}", s.sizes());
         let st = &s.sandbox.stats;
         if std::env::var("FAR").is_ok() {
             let n = s.far.is_far.len();

@@ -364,6 +364,7 @@ fn run(shared: &Shared) {
     // Far sectors' levels as last redrawn, and when (see below).
     let mut far_drawn: Vec<f32> = Vec::new();
     let mut far_drawn_at = Instant::now();
+    let mut sizes_at = Instant::now();
     let mut fields_seen = u64::MAX;
     let mut rest_counted = Instant::now() - Duration::from_secs(5);
     // Leaves the screen's copy (see `Mirror`) doesn't have up to date yet:
@@ -707,6 +708,12 @@ fn run(shared: &Shared) {
                 // Ground eaten far off (whole sectors, see dft_sim::world::
                 // FarCut): every 2 s at most, one area to redraw, round the
                 // sectors whose level came down, as far as the view goes.
+                // (DFT_SIZES=1: the simulation's stores' sizes every 30 s, on
+                // stderr, for tracking down memory.)
+                if std::env::var("DFT_SIZES").is_ok() && sizes_at.elapsed() >= Duration::from_secs(30) {
+                    sizes_at = Instant::now();
+                    eprintln!("t {:.0}: {:?}; out legs {} changes {} hubs {} fields {} blocks {} rects {} fine {}", s.time(), s.sizes(), out.leg_full.as_ref().map_or(0, |v| v.len()), out.leg_changes.len(), out.hubs.len(), out.fields.len(), out.blocks.len(), out.rects.len(), out.fine.len());
+                }
                 if far_drawn_at.elapsed() >= Duration::from_secs(2) && far_drawn != s.world.far.levels {
                     far_drawn_at = Instant::now();
                     let lv = &s.world.far.levels;

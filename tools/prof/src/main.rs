@@ -162,7 +162,7 @@ fn main() {
     let mats = dft_sim::materials::MaterialTable::load(&data.join("materials.toml").to_string_lossy()).unwrap();
     let planet = dft_sim::planet::Planet::new(spec, mats).unwrap();
     let mut e = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
-    e.seed_swarm.start_harvesters = drones as u32;
+    e.seed_swarm.start_harvesters = drones.min(1_000_000) as u32;
     e.units.bay.retain(|b| matches!(b.unit, Unit::Cutter | Unit::Hauler));
     let mut s = Sim::new(World::new(planet), e);
     s.free_drones = Some(drones);
@@ -220,8 +220,10 @@ fn main() {
             t += 1.0;
             let a = a0 + v * (t - warm) / r;
             let (x, y) = ((a.cos() * r) as i64, (a.sin() * r) as i64);
-            s.set_view(Some(([x - 1600, x + 1600, y - 900, y + 900], 2.0)));
-            s.set_focus(Some(Some([x - 3200, x + 3200, y - 1800, y + 1800])));
+            s.set_view(Some(([x - 1200, x + 1200, y - 675, y + 675], 1.5)));
+            s.set_focus(Some(Some([x - 2400, x + 2400, y - 1350, y + 1350])));
+            // (In sight too, as the game's screen is at this zoom.)
+            s.set_attention(Some(Some([x - 1328, x + 1328, y - 803, y + 803])));
             s.run(t);
         }
     }

@@ -49,11 +49,59 @@ impl Plugin for FogPlugin {
     }
 }
 
+/// Cells charted, a bit each, in 64 x 64 blocks (a planet's worth of
+/// charted ground in a few tens of megabytes; a map of cells took gigabytes
+/// on an Earth-size body).
+#[derive(Default, Clone)]
+struct Bits {
+    blocks: HashMap<(i64, i64), Box<[u64; 64]>>,
+    count: usize,
+}
+
+impl Bits {
+    fn at(c: (i64, i64)) -> ((i64, i64), usize, u64) {
+        ((c.0.div_euclid(64), c.1.div_euclid(64)), c.1.rem_euclid(64) as usize, 1u64 << c.0.rem_euclid(64))
+    }
+    fn contains(&self, c: (i64, i64)) -> bool {
+        let (b, row, bit) = Self::at(c);
+        self.blocks.get(&b).is_some_and(|w| w[row] & bit != 0)
+    }
+    /// True if it wasn't charted before.
+    fn insert(&mut self, c: (i64, i64)) -> bool {
+        let (b, row, bit) = Self::at(c);
+        let w = self.blocks.entry(b).or_insert_with(|| Box::new([0u64; 64]));
+        if w[row] & bit != 0 {
+            return false;
+        }
+        w[row] |= bit;
+        self.count += 1;
+        true
+    }
+    fn cells(&self) -> Vec<(i64, i64)> {
+        let mut v = Vec::with_capacity(self.count);
+        for (&(bx, by), w) in &self.blocks {
+            for (row, bits) in w.iter().enumerate() {
+                for i in 0..64 {
+                    if bits & (1u64 << i) != 0 {
+                        v.push((bx * 64 + i as i64, by * 64 + row as i64));
+                    }
+                }
+            }
+        }
+        v
+    }
+}
+
 #[derive(Resource)]
 pub struct Fog {
     pub on: bool,
-    /// Per grid: when each charted cell was last seen (real seconds).
-    seen: Vec<HashMap<(i64, i64), f32>>,
+    /// Per grid: the cells charted.
+    seen: Vec<Bits>,
+    /// Per grid: when cells were last seen (real seconds), only those seen
+    /// within LIVE_S (for the glow where drones are now).
+    live: Vec<HashMap<(i64, i64), f32>>,
+    /// When the live maps were last cleared of the faded.
+    pruned: f32,
     /// Where the round-robin over the swarm has got to.
     cursor: usize,
     /// Far sectors' marks charted so far this round (a share a frame).
@@ -76,30 +124,37 @@ pub struct Fog {
 impl Fog {
     /// Charted cells on the finest grid (for the log and panel).
     pub fn charted(&self) -> usize {
-        self.seen.first().map_or(0, |m| m.len())
+        self.seen.first().map_or(0, |m| m.count)
     }
 
     /// Charted cells on the finest grid (for saving).
     pub fn charted_cells(&self) -> Vec<(i64, i64)> {
-        let mut v: Vec<(i64, i64)> = self.seen.first().map(|m| m.keys().copied().collect()).unwrap_or_default();
+        let mut v: Vec<(i64, i64)> = self.seen.first().map(|m| m.cells()).unwrap_or_default();
         v.sort_unstable();
         v
     }
 
     /// Whether the world point (x, y) has been charted (fog off: everywhere).
     pub fn charted_at(&self, x: f64, y: f64) -> bool {
-        !self.on || self.seen.first().is_some_and(|m| m.contains_key(&((x / CELL).floor() as i64, (y / CELL).floor() as i64)))
+        !self.on || self.seen.first().is_some_and(|m| m.contains(((x / CELL).floor() as i64, (y / CELL).floor() as i64)))
     }
 
     fn mark(&mut self, c: (i64, i64), now: f32) {
         for k in 0..GRIDS {
             let key = (c.0 >> k, c.1 >> k);
-            let e = self.seen[k].entry(key).or_insert(f32::MIN);
-            if *e >= now {
-                // Already marked this frame here, so on every coarser grid too.
+            let charted_new = self.seen[k].insert(key);
+            // (Only what is seen now glows: a chart restored from a save,
+            // marked long ago, doesn't.)
+            if now > self.pruned - LIVE_S as f32 {
+                let e = self.live[k].entry(key).or_insert(f32::MIN);
+                if *e >= now {
+                    // Already marked this frame here, so on every coarser grid too.
+                    break;
+                }
+                *e = now;
+            } else if !charted_new {
                 break;
             }
-            *e = now;
         }
     }
 }
@@ -109,7 +164,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, o: Res<crate
     img.sampler = ImageSampler::nearest();
     let image = images.add(img);
     let sprite = commands.spawn((Sprite { image: image.clone(), custom_size: Some(Vec2::ONE), ..default() }, Transform::from_xyz(0.0, 0.0, 8.0))).id();
-    commands.insert_resource(Fog { on: !o.no_fog, seen: vec![HashMap::new(); GRIDS], cursor: 0, far_cursor: 0, body: 0, surface: Vec::new(), base: Vec::new(), heights_seen: 0, image, sprite, restore: None });
+    commands.insert_resource(Fog { on: !o.no_fog, seen: vec![Bits::default(); GRIDS], live: vec![HashMap::new(); GRIDS], pruned: 0.0, cursor: 0, far_cursor: 0, body: 0, surface: Vec::new(), base: Vec::new(), heights_seen: 0, image, sprite, restore: None });
 }
 
 fn toggle(keys: Res<ButtonInput<KeyCode>>, mut fog: ResMut<Fog>) {
@@ -125,7 +180,8 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
     if fog.body != id {
         // A new body: forget the charts, and learn its outline.
         fog.body = id;
-        fog.seen = vec![HashMap::new(); GRIDS];
+        fog.seen = vec![Bits::default(); GRIDS];
+        fog.live = vec![HashMap::new(); GRIDS];
         fog.cursor = 0;
         let n = 8192;
         let p = &body.0;
@@ -157,6 +213,14 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
         }
     }
     let now = time.elapsed_secs_f64() as f32;
+    // (Cells seen longer ago than the glow lasts drop out of the live maps.)
+    if now - fog.pruned >= 1.0 {
+        fog.pruned = now;
+        let cut = now - LIVE_S as f32;
+        for m in fog.live.iter_mut() {
+            m.retain(|_, t| *t >= cut);
+        }
+    }
     if fog.restore.as_ref().is_some_and(|(b, _)| *b == id) {
         // Charted long ago: remembered, not live.
         let (_, cells) = fog.restore.take().unwrap();
@@ -280,12 +344,15 @@ fn draw(fog: Res<Fog>, view: Res<View>, time: Res<Time<Real>>, mut images: ResMu
     let (gw, gh) = (((r / cs).floor() as i64 + 2 - gx0) as usize, ((t / cs).floor() as i64 + 2 - gy0) as usize);
     let mut charted = vec![0f32; gw * gh];
     let mut live = vec![0f32; gw * gh];
-    let seen = &fog.seen[k];
+    let (seen, recent) = (&fog.seen[k], &fog.live[k]);
     for j in 0..gh {
         for i in 0..gw {
-            if let Some(&s) = seen.get(&(gx0 + i as i64, gy0 + j as i64)) {
+            let c = (gx0 + i as i64, gy0 + j as i64);
+            if seen.contains(c) {
                 charted[j * gw + i] = 1.0;
-                live[j * gw + i] = (1.0 - (now - s) / LIVE_S as f32).clamp(0.0, 1.0);
+                if let Some(&s) = recent.get(&c) {
+                    live[j * gw + i] = (1.0 - (now - s) / LIVE_S as f32).clamp(0.0, 1.0);
+                }
             }
         }
     }
@@ -310,7 +377,7 @@ fn draw(fog: Res<Fog>, view: Res<View>, time: Res<Time<Real>>, mut images: ResMu
     let mut near = vec![0f32; nw * nh];
     for j in 0..nh {
         for i in 0..nw {
-            if fog.seen[kp].contains_key(&(nx0 + i as i64, ny0 + j as i64)) {
+            if fog.seen[kp].contains((nx0 + i as i64, ny0 + j as i64)) {
                 near[j * nw + i] = 1.0;
             }
         }

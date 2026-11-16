@@ -937,7 +937,9 @@ impl Sim {
     /// rest into the last one. How many went (0 if there is a flock near
     /// the camera for them).
     pub(super) fn far_absorb_many(&mut self, count: u64) -> u64 {
-        if !self.far.any_far || count == 0 {
+        // (No far sector yet: only once the budget is full, then the first
+        // ones open beside the swarm's reach.)
+        if count == 0 || self.far.cutters.is_empty() || (!self.far.any_far && (self.alive_count as f64) < self.far.budget) {
             return 0;
         }
         // (Near the camera while the budget has room; beyond it, far.)
@@ -960,7 +962,7 @@ impl Sim {
     /// `count` cutters into far sectors with room (see `far_absorb_many`).
     /// How many went.
     fn far_rehome(&mut self, count: u64) -> u64 {
-        if !self.far.any_far || count == 0 {
+        if count == 0 || self.far.cutters.is_empty() {
             return 0;
         }
         let n = self.far_n();

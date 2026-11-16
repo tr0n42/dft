@@ -2882,7 +2882,12 @@ impl Sim {
             // (Those for far sectors, all at once.)
             let far = self.far_absorb_many(n);
             self.harvesters_built += far;
-            for _ in far..n {
+            // With a camera, no more flown one by one than the far field's
+            // budget: the rest come once there are far sectors to take them
+            // (a big body's swarm would otherwise start as millions of
+            // single drones).
+            let flown = if self.far.view.is_some() { (n - far).min((self.far.budget.max(1.0) as u64).saturating_sub(self.alive_count as u64).max(1)) } else { n - far };
+            for _ in 0..flown {
                 self.spawn_harvester();
             }
             // Specialists for the benchmarks: one more a second while short.
@@ -3957,6 +3962,30 @@ impl Sim {
                 self.settling.insert(c);
             }
         }
+    }
+
+    /// How big its main stores are (for tracking down memory): name, count.
+    pub fn sizes(&self) -> Vec<(&'static str, usize)> {
+        vec![
+            ("drones", self.drones.len()),
+            ("drones cap", self.drones.capacity()),
+            ("haulers", self.haulers.len()),
+            ("hubs", self.hubs.len()),
+            ("fields", self.fields.iter().flatten().count()),
+            ("frontier", self.frontier.len()),
+            ("buckets", self.buckets.len()),
+            ("reserved", self.reserved.len()),
+            ("open tiles", self.open.tiles.len()),
+            ("outside tiles", self.outside.tiles.len()),
+            ("progress", self.progress.len()),
+            ("world nodes", self.world.nodes.len()),
+            ("legs changed", self.leg_track.as_ref().map_or(0, |t| t.changed.len())),
+            ("track blocks", self.world.track.as_ref().map_or(0, |t| t.blocks.len())),
+            ("track rects", self.world.track.as_ref().map_or(0, |t| t.rects.len())),
+            ("sandbox dormant", self.sandbox.dormant()),
+            ("parked", self.parked.len()),
+            ("flock stats", self.flock.len()),
+        ]
     }
 
     /// Cutters waiting at their flock for a hauler.
