@@ -32,8 +32,9 @@ pub const FAR_BUDGET: f64 = 100_000.0;
 const FAR_BUDGET_MIN: f64 = 0.0;
 const FAR_BUDGET_MAX: f64 = 400_000.0;
 /// Real ms the simulation may take per second of game time: 15x with room
-/// for drawing and everything else the game does (1000 / 15 = 67).
-pub const FAR_TARGET_MS: f64 = 50.0;
+/// for drawing and everything else the game does (1000 / 15 = 67; 60 is
+/// 16.7x).
+pub const FAR_TARGET_MS: f64 = 60.0;
 /// Seconds between a far sector's bites (at least: with many far sectors,
 /// longer, so there are at most about BITES_PER_S bites a second).
 const FAR_STEP_S: f64 = 5.0;

@@ -840,6 +840,23 @@ told where the view is heading (a zoom's end, a pan a second on), so the
 sectors there are flocks before they come into sight (`view::Glide`,
 `view::Heading`). Drags stay one to one.
 
+**Memory:** the benchmarks used to start a big swarm as hundreds of
+millions of single drones (21 GB for an Earth); with a camera no more are
+flown one by one than the budget, the rest wait for far sectors (Earth
+covered: 0.4 GB headless, 4x Earth 0.5 GB). The game's fog of war kept a
+hash map entry per charted cell on 26 grids (5 GB on an Earth in 5 minutes):
+now a bit a cell, and times only for what was seen in the last 1.5 s
+(Earth in the game: 6.6 -> 1.7 GB). Saves write the charted cells as deltas,
+compressed: an Earth's worth may be tens of MB.
+
+**Budget target:** 60 ms a game second (16.7x). The dev planet with 100k
+cutters never goes far: all of them flown one by one, 10x in every shot at
+about 40 ms a game second.
+
+**To watch it:** stress-big-swarm.bat (living world covered) and
+stress-earth.bat (an Earth covered), both at 10x with pictures of each
+shot in logs.
+
 **Open:** a fast pan along the surface (half a screen a second at mid
 zoom) still dips to about 7x on the living world while sectors come down in
 turn; the economy's growth is far too slow to cover anything big (living
@@ -941,6 +958,12 @@ on Earth the game went from 0.4 to 60 fps zoomed out.
 **Open:** the economy grows the swarm far too slowly to cover anything big
 (living world: 11k cutters after 4 game hours, 11 Mt unused in the
 stockpile): flocks open one at a time. A design question.
+
+**Memory:** an Earth covered runs in 1.7 GB in the game (was 12 GB): big
+swarms no longer start as millions of single drones, and the fog of war
+keeps a bit per charted cell instead of a map entry.
+
+**To watch:** stress-earth.bat (new) and stress-big-swarm.bat.
 
 **Tests:** full suite 112 passed, 0 failed, 3 ignored (as before), with 3
 new far-field tests. Commits ea57dd1 onward; not pushed.
