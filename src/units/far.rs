@@ -403,7 +403,7 @@ impl Sim {
             let plans: Vec<(usize, f64, f64, Vec<(MatId, f64)>)> = {
                 use rayon::prelude::*;
                 let me: &Sim = self;
-                due.par_iter().filter(|&&k| !me.far.wet[k] && me.far.cutters[k] > 0).filter_map(|&k| me.far_plan(k, dt)).collect()
+                due.par_iter().filter(|&&k| me.far.cutters[k] > 0).filter_map(|&k| me.far_plan(k, dt)).collect()
             };
             for (k, from, to, eaten) in plans {
                 self.far_apply(k, from, to, &eaten);
@@ -668,7 +668,10 @@ impl Sim {
             if !lj.is_finite() {
                 continue;
             }
-            if self.far.wet[j] {
+            // (A sea is drunk from the top down like any other ground: the
+            // land beside it waits for it, so it never pours into what was
+            // eaten.)
+            if self.far.wet[j] && !self.far.wet[k] {
                 floor = floor.max(lj + 1.0);
             }
             // No deeper than FAR_STEP_M under a neighbour: it waits for
@@ -795,7 +798,7 @@ impl Sim {
                 if self.parked.is_empty() {
                     break;
                 }
-                if !self.far.is_far[k] || !self.far.open[k] || self.far.wet[k] {
+                if !self.far.is_far[k] || !self.far.open[k] {
                     continue;
                 }
                 let r = self.far_room_of(k);
@@ -828,7 +831,7 @@ impl Sim {
         // sectors (as counts they cost nothing; flown one by one, they
         // would count against the budget doing nothing).
         if self.parked.len() >= POOL_OPEN && self.far.any_far {
-            let usable: Vec<usize> = (0..n).filter(|&k| self.far.is_far[k] && self.far.open[k] && !self.far.wet[k]).collect();
+            let usable: Vec<usize> = (0..n).filter(|&k| self.far.is_far[k] && self.far.open[k]).collect();
             if !usable.is_empty() {
                 let mut i = 0;
                 while let Some(id) = self.far_pop_parked() {
@@ -891,7 +894,7 @@ impl Sim {
         // tick at most a search that finds none: then the last one again).
         let n = self.far_n();
         let start = self.far.last_put.min(n - 1);
-        let usable = |s: &Self, k: usize| s.far.is_far[k] && s.far.open[k] && !s.far.wet[k];
+        let usable = |s: &Self, k: usize| s.far.is_far[k] && s.far.open[k];
         if self.far.no_room_tick == self.tick + 1 {
             let k = if usable(self, start) { start } else {
                 match (0..n).find(|&k| usable(self, k)) {
@@ -980,7 +983,7 @@ impl Sim {
                 break;
             }
             let k = (start + i) % n;
-            if !(self.far.is_far[k] && self.far.open[k] && !self.far.wet[k]) {
+            if !(self.far.is_far[k] && self.far.open[k]) {
                 continue;
             }
             last = Some(k);
@@ -1005,7 +1008,7 @@ impl Sim {
             if last.is_none() {
                 return count - left;
             }
-            let usable: Vec<usize> = (0..n).filter(|&k| self.far.is_far[k] && self.far.open[k] && !self.far.wet[k]).collect();
+            let usable: Vec<usize> = (0..n).filter(|&k| self.far.is_far[k] && self.far.open[k]).collect();
             let each = left / usable.len() as u64;
             let mut extra = left - each * usable.len() as u64;
             for &k in &usable {
@@ -1090,10 +1093,6 @@ impl Sim {
                     self.far.wet[k] = wet > 0.5;
                     let _ = self.world.far_lower(k, top + 64.0, top);
                 }
-                if self.far.wet[k] {
-                    // (Open, so the swarm reaches past it, but nothing to eat.)
-                    continue;
-                }
                 if self.far_must_near(k) {
                     continue;
                 }
@@ -1110,7 +1109,7 @@ impl Sim {
         let n = self.far_n();
         let mut room = 0;
         for k in 0..n {
-            if self.far.is_far[k] && self.far.open[k] && !self.far.wet[k] {
+            if self.far.is_far[k] && self.far.open[k] {
                 let (a0, a1) = self.far_span(k);
                 let r = (self.world.far.levels[k] as f64).min(self.world.planet.max_radius);
                 room += ((COVER_PER_M * (a1 - a0) * r) as u64).saturating_sub(self.far.cutters[k]);

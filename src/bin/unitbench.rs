@@ -255,6 +255,17 @@ fn main() {
             println!("  far field: {} cutters in {} far sectors of {} ({} reached) · eaten {:.0} kt · folded {} flocks, unfolded {} sectors ({} cutters) · {:.1} s · budget {:.0} one by one, sim {:.0} ms per game s lately", f.total, f.is_far.iter().filter(|x| **x).count(), f.cutters.len(), f.open.iter().filter(|x| **x).count(), f.eaten_kg / 1e6, f.folded, f.unfolded, f.cutters_unfolded, f.prof, f.budget, f.cost_ms);
         }
         println!("  sizes: {:?}", s.sizes());
+        {
+            let lv: Vec<f64> = s.world.far.levels.iter().filter(|l| l.is_finite()).map(|&l| l as f64).collect();
+            if !lv.is_empty() {
+                let r = s.world.planet.radius;
+                let mut d: Vec<f64> = lv.iter().map(|l| r - l).collect();
+                d.sort_by(|a, b| a.total_cmp(b));
+                println!("  far levels, m below the body's radius: min {:.0}, quarter {:.0}, middle {:.0}, three quarters {:.0}, max {:.0}", d[0], d[d.len() / 4], d[d.len() / 2], d[3 * d.len() / 4], d[d.len() - 1]);
+                let held = (0..lv.len()).count();
+                let _ = held;
+            }
+        }
         let st = &s.sandbox.stats;
         if std::env::var("FAR").is_ok() {
             let n = s.far.is_far.len();

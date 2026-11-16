@@ -778,7 +778,16 @@ that many cutters would cut (hold, dig time of the rock at the top, pace
 - Loose matter in far sectors (water, sand) waits until someone looks
   (dormant): otherwise lakes woken by flocks before they folded drained
   across the eaten floor cell by cell, 140 ms a game second.
-- A far sector next to a sea stops at the sea's surface (a shore is left).
+- Seas are drunk from the top down like any other ground (cutters drink
+  seas); a land sector next to a sea waits for it, no lower than its
+  surface, so no sea pours into what was eaten. (When seas were left alone
+  the living world's far swarm ran out of land above sea level within a
+  few game hours.) A sea the camera doesn't show sleeps, as far sectors do.
+- No sector goes more than 300 m under a neighbour; the ramp spans it.
+  Over 6,000 game s on the living world, far sectors reach 0.4 to 8.5 km
+  down; the mining rate falls as the rock gets harder and the sectors
+  beside the ones kept as flocks (fewer cutters a km) hold their neighbours
+  back.
 - Sectors the camera shows (or within a screen of it, three screens across)
   closer than 5 m a pixel are always flocks: their cutters come back down,
   up to 20,000 a game second (`UNFOLD_PER_S`), over the ground as it now
