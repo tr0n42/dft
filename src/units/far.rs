@@ -48,9 +48,11 @@ const LOOKS: usize = 12;
 /// Cutters that can work a metre of surface at once: what flocks reach on
 /// ground with room for them (measured on the living world; see HANDOFF).
 pub const COVER_PER_M: f64 = 6.0;
-/// A far cutter's pace against one flown cell by cell with the same cut
-/// time: flights, waits for haulers, rests (measured, see HANDOFF).
-const PACE: f64 = 0.6;
+/// A far cutter's pace against a trip's dig time and flights: matched to
+/// what cutters flown one by one bring in per cutter at work (waits for
+/// haulers included), measured on the living world (about 160 kg a second
+/// each with 300k cutters).
+const PACE: f64 = 1.0;
 /// New cutters a second that drop to flocks on screen past the budget.
 const NEAR_NEW_PER_S: u64 = 2_000;
 /// Most a far sector's level goes under a neighbour's (m): its ramp spans
