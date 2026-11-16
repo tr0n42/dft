@@ -28,6 +28,10 @@ const GRIDS: usize = 26;
 const SENSE: i64 = 3;
 /// How far around a landing point, in cells.
 const HUB_SENSE: i64 = 5;
+/// Far sectors charted a frame (in turn), and the stretch of surface each
+/// one charts (about a sector's width, see dft_sim::swarm::SECTOR_M).
+const FAR_PER_FRAME: usize = 16;
+const FAR_STRETCH_M: f64 = 1100.0;
 /// Seconds a cell stays live after a drone was last seen in it, fading out.
 const LIVE_S: f64 = 1.5;
 /// The overlay is drawn at a pixel of this many screen pixels.
@@ -165,16 +169,34 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
         // Flocks every frame; far sectors' marks (a swarm worked as a
         // count, tens of thousands on a big body) a few hundred a frame.
         // (Flocks with cutters: a flock that's gone charts nothing.)
-        let mut v: Vec<(f64, f64)> = out.hubs.iter().filter(|h| h.2 != 3 && h.3 > 0).map(|h| (h.0, h.1)).collect();
+        let v: Vec<(f64, f64)> = out.hubs.iter().filter(|h| h.2 != 3 && h.3 > 0).map(|h| (h.0, h.1)).collect();
         let far: Vec<(f64, f64)> = out.hubs.iter().filter(|h| h.2 == 3).map(|h| (h.0, h.1)).collect();
+        let mut stretch = Vec::new();
         if !far.is_empty() {
             let start = fog.far_cursor % far.len();
-            let end = (start + 256).min(far.len());
-            v.extend_from_slice(&far[start..end]);
+            let end = (start + FAR_PER_FRAME).min(far.len());
+            stretch.extend_from_slice(&far[start..end]);
             fog.far_cursor = if end >= far.len() { 0 } else { end };
         }
-        (out.stats.time, v)
+        (out.stats.time, (v, stretch))
     };
+    let (hubs, stretch) = hubs;
+    // A far sector (its swarm worked as a count) charts the whole stretch
+    // of surface it eats: a band along it, a few cells deep, under its
+    // mark (which sits 20 m over its ground, in its middle).
+    for (x, y) in stretch {
+        let r = (x * x + y * y).sqrt().max(1.0);
+        let a = y.atan2(x);
+        let half = 0.5 * FAR_STRETCH_M / r;
+        let steps = (FAR_STRETCH_M / CELL).ceil() as i64;
+        for i in 0..=steps {
+            let b = a - half + 2.0 * half * i as f64 / steps as f64;
+            for j in 0..4 {
+                let rr = r - 20.0 - CELL * j as f64;
+                fog.mark((((b.cos() * rr) / CELL).floor() as i64, ((b.sin() * rr) / CELL).floor() as i64), now);
+            }
+        }
+    }
     let cell = |x: f64, y: f64| ((x / CELL).floor() as i64, (y / CELL).floor() as i64);
     // This frame's share of the swarm, on all cores: the cells drones are in.
     let n = fleet.legs.len();
