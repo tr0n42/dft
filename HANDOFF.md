@@ -812,6 +812,14 @@ shot):**
 | Earth, ~240M | 10x, 60 fps | 9.9x, 57 fps | 10x, 47-55 fps | 10x, 52 fps |
 | 4x Earth, ~960M | 10x, 56 fps | 8.8x | 10x | 10x |
 
+Top speed (the same shots asked for 30x; the budget of cutters flown one by
+one adapts to keep the sim near 50 ms a game second):
+
+| Body, cutters | Whole body | Mid zoom | Close up | Fast pan |
+|---|---|---|---|---|
+| Living world, 1.5M | 24x | 17x | 24.5x | 13.5x |
+| Earth, ~240M | 22-25x | 23.5x | 21.6x | 23.3x |
+
 Zoomed out the sim spends 2-7 ms a game second. At mid zoom on the living
 world 133k cutters come down (19 sectors on and around the screen) and it
 still holds 9.5x. The benchmark's first 100 s run at 4-5x while it makes
@@ -907,6 +915,10 @@ and only once there are more cutters than the sim can fly one by one at
 eating the ground from the top down: highest ground first, ramps between
 stretches, pitted so it reads as dug. What the camera shows is always
 real flocks; stretches come back as flocks as the camera arrives.
+
+**Top speeds (game, asked for 30x):** living world covered 17-24x, its
+fast pan 13.5x; Earth covered 22-25x in every shot. So 15x holds, with room,
+except a fast pan on the living world.
 
 **Speeds now (game, asked for 10x):**
 - Living world covered (1.5M): 10x zoomed out, mid zoom and close up; a
