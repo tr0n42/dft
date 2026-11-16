@@ -760,13 +760,13 @@ still about 240 million cutters.
 **The far field (src/units/far.rs, world::FarCut).** The surface is cut
 into sectors about 1 km wide (by angle). Near the camera the swarm is what
 it was: flocks of cutters flown one by one. Beyond what the sim can afford
-one by one (a budget that follows the sim's own cost, aiming at 50 ms per
+one by one (a budget that follows the sim's own cost, aiming at 60 ms per
 game second, never trimming what the camera shows), whole sectors go far:
 their flocks fold into a count, haulers go up to unload, and each far
 sector is eaten as a whole, a bite every few seconds (staggered, at most
 ~400 bites a second, worked out side by side): its level comes down by what
 that many cutters would cut (hold, dig time of the rock at the top, pace
-0.6), highest ground first, delivered straight to the mother swarm.
+1.0: about 160 kg/s each at work, as flown cutters manage), highest ground first, delivered straight to the mother swarm.
 - What is eaten: every cell further from the centre than its sector's
   level. Untouched ground is never generated for it (the rule is applied
   when read: `FarCut::cut`); cells already generated are emptied
@@ -822,7 +822,7 @@ shot):**
 | 4x Earth, ~960M | 10x, 56 fps | 8.8x | 10x | 10x |
 
 Top speed (the same shots asked for 30x; the budget of cutters flown one by
-one adapts to keep the sim near 50 ms a game second):
+one adapts to keep the sim near 60 ms a game second):
 
 | Body, cutters | Whole body | Mid zoom | Close up | Fast pan |
 |---|---|---|---|---|
@@ -883,6 +883,9 @@ shot in logs.
   haulers) would have to scale by many orders of magnitude over the meta
   progression, or cutters live longer, or a "far" production rate: a design
   question for Benjamin.
+- Zoomed out, spare haulers in the mother swarm may still look cluttered.
+  Idle haulers past the calls + 32 are now recycled whenever anything is
+  far, but the picture wasn't re-checked (the last screenshots failed).
 
 ## What's next
 
@@ -990,7 +993,7 @@ keeps a bit per charted cell instead of a map entry.
 **To watch:** stress-earth.bat (new) and stress-big-swarm.bat.
 
 **Tests:** full suite 112 passed, 0 failed, 3 ignored (as before), with 3
-new far-field tests. Commits ea57dd1 onward; not pushed.
+new far-field tests. Commits ea57dd1 onward, pushed to GitHub on 16 Nov.
 
 ## Previous session's report (14 to 15 November 2026)
 
