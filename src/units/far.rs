@@ -381,9 +381,12 @@ impl Sim {
         self.far.any_far = self.far.is_far.iter().any(|f| *f);
         self.far.total = self.far.cutters.iter().sum();
         self.far_spread();
-        // Loose matter in far sectors waits until someone looks.
-        if self.world.far.asleep != self.far.is_far {
-            self.world.far.asleep = self.far.is_far.clone();
+        // Loose matter in far sectors waits until someone looks; so does a
+        // sea the camera doesn't show (flocks beside it would drain it cell
+        // by cell, out of sight).
+        let asleep: Vec<bool> = (0..n).map(|k| self.far.is_far[k] || (self.far.wet[k] && !self.far.must[k] && self.far.view.is_some())).collect();
+        if self.world.far.asleep != asleep {
+            self.world.far.asleep = asleep;
         }
         self.far.any_far = self.far.is_far.iter().any(|f| *f);
         // Bites: each far sector every `period` seconds, a share of them

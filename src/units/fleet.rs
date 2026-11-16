@@ -44,6 +44,10 @@ pub struct FleetBooks {
 /// the ground) of where it would be placed now, and still clear.
 const DOCK_KEEP_M: f64 = 40.0;
 
+/// Spare haulers kept idle in the mother swarm while part of the swarm is
+/// far (see `fleet_work`).
+const SPARE_HAULERS: usize = 32;
+
 impl Sim {
     /// Where flock h's drop-off point d hangs (the flock's landing point if
     /// it has none yet).
@@ -362,6 +366,26 @@ impl Sim {
                 self.mass += m;
                 self.recovered_mass += m;
                 self.haulers_moved = true;
+            }
+        }
+        // With part of the swarm far (worked as a count, no haulers), the
+        // haulers its folded flocks sent up are spare: past what the calls
+        // need and a reserve, the longest idle are recycled now rather
+        // than circling in the mother swarm for minutes.
+        if self.far.any_far {
+            let mut idle: Vec<(u64, usize)> = (0..self.haulers.len()).filter(|&k| self.haulers[k].alive && self.haulers[k].state == HaulerState::Idle).map(|k| (self.haulers[k].t1, k)).collect();
+            let keep = self.calls.len() + SPARE_HAULERS;
+            if idle.len() > keep {
+                idle.sort_unstable();
+                for &(_, k) in &idle[..idle.len() - keep] {
+                    self.haulers[k].alive = false;
+                    self.haulers_retired += 1;
+                    self.fleet_books.recycled += 1;
+                    let m = self.eco.hauler.mass_cost;
+                    self.mass += m;
+                    self.recovered_mass += m;
+                    self.haulers_moved = true;
+                }
             }
         }
     }
