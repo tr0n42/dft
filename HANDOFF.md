@@ -871,11 +871,18 @@ about 40 ms a game second.
 stress-earth.bat (an Earth covered), both at 10x with pictures of each
 shot in logs.
 
-**Open:** a fast pan along the surface (half a screen a second at mid
-zoom) still dips to about 7x on the living world while sectors come down in
-turn; the economy's growth is far too slow to cover anything big (living
-world: 11k cutters after 4 game hours, held back by how fast flocks open,
-with 11 Mt unused in the stockpile): a design question.
+**Open:**
+- A fast pan along the surface and mid zoom on the covered living world:
+  about 13x top speed (the area kept as flocks holds ~130k cutters).
+- The economy's growth is far too slow to cover anything big. Living world,
+  4 game hours: 11k cutters alive; the factory built 50,576 (3.5 a second)
+  with 12 Mt sitting in the stockpile, and ~20 hauler calls queued. So the
+  factory's rate is the cap, not matter or room. To hold an Earth covered,
+  cutters living 900 s, takes 240M / 900 = about 267,000 new cutters a
+  second (27 t of parts a second: nothing beside what it mines). Bays (and
+  haulers) would have to scale by many orders of magnitude over the meta
+  progression, or cutters live longer, or a "far" production rate: a design
+  question for Benjamin.
 
 ## What's next
 
@@ -970,9 +977,11 @@ minutes: 13k -> 53k cutters at work), long hauls capped at 1.5x, the
 wheel's zoom glides and the sim gets ready where the view is heading, and
 on Earth the game went from 0.4 to 60 fps zoomed out.
 
-**Open:** the economy grows the swarm far too slowly to cover anything big
-(living world: 11k cutters after 4 game hours, 11 Mt unused in the
-stockpile): flocks open one at a time. A design question.
+**Open (design):** the economy grows the swarm far too slowly to cover
+anything big: the factory builds about 3.5 cutters a second (living world,
+4 game hours: 11k alive, 12 Mt unused in the stockpile). Holding an Earth
+covered needs about 267,000 new cutters a second (they live 900 s): bays,
+haulers or cutter life have to scale with the meta progression.
 
 **Memory:** an Earth covered runs in 1.7 GB in the game (was 12 GB): big
 swarms no longer start as millions of single drones, and the fog of war
