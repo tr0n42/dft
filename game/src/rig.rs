@@ -1,104 +1,96 @@
-//! Procedural legs for any walker: any number of legs, any number of joints
-//! a leg.
+//! The tripods' legs and gait (the forester and the abductor), as the swarm
+//! mockup walks them (mockups/swarm-foundry.html, sceneTripod):
 //!
-//! How it works (the usual way procedural walkers are built: feet planted on
-//! the ground and stepped when they fall too far behind, each leg solved by
-//! inverse kinematics):
-//! - **Feet stay planted.** Each foot has a rest spot under the body. While
-//!   the body moves, a planted foot stays where it is on the ground; once it
-//!   is too far from its rest spot (the body has carried on), it steps.
-//! - **Steps.** A step lifts the foot in an arc to a spot a little ahead of
-//!   its rest spot (ahead by how fast the body is going), over a set time.
-//! - **Gait groups.** Legs belong to groups that take turns: a leg may only
-//!   lift while no leg of another group is in the air (a crab's diagonal
-//!   pairs, a tripod's legs one at a time), so it never stands on too few.
-//! - **On the real ground.** Where a foot comes down is found on the ground
-//!   as drawn (the screen's copy of the world), not a flat line: feet stand
-//!   on slopes, in hollows, on ledges.
-//! - **The body on springs.** It rides at its height over the ground, sags
-//!   while legs are in the air, jolts down as each foot lands, and leans
-//!   toward its planted feet.
-//! - **Each leg solved by FABRIK** (Aristidou and Lasenby's forward and
-//!   backward reaching inverse kinematics): the chain of joints is pulled to
-//!   the foot from the hip and back to the hip from the foot a few times,
-//!   each bone keeping its length, starting from last frame's pose so it
-//!   moves smoothly. Every leg has a bend: its joints are nudged toward a
-//!   pole (up and outward) so knees always bow the same way.
+//! - **A stride cycle, one leg at a time.** Three legs, leg i lifting at
+//!   i/3 of the cycle, its swing taking 0.3 of it. The cycle runs on with the
+//!   distance the body covers: a long, fast stride while it travels, a short
+//!   one (a slow creep) while it works.
+//! - **Feet stay put while planted** and swing in a low arc to a spot half a
+//!   stride ahead of their rest spot. Where a foot comes down is found on the
+//!   ground as drawn (the screen's copy of the world), not a flat line: feet
+//!   stand on slopes, in hollows, on ledges. The only thing the mockup can't
+//!   do.
+//! - **The body hangs on its legs like a load on springs.** It sags when a
+//!   leg lifts (two legs hold what three did), jolts down as each foot lands,
+//!   surges while all three are planted and leans toward its planted feet.
+//! - **Unfolding**: the legs spread from the package and the body heaves up,
+//!   sags a little, holds. A leap tucks the legs in.
 //!
-//! Positions are in the walker's own frame: u along the ground (+u
-//! clockwise round the body), w up from where it stands.
+//! The simulation decides where the body is; this only decides its legs and
+//! how it rides on them. Positions are in the walker's own frame: u along the
+//! ground (+u clockwise round the body), w up from where it stands.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// One leg.
-#[derive(Clone, Debug)]
-pub struct LegSpec {
-    /// Where it joins the body (u, w from the body's base).
-    pub hip: (f32, f32),
-    /// Its foot's rest spot on the ground (u from the body).
-    pub rest: f32,
-    /// Its bones, as shares of its whole length (any number).
-    pub bones: Vec<f32>,
-    /// Which gait group it steps with.
-    pub group: u8,
-    /// How strongly its joints bow toward its pole (up and out), 0 to 1.
-    pub bend: f32,
-}
+/// The mockup's walking speed and stride period: a cycle carries the body
+/// V * P metres at the working stride (times the stride while travelling).
+const V: f32 = 2.3;
+const P: f32 = 5.2;
+/// The share of the cycle a leg is in the air.
+const SWING: f32 = 0.3;
+/// The longer stride while travelling.
+const TRAVEL_STRIDE: f32 = 1.7;
+/// The simulation's speed (m/s) over which it travels rather than works.
+const TRAVEL_SPEED: f32 = 4.0;
+/// Gravity (m/s/s), the mockup's.
+const G: f32 = 30.0;
 
-/// A walker's legs and how it walks.
-#[derive(Clone, Debug)]
-pub struct RigSpec {
-    pub legs: Vec<LegSpec>,
+/// A tripod's legs, in the mockup's frame (x toward where it faces).
+pub struct GaitSpec {
+    /// Where each leg joins the body (x from the body's middle).
+    pub hips: [f32; 3],
+    /// Each foot's rest spot on the ground (x from the body's middle).
+    pub spread: [f32; 3],
     /// The body's height over the ground (m).
     pub height: f32,
-    /// Seconds a step takes, and how high a foot is lifted (m).
-    pub step_s: f32,
-    pub lift_m: f32,
-    /// A foot steps once it is this far from its rest spot (m).
-    pub trigger_m: f32,
-    /// Each leg's whole length, as a share of the hip-to-rest distance.
-    pub reach: f32,
-    /// The body sags this much (m) for each leg in the air.
-    pub sag_m: f32,
 }
 
-/// A walker's pose this frame.
+/// A tripod's pose this frame. Feet are in the walker's own frame (u, w),
+/// in the mockup's leg order (rear leg first, as it faces).
 pub struct Pose {
     /// The body's base over the ground (m).
     pub body: f32,
-    /// Lean along the ground (m).
+    /// The body's shift along the ground (u, m): its lean toward its planted
+    /// feet and its surge.
+    pub shift: f32,
+    /// The lean alone (u, m), for what hangs off it.
     pub lean: f32,
-    /// Each leg's joints, hip first, foot last.
-    pub legs: Vec<Vec<(f32, f32)>>,
+    pub feet: [(f32, f32); 3],
     /// Feet that came down this frame.
-    pub landed: Vec<bool>,
+    pub landed: [bool; 3],
+    /// How far it has unfolded from its package (0 to 1; 1 once standing).
+    pub unfold: f32,
 }
 
-#[derive(Clone)]
-struct Step {
+#[derive(Clone, Copy)]
+struct Leg {
+    /// Where the foot stands: its direction (radians) and its height over
+    /// the walker's own ground.
+    a: f64,
+    w: f32,
+    /// A swing: from and to (direction, height), and how far through
+    /// (0 to 1; negative: planted).
     from: (f64, f32),
     to: (f64, f32),
-    t: f32,
-}
-
-#[derive(Clone)]
-struct Foot {
-    /// Where it stands: metres round the body (counter-clockwise) and its
-    /// height over the walker's own ground.
-    s: f64,
-    w: f32,
-    step: Option<Step>,
+    swing: f32,
 }
 
 struct State {
     last_t: f64,
-    s: f64,
-    vel: f64,
-    feet: Vec<Foot>,
-    joints: Vec<Vec<(f32, f32)>>,
+    /// The body's direction last frame.
+    a: f64,
+    gait: f32,
+    stride: f32,
+    /// Which way it is going along u (+1 or -1).
+    dir: f32,
+    /// The feet by side: slot 0 the furthest toward -u.
+    legs: [Leg; 3],
     body: f32,
     vy: f32,
+    /// The game time it began to unfold, and the state it was in.
+    unfold_at: f64,
+    state: u8,
 }
 
 static STATES: Mutex<Option<HashMap<u64, State>>> = Mutex::new(None);
@@ -108,219 +100,183 @@ fn ease(x: f32) -> f32 {
     x * x * (3.0 - 2.0 * x)
 }
 
-fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
-    ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
+/// An angle difference into (-pi, pi].
+fn wrap(d: f64) -> f64 {
+    let t = std::f64::consts::TAU;
+    let d = d.rem_euclid(t);
+    if d > std::f64::consts::PI { d - t } else { d }
 }
 
-/// FABRIK: pull the chain `j` (hip first) so its last joint reaches
-/// `target`, keeping each bone's length, its first joint fixed at `root`,
-/// nudged toward `pole` so it bends the same way every frame.
-pub fn fabrik(j: &mut [(f32, f32)], lens: &[f32], root: (f32, f32), target: (f32, f32), pole: (f32, f32), bend: f32) {
-    let n = j.len();
-    if n < 2 {
-        return;
-    }
-    let total: f32 = lens.iter().sum();
-    let to_target = dist(root, target);
-    if to_target >= total * 0.999 {
-        // Out of reach: straight toward it.
-        let (dx, dy) = ((target.0 - root.0) / to_target.max(1e-6), (target.1 - root.1) / to_target.max(1e-6));
-        j[0] = root;
-        for i in 1..n {
-            j[i] = (j[i - 1].0 + dx * lens[i - 1], j[i - 1].1 + dy * lens[i - 1]);
-        }
-        return;
-    }
-    for _ in 0..10 {
-        // The bend: inner joints drawn toward the pole a little each pass.
-        for joint in j.iter_mut().take(n - 1).skip(1) {
-            joint.0 += (pole.0 - joint.0) * 0.08 * bend;
-            joint.1 += (pole.1 - joint.1) * 0.08 * bend;
-        }
-        // Backward: from the foot.
-        j[n - 1] = target;
-        for i in (0..n - 1).rev() {
-            let d = dist(j[i], j[i + 1]).max(1e-6);
-            let k = lens[i] / d;
-            j[i] = (j[i + 1].0 + (j[i].0 - j[i + 1].0) * k, j[i + 1].1 + (j[i].1 - j[i + 1].1) * k);
-        }
-        // Forward: from the hip.
-        j[0] = root;
-        for i in 0..n - 1 {
-            let d = dist(j[i], j[i + 1]).max(1e-6);
-            let k = lens[i] / d;
-            j[i + 1] = (j[i].0 + (j[i + 1].0 - j[i].0) * k, j[i].1 + (j[i + 1].1 - j[i].1) * k);
-        }
-        if dist(j[n - 1], target) < 0.05 {
-            break;
-        }
-    }
+/// How far the body has surged ahead of its even pace (a share of the
+/// stride) at `cyc` through the cycle: it goes at 1.3 while all three feet
+/// are down and 0.6 while one swings (the mockup's), the same distance a
+/// cycle all told.
+fn surge(cyc: f32) -> f32 {
+    let third = 1.0 / 3.0;
+    let mean = (SWING * 0.6 + (third - SWING) * 1.3) / third;
+    let p = cyc.rem_euclid(third);
+    let slow = 0.6 / mean - 1.0;
+    let fast = 1.3 / mean - 1.0;
+    let at = if p < SWING { slow * p } else { slow * SWING + fast * (p - SWING) };
+    // Centred on the even pace.
+    at - slow * SWING * 0.5
 }
 
-/// Step walker `id` (rig `spec`, standing at (x, y) in the world) to real
-/// time `real_t`. `ground(s)` gives the ground's height (m) over the
-/// walker's own ground at `s` metres round the body (None: none found
-/// near). `moving` says whether it is walking; `airborne` tucks its legs in
-/// (a leap).
-pub fn step(id: u64, spec: &RigSpec, x: f64, y: f64, real_t: f64, airborne: bool, ground: &dyn Fn(f64) -> Option<f32>) -> Pose {
-    let n = spec.legs.len();
+/// Step tripod `id` (legs `spec`, standing at (x, y) in the world, facing
+/// `face` along u) to real time `real_t`. `state` is the simulation's (1
+/// unfolding, 4 leaping, the rest walking or working), `speed` its speed
+/// (m/s of game time), `ground(u)` the ground's height (m) over the walker's
+/// own ground `u` metres along (None: none found near).
+#[allow(clippy::too_many_arguments)]
+pub fn step(id: u64, spec: &GaitSpec, x: f64, y: f64, face: f32, now: f64, real_t: f64, state: u8, speed: f32, ground: &dyn Fn(f32) -> Option<f32>) -> Pose {
     let r = (x * x + y * y).sqrt().max(1.0);
-    let s_now = y.atan2(x) * r;
-    // +u is clockwise: minus the distance round.
-    let s_of = |u: f32| s_now - u as f64;
-    let u_of = |s: f64| -(s - s_now) as f32;
+    let a_now = y.atan2(x);
+    // +u is clockwise: against the direction.
+    let u_of = |a: f64| -(wrap(a - a_now) * r) as f32;
+    let a_of = |u: f32| a_now - u as f64 / r;
+    // Leg i of the mockup's frame stands in slot `slot(i)` (slots by side,
+    // so a foot keeps its side when it turns about).
+    let slot = |i: usize| if face > 0.0 { i } else { 2 - i };
+    let rest = |i: usize| face * spec.spread[i];
     let mut all = STATES.lock().unwrap();
     let map = all.get_or_insert_with(Default::default);
-    if map.len() > 128 {
+    if map.len() > 64 {
         map.retain(|_, st| real_t - st.last_t < 30.0);
     }
-    let rest_w = |s: f64| ground(s).unwrap_or(0.0);
-    let fresh = || State {
-        last_t: real_t,
-        s: s_now,
-        vel: 0.0,
-        feet: spec.legs.iter().map(|l| Foot { s: s_of(l.rest), w: rest_w(s_of(l.rest)), step: None }).collect(),
-        joints: Vec::new(),
-        body: spec.height,
-        vy: 0.0,
+    let fresh = || {
+        let mut legs = [Leg { a: a_now, w: 0.0, from: (a_now, 0.0), to: (a_now, 0.0), swing: -1.0 }; 3];
+        for i in 0..3 {
+            let u = rest(i);
+            let l = &mut legs[slot(i)];
+            l.a = a_of(u);
+            l.w = ground(u).unwrap_or(0.0);
+        }
+        State { last_t: real_t, a: a_now, gait: 0.0, stride: 1.0, dir: face, legs, body: spec.height, vy: 0.0, unfold_at: now, state }
     };
-    let st = map.entry(id).or_insert_with(fresh);
-    if st.feet.len() != n {
+    let st = map.entry(id).or_insert_with(&fresh);
+    // Out of sight a while: stand afresh.
+    if real_t - st.last_t > 1.0 {
         *st = fresh();
     }
     let dt = (real_t - st.last_t).clamp(0.0, 0.05) as f32;
     st.last_t = real_t;
-    let ds = s_now - st.s;
-    // A jump (a load, or out of sight for long): stand afresh.
-    if ds.abs() > (spec.height as f64 * 3.0).max(60.0) {
+    // How far the body moved along u since last frame; a jump (a load, or
+    // out of sight for long): stand afresh.
+    let du = -(wrap(a_now - st.a) * r) as f32;
+    if du.abs() > (spec.height * 3.0).max(60.0) {
         *st = fresh();
     }
-    if dt > 0.0 {
-        let v = (s_now - st.s) / dt as f64;
-        st.vel += (v - st.vel) * (dt as f64 * 6.0).min(1.0);
-    }
-    st.s = s_now;
-    let mut landed = vec![false; n];
-
-    if airborne {
-        // Feet drawn in under it; it stands afresh where it lands.
-        for (i, l) in spec.legs.iter().enumerate() {
-            st.feet[i] = Foot { s: s_of(l.rest * 0.3), w: -2.0, step: None };
+    st.a = a_now;
+    if state != st.state {
+        if state == 1 {
+            st.unfold_at = now;
         }
-        let target = spec.height * 0.45;
-        st.vy += ((target - st.body) * 7.0 - st.vy * 2.6) * dt;
+        st.state = state;
+    }
+    let mut landed = [false; 3];
+    let mut unfold = 1.0;
+
+    if state == 1 {
+        // Unfolding: the mockup's 5.8 s from landing to standing, in the
+        // simulation's 3 s. The legs spread from the package; standing is
+        // work: it heaves up, sags a little, holds.
+        let since = ((now - st.unfold_at) / 3.0 * 5.8) as f32;
+        unfold = ((since - 0.6) / 2.6).clamp(0.0, 1.0);
+        let stand = ((since - 3.4) / 2.4).clamp(0.0, 1.0);
+        let k = ease(unfold);
+        for i in 0..3 {
+            let to = rest(i);
+            let tw = ground(to).unwrap_or(0.0);
+            let l = &mut st.legs[slot(i)];
+            l.a = a_of(to * k);
+            l.w = 1.0 + (tw - 1.0) * k + 6.0 * (k * std::f32::consts::PI).sin();
+            l.swing = -1.0;
+        }
+        let sag = if stand > 0.7 { ((stand - 0.7) / 0.3 * std::f32::consts::PI).sin() * 2.5 } else { 0.0 };
+        st.body = 4.0 + (spec.height - 3.0) * ease(stand) - sag;
+        st.vy = 0.0;
+    } else if state == 4 {
+        // A leap: the feet drawn in under it; it stands afresh where it lands.
+        for i in 0..3 {
+            let l = &mut st.legs[slot(i)];
+            let u = u_of(l.a);
+            let k = (dt * 10.0).min(1.0);
+            l.a = a_of(u + (rest(i) * 0.3 - u) * k);
+            l.w += (-2.0 - l.w) * k;
+            l.swing = -1.0;
+        }
+        st.vy += ((spec.height * 0.45 - st.body) * 7.0 - st.vy * 2.6) * dt;
         st.body += st.vy * dt;
     } else {
-        // Feet in the air move on; those that land jolt the body.
-        for (i, f) in st.feet.iter_mut().enumerate() {
-            if let Some(sp) = &mut f.step {
-                sp.t += dt / spec.step_s.max(0.05);
-                if sp.t >= 1.0 {
-                    f.s = sp.to.0;
-                    f.w = sp.to.1;
-                    f.step = None;
-                    landed[i] = true;
-                    st.vy -= 4.5;
+        // The stride: long and fast travelling, short working.
+        let want = if speed > TRAVEL_SPEED { TRAVEL_STRIDE } else { 1.0 };
+        st.stride += (want - st.stride) * (dt * 2.0).min(1.0);
+        if du.abs() > 1e-4 {
+            st.dir = du.signum();
+        }
+        let len = V * P * st.stride;
+        let mut dg = du.abs() / len;
+        // A foot in the air when the body stops still comes down.
+        if st.legs.iter().any(|l| l.swing >= 0.0) {
+            dg = dg.max(dt * 0.8);
+        }
+        st.gait = (st.gait + dg).rem_euclid(1000.0);
+        let cyc = st.gait.fract();
+        for i in 0..3 {
+            let s0 = i as f32 / 3.0;
+            let u = (cyc - s0).rem_euclid(1.0);
+            let l = &mut st.legs[slot(i)];
+            if u < SWING {
+                if l.swing < 0.0 {
+                    // Off it goes, to half a stride ahead of its rest spot.
+                    l.from = (l.a, l.w);
+                    let tu = rest(i) + st.dir * len * 0.5;
+                    l.to = (a_of(tu), ground(tu).unwrap_or(l.w));
                 }
-            } else {
+                l.swing = u / SWING;
+            } else if l.swing >= 0.0 {
+                // The foot comes down under load: a jolt through the body.
+                l.swing = -1.0;
+                l.a = l.to.0;
+                l.w = l.to.1;
+                landed[i] = true;
+                st.vy -= 4.5;
+            } else if let Some(g) = ground(u_of(l.a)) {
                 // A planted foot follows the ground under it (it may have
                 // been eaten away).
-                if let Some(g) = ground(f.s) {
-                    f.w = g;
-                }
+                l.w = g;
             }
         }
-        // Which legs want to step: too far from their rest spot.
-        let lead = (st.vel * spec.step_s as f64 * 0.6).clamp(-spec.trigger_m as f64 * 1.5, spec.trigger_m as f64 * 1.5);
-        let mut want: Vec<(f64, usize)> = Vec::new();
-        for (i, l) in spec.legs.iter().enumerate() {
-            let f = &st.feet[i];
-            if f.step.is_some() {
-                continue;
-            }
-            let off = (f.s - s_of(l.rest)).abs();
-            if off > spec.trigger_m as f64 {
-                want.push((off, i));
-            }
-        }
-        // Only one group in the air at a time: the group already stepping,
-        // else the group of the leg furthest behind.
-        let busy: Option<u8> = spec.legs.iter().enumerate().find(|(i, _)| st.feet[*i].step.is_some()).map(|(_, l)| l.group);
-        want.sort_by(|a, b| b.0.total_cmp(&a.0));
-        let group = busy.or_else(|| want.first().map(|w| spec.legs[w.1].group));
-        if let Some(g) = group {
-            if busy.is_none() {
-                // The whole group lifts together.
-                for (i, l) in spec.legs.iter().enumerate() {
-                    if l.group != g || st.feet[i].step.is_some() {
-                        continue;
-                    }
-                    let to_s = s_of(l.rest) + lead;
-                    let to_w = ground(to_s).unwrap_or(st.feet[i].w);
-                    let from = (st.feet[i].s, st.feet[i].w);
-                    st.feet[i].step = Some(Step { from, to: (to_s, to_w), t: 0.0 });
-                }
-            }
-        }
-        // The body: at its height, sagging for each leg in the air.
-        let up = st.feet.iter().filter(|f| f.step.is_some()).count() as f32;
-        let ground_here = ground(s_now).unwrap_or(0.0);
-        let target = spec.height + ground_here.max(0.0) - up * spec.sag_m;
-        st.vy += ((target - st.body) * 7.0 - st.vy * 2.6 - 30.0 * 0.04 * up) * dt;
+        // The body on its springs: at its height, sagging for each leg in
+        // the air.
+        let up = st.legs.iter().filter(|l| l.swing >= 0.0).count() as f32;
+        let target = spec.height + ground(0.0).unwrap_or(0.0).max(0.0) - up * 4.0;
+        st.vy += ((target - st.body) * 7.0 - st.vy * 2.6 - G * 0.04 * up) * dt;
         st.body += st.vy * dt;
     }
 
-    // Where each foot is now, in the walker's frame.
-    let mut feet_now = Vec::with_capacity(n);
-    let mut lean = 0.0f32;
-    for f in &st.feet {
-        let p = match &f.step {
-            Some(sp) => {
-                let e = ease(sp.t) as f64;
-                let s = sp.from.0 + (sp.to.0 - sp.from.0) * e;
-                let w = sp.from.1 + (sp.to.1 - sp.from.1) * e as f32 + (sp.t * std::f32::consts::PI).sin() * spec.lift_m;
-                (u_of(s), w)
+    // Where each foot is now.
+    let lift_m = 6.0 + 3.0 * ((st.stride - 1.0) / (TRAVEL_STRIDE - 1.0)).clamp(0.0, 1.0);
+    let mut feet = [(0.0f32, 0.0f32); 3];
+    let mut lean = 0.0;
+    for (i, f) in feet.iter_mut().enumerate() {
+        let l = &st.legs[slot(i)];
+        *f = if l.swing >= 0.0 {
+            let (fu, tu) = (u_of(l.from.0), u_of(l.to.0));
+            if (tu - fu).abs() > 100.0 {
+                (tu, l.to.1)
+            } else {
+                let e = ease(l.swing);
+                (fu + (tu - fu) * e, l.from.1 + (l.to.1 - l.from.1) * e + (l.swing * std::f32::consts::PI).sin() * lift_m)
             }
-            None => {
-                lean += u_of(f.s);
-                (u_of(f.s), f.w)
-            }
+        } else {
+            let u = u_of(l.a);
+            lean += u;
+            (u, l.w)
         };
-        feet_now.push(p);
     }
-    let lean = lean * 0.03;
-
-    // Each leg by FABRIK, from last frame's pose.
-    let body = st.body;
-    let mut legs = Vec::with_capacity(n);
-    if st.joints.len() != n {
-        st.joints = vec![Vec::new(); n];
-    }
-    for (i, l) in spec.legs.iter().enumerate() {
-        let root = (l.hip.0 + lean, body + l.hip.1);
-        let foot = feet_now[i];
-        let span = dist(root, (l.rest, 0.0)).max(1.0);
-        let total = span * spec.reach;
-        let lens: Vec<f32> = {
-            let sum: f32 = l.bones.iter().sum::<f32>().max(1e-6);
-            l.bones.iter().map(|b| b / sum * total).collect()
-        };
-        // The pole: up over the hip and out the way the leg reaches.
-        let out = if l.rest >= l.hip.0 { 1.0 } else { -1.0 };
-        let pole = (root.0 + out * total * 0.6, root.1 + total * 0.6);
-        let j = &mut st.joints[i];
-        if j.len() != lens.len() + 1 {
-            // Start bowed toward the pole.
-            *j = (0..=lens.len())
-                .map(|k| {
-                    let t = k as f32 / lens.len() as f32;
-                    let bow = (t * std::f32::consts::PI).sin();
-                    (root.0 + (foot.0 - root.0) * t + (pole.0 - root.0) * 0.3 * bow, root.1 + (foot.1 - root.1) * t + (pole.1 - root.1) * 0.3 * bow)
-                })
-                .collect();
-        }
-        fabrik(j, &lens, root, foot, pole, l.bend);
-        legs.push(j.clone());
-    }
-    Pose { body, lean, legs, landed }
+    // (Unfolding, it stands square.)
+    let lean = if state == 1 { 0.0 } else { lean * 0.03 };
+    let surge_u = if state == 1 || state == 4 { 0.0 } else { st.dir * V * P * st.stride * surge(st.gait) };
+    Pose { body: st.body, shift: lean + surge_u, lean, feet, landed, unfold }
 }
