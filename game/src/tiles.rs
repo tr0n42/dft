@@ -505,29 +505,32 @@ pub fn collapse_radius(p: &Planet, eaten: f64) -> f64 {
 /// 254 the picture alone looks the same).
 pub const LAVA_ALPHA: u8 = 254;
 
-/// A tile's molten rock: how much of it is molten (a share of its texels),
-/// and the middle of it (m).
+/// A tile's molten rock, where it is: the tile cut into LAVA_MASK x
+/// LAVA_MASK squares, bottom row first, each the number of its texels molten
+/// (of 64), for the light it gives (lava.rs).
 #[derive(Clone, Copy, Debug)]
 pub struct Lava {
-    pub share: f32,
-    pub at: (f64, f64),
+    pub mask: [u8; LAVA_MASK * LAVA_MASK],
 }
 
-fn lava_of(k: Key, px: &[u8]) -> Option<Lava> {
-    let (mut n, mut sx, mut sy) = (0usize, 0.0f64, 0.0f64);
+/// Squares a side in a tile's lava mask (8 x 8 texels each).
+pub const LAVA_MASK: usize = 16;
+
+fn lava_of(px: &[u8]) -> Option<Lava> {
+    let mut n = 0usize;
+    let mut mask = [0u8; LAVA_MASK * LAVA_MASK];
+    let per = TEX as usize / LAVA_MASK;
     for (o, rgba) in px.chunks_exact(4).enumerate() {
         if rgba[3] == LAVA_ALPHA {
             n += 1;
-            sx += (o % TEX as usize) as f64;
-            sy += (TEX as usize - 1 - o / TEX as usize) as f64;
+            let (i, j) = (o % TEX as usize, TEX as usize - 1 - o / TEX as usize);
+            mask[(j / per) * LAVA_MASK + i / per] += 1;
         }
     }
     if n == 0 {
         return None;
     }
-    let s = k.span();
-    let t = s / TEX as f64;
-    Some(Lava { share: n as f32 / (TEX * TEX) as f32, at: (k.ix as f64 * s + (sx / n as f64 + 0.5) * t, k.iy as f64 * s + (sy / n as f64 + 0.5) * t) })
+    Some(Lava { mask })
 }
 
 /// The air's most see-through strength, at the ground (it was 0.55; Benjamin,
@@ -1083,7 +1086,7 @@ fn collect(mut commands: Commands, mut tiles: ResMut<Tiles>, mut images: ResMut<
         let result = result.map(|(px, ghost, plants)| {
             s.ghost = ghost;
             s.plants = Arc::new(plants);
-            s.lava = lava_of(k, &px);
+            s.lava = lava_of(&px);
             px
         });
         if result.is_none() {

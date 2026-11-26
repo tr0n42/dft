@@ -66,10 +66,11 @@ pub(super) const PLUME_MAX: usize = 200;
 pub(super) const SETTLE_PER_TICK: usize = 20_000;
 
 /// The heart of a sapper's blast is heated to this (K): it melts, and cools
-/// to glass after about this long (s).
+/// to glass after about this long (s; it was 25, and Benjamin, 26 Nov: the
+/// blast's glow lingered far too long).
 pub(super) const MELT_K: f64 = 2000.0;
 
-pub(super) const MELT_COOL_S: f64 = 25.0;
+pub(super) const MELT_COOL_S: f64 = 6.0;
 
 /// Ground this hot next to a sapper (a blast's heat) destroys it, and so sets it off.
 pub(super) const SAPPER_COOK_K: f64 = 800.0;

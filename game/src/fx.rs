@@ -75,6 +75,7 @@ struct Bit {
 
 struct Queue {
     lights: Vec<Emit>,
+    glows: Vec<Glow>,
     new: Vec<Bit>,
     rng: u64,
     /// A white flash over the whole screen, and the screen shaking (pixels),
@@ -83,7 +84,7 @@ struct Queue {
     shake: f32,
 }
 
-static QUEUE: Mutex<Queue> = Mutex::new(Queue { lights: Vec::new(), new: Vec::new(), rng: 0x5EED, flash: 0.0, shake: 0.0 });
+static QUEUE: Mutex<Queue> = Mutex::new(Queue { lights: Vec::new(), glows: Vec::new(), new: Vec::new(), rng: 0x5EED, flash: 0.0, shake: 0.0 });
 
 /// A white flash over the whole screen (0 to 1), dying away.
 pub fn flash(f: f32) {
@@ -112,6 +113,33 @@ pub fn emit(x: f64, y: f64, r: f64, c: [f32; 3], i: f32) {
     if q.lights.len() < 20_000 {
         q.lights.push(Emit { x, y, r, c: [c[0] / 255.0 * i, c[1] / 255.0 * i, c[2] / 255.0 * i] });
     }
+}
+
+/// Glowing ground (molten rock): a square from (x, y), `q` m a side, a share
+/// `f` of it glowing, colour `c` (sRGB 0-255), strength `i`. Its light
+/// spills GLOW_REACH_M round it, the same in metres at every zoom.
+pub fn glow(x: f64, y: f64, q: f64, f: f32, c: [f32; 3], i: f32) {
+    if f <= 0.0 || i <= 0.01 {
+        return;
+    }
+    let mut g = QUEUE.lock().unwrap();
+    if g.glows.len() < 100_000 {
+        let k = f * i / 255.0;
+        g.glows.push(Glow { x, y, q, c: [c[0] * k, c[1] * k, c[2] * k] });
+    }
+}
+
+/// How far glowing ground's light spills (m).
+const GLOW_REACH_M: f64 = 14.0;
+
+/// Glowing ground this frame: a square (corner, side, m) and its colour
+/// times strength times the share of it glowing.
+#[derive(Clone, Copy)]
+struct Glow {
+    x: f64,
+    y: f64,
+    q: f64,
+    c: [f32; 3],
 }
 
 /// Sparks: `n` hot flecks thrown out from (x, y) at up to `speed` m/s
@@ -239,17 +267,19 @@ fn draw(
         let sparks_h = meshes.add(empty());
         let light_h = meshes.add(empty());
         commands.spawn((Mesh2d(sparks_h.clone()), MeshMaterial2d(add_materials.add(crate::glow::AddMaterial::default())), Transform::from_xyz(0.0, 0.0, 16.5), NoFrustumCulling));
-        // Effects over the machines; the light over everything.
+        // Effects over the machines.
         commands.spawn((Mesh2d(bits_h.clone()), MeshMaterial2d(materials.add(ColorMaterial::default())), Transform::from_xyz(0.0, 0.0, 16.0), NoFrustumCulling));
-        // (The light is added over what it falls on: see glow.rs.)
-        commands.spawn((Mesh2d(light_h.clone()), MeshMaterial2d(add_materials.add(crate::glow::AddMaterial::default())), Transform::from_xyz(0.0, 0.0, 17.0), NoFrustumCulling));
+        // The light is added over what it falls on (see glow.rs): the
+        // ground and plants, under the fog (z 8), so nothing uncharted shows
+        // lit (Benjamin, 26 Nov: lava light showed through the fog).
+        commands.spawn((Mesh2d(light_h.clone()), MeshMaterial2d(add_materials.add(crate::glow::AddMaterial::default())), Transform::from_xyz(0.0, 0.0, 7.9), NoFrustumCulling));
         commands.insert_resource(Meshes { bits: bits_h, sparks: sparks_h, light: light_h });
         return;
     };
     let dt = time.delta_secs().min(0.05);
-    let (lights, new) = {
+    let (lights, glows, new) = {
         let mut q = QUEUE.lock().unwrap();
-        (std::mem::take(&mut q.lights), std::mem::take(&mut q.new))
+        (std::mem::take(&mut q.lights), std::mem::take(&mut q.glows), std::mem::take(&mut q.new))
     };
     let (l, b, r, t) = view.bounds();
     // A block of `m` metres at world (x, y) (its lower-left corner), on whole
@@ -419,7 +449,9 @@ fn draw(
     let mut pos = Vec::new();
     let mut col = Vec::new();
     let lights: Vec<Emit> = lights.into_iter().filter(|e| e.x + e.r >= l && e.x - e.r <= r && e.y + e.r >= b && e.y - e.r <= t).collect();
-    if !lights.is_empty() {
+    let gr = GLOW_REACH_M;
+    let glows: Vec<Glow> = glows.into_iter().filter(|e| e.x + e.q + gr >= l && e.x - gr <= r && e.y + e.q + gr >= b && e.y - gr <= t).collect();
+    if !lights.is_empty() || !glows.is_empty() {
         // The visible cells, coarser when zoomed far out.
         let (vx0, vx1, vy0, vy1) = (l.floor() - 1.0, r.ceil() + 1.0, b.floor() - 1.0, t.ceil() + 1.0);
         let g = ((vx1 - vx0) * (vy1 - vy0) / MAX_CELLS).sqrt().ceil().max(1.0);
@@ -428,28 +460,105 @@ fn draw(
         let gh = ((vy1 / g).ceil() as i64 - gy0 + 1) as usize;
         let mut buf = vec![[0.0f32; 3]; gw * gh];
         let mut lit: Vec<usize> = Vec::new();
+        // Each light gives the same light in all whatever the cells' size:
+        // a light small beside the cells (zoomed out) is spread thin over the
+        // cell it is in, not stamped across it whole (Benjamin, 26 Nov: a
+        // blast's glow grew as the view zoomed out).
+        let (cells_x, cells_y) = (gw as i64, gh as i64);
+        let add = |buf: &mut Vec<[f32; 3]>, lit: &mut Vec<usize>, i: i64, j: i64, c: [f32; 3], f: f32| {
+            if i < 0 || j < 0 || i >= cells_x || j >= cells_y {
+                return;
+            }
+            let o = j as usize * gw + i as usize;
+            if buf[o] == [0.0; 3] {
+                lit.push(o);
+            }
+            buf[o][0] += c[0] * f;
+            buf[o][1] += c[1] * f;
+            buf[o][2] += c[2] * f;
+        };
         for e in &lights {
             let i0 = (((e.x - e.r) / g).floor() as i64 - gx0).max(0);
             let i1 = (((e.x + e.r) / g).floor() as i64 - gx0).min(gw as i64 - 1);
             let j0 = (((e.y - e.r) / g).floor() as i64 - gy0).max(0);
             let j1 = (((e.y + e.r) / g).floor() as i64 - gy0).min(gh as i64 - 1);
+            let fall = |i: i64, j: i64| -> f32 {
+                let dx = ((i + gx0) as f64 + 0.5) * g - e.x;
+                let dy = ((j + gy0) as f64 + 0.5) * g - e.y;
+                let d = (dx * dx + dy * dy).sqrt() / e.r;
+                if d >= 1.0 { 0.0 } else { ((1.0 - d) * (1.0 - d)) as f32 }
+            };
+            // All its light, in cells: (1 - d)^2 over the disc is pi r^2 / 6.
+            let whole = (std::f64::consts::PI * e.r * e.r / 6.0 / (g * g)) as f32;
+            let mut scale = 1.0f32;
+            if e.r < 4.0 * g {
+                let mut sum = 0.0f32;
+                for j in j0..=j1 {
+                    for i in i0..=i1 {
+                        sum += fall(i, j);
+                    }
+                }
+                if sum <= 0.0 {
+                    // Inside one cell: all its light there.
+                    add(&mut buf, &mut lit, (e.x / g).floor() as i64 - gx0, (e.y / g).floor() as i64 - gy0, e.c, whole);
+                    continue;
+                }
+                scale = whole / sum;
+            }
             for j in j0..=j1 {
                 for i in i0..=i1 {
-                    let dx = ((i + gx0) as f64 + 0.5) * g - e.x;
-                    let dy = ((j + gy0) as f64 + 0.5) * g - e.y;
-                    let d = (dx * dx + dy * dy).sqrt() / e.r;
-                    if d >= 1.0 {
-                        continue;
+                    let f = fall(i, j);
+                    if f > 0.0 {
+                        add(&mut buf, &mut lit, i, j, e.c, f * scale);
                     }
-                    let f = ((1.0 - d) * (1.0 - d)) as f32;
-                    let o = j as usize * gw + i as usize;
-                    if buf[o] == [0.0; 3] {
-                        lit.push(o);
-                    }
-                    buf[o][0] += e.c[0] * f;
-                    buf[o][1] += e.c[1] * f;
-                    buf[o][2] += e.c[2] * f;
                 }
+            }
+        }
+        // Glowing ground: laid on the cells by how much of each glows, then
+        // spread GLOW_REACH_M round (two passes of a box blur each way).
+        // (Cells mostly glowing are molten: solid, no need to look them up.)
+        let mut molten: Vec<bool> = Vec::new();
+        if !glows.is_empty() {
+            let mut gb = vec![[0.0f32; 3]; gw * gh];
+            let mut cover = vec![0.0f32; gw * gh];
+            for e in &glows {
+                let i0 = ((e.x / g).floor() as i64 - gx0).max(0);
+                let i1 = (((e.x + e.q) / g).ceil() as i64 - 1 - gx0).max(i0).min(gw as i64 - 1);
+                let j0 = ((e.y / g).floor() as i64 - gy0).max(0);
+                let j1 = (((e.y + e.q) / g).ceil() as i64 - 1 - gy0).max(j0).min(gh as i64 - 1);
+                // (Each cell by the share of it the square covers: squares
+                // and cells of different sizes add up evenly.)
+                let over = |a0: f64, a1: f64, b0: f64| (a1.min(b0 + g) - a0.max(b0)).max(0.0) / g;
+                for j in j0..=j1 {
+                    let ky = over(e.y, e.y + e.q, (j + gy0) as f64 * g);
+                    for i in i0..=i1 {
+                        let k = (over(e.x, e.x + e.q, (i + gx0) as f64 * g) * ky) as f32;
+                        let o = j as usize * gw + i as usize;
+                        cover[o] += k;
+                        gb[o][0] += e.c[0] * k;
+                        gb[o][1] += e.c[1] * k;
+                        gb[o][2] += e.c[2] * k;
+                    }
+                }
+            }
+            molten = cover.iter().map(|&k| k >= 0.5).collect();
+            let h = (GLOW_REACH_M / (2.0 * g)).round() as usize;
+            if h >= 1 {
+                for _ in 0..2 {
+                    blur(&mut gb, gw, gh, h, 1, gw);
+                    blur(&mut gb, gh, gw, h, gw, 1);
+                }
+            }
+            for (o, c) in gb.iter().enumerate() {
+                if c[0].max(c[1]).max(c[2]) < 0.5 / BANDS {
+                    continue;
+                }
+                if buf[o] == [0.0; 3] {
+                    lit.push(o);
+                }
+                buf[o][0] += c[0].min(1.5);
+                buf[o][1] += c[1].min(1.5);
+                buf[o][2] += c[2].min(1.5);
             }
         }
         let q = |v: f32| (v * BANDS).floor().min(BANDS * 1.5) / BANDS;
@@ -464,7 +573,7 @@ fn draw(
         // generator answering for untouched ground: on all cores.)
         use bevy::tasks::{ComputeTaskPool, ParallelSlice};
         let parts = lit.par_chunk_map(ComputeTaskPool::get(), 1024, |_, chunk| {
-            let (mut p2, mut c2) = (Vec::new(), Vec::new());
+            let mut out: Vec<(usize, [f32; 4])> = Vec::with_capacity(chunk.len());
             for &o in chunk {
                 let c = buf[o];
                 let m = c[0].max(c[1]).max(c[2]);
@@ -474,7 +583,7 @@ fn draw(
                 let (i, j) = ((o % gw) as i64, (o / gw) as i64);
                 let (wx, wy) = (((i + gx0) as f64) * g, ((j + gy0) as f64) * g);
                 let half = (g / 2.0).floor();
-                let solid = solid_at((wx + half) as i64, (wy + half) as i64);
+                let solid = molten.get(o).copied().unwrap_or(false) || solid_at((wx + half) as i64, (wy + half) as i64);
                 // Thin light in open space is dithered: every other block.
                 if !solid && m < 3.0 / BANDS && (i + j) & 1 == 1 {
                     continue;
@@ -485,13 +594,35 @@ fn draw(
                 if cc[0].max(cc[1]).max(cc[2]) <= 0.0 {
                     continue;
                 }
-                quad(&mut p2, &mut c2, wx, wy, g, lin(cc, 1.0));
+                out.push((o, lin(cc, 1.0)));
             }
-            (p2, c2)
+            out
         });
-        for (p2, c2) in parts {
-            pos.extend(p2);
-            col.extend(c2);
+        // Drawn in strips: a run of cells along a row lit the same is one
+        // quad (a sea of lava is lit evenly, row on row).
+        let mut run: Option<(usize, usize, [f32; 4])> = None;
+        let strip = |pos: &mut Vec<[f32; 3]>, col: &mut Vec<[f32; 4]>, (o, n, c): (usize, usize, [f32; 4])| {
+            let (i, j) = ((o % gw) as i64, (o / gw) as i64);
+            let (wx, wy) = (((i + gx0) as f64) * g, ((j + gy0) as f64) * g);
+            let a = view.to_screen(wx, wy);
+            let z = view.to_screen(wx + g * n as f64, wy + g);
+            let (x0, y0, x1, y1) = (a.x.round(), a.y.round(), z.x.round().max(a.x.round() + 1.0), z.y.round().max(a.y.round() + 1.0));
+            pos.extend_from_slice(&[[x0, y0, 0.0], [x1, y0, 0.0], [x1, y1, 0.0], [x0, y0, 0.0], [x1, y1, 0.0], [x0, y1, 0.0]]);
+            col.extend_from_slice(&[c; 6]);
+        };
+        for (o, c) in parts.into_iter().flatten() {
+            match run {
+                Some((o0, n, c0)) if o == o0 + n && o / gw == o0 / gw && c == c0 => run = Some((o0, n + 1, c0)),
+                _ => {
+                    if let Some(r) = run.take() {
+                        strip(&mut pos, &mut col, r);
+                    }
+                    run = Some((o, 1, c));
+                }
+            }
+        }
+        if let Some(r) = run.take() {
+            strip(&mut pos, &mut col, r);
         }
     }
     if pos.is_empty() {
@@ -502,5 +633,39 @@ fn draw(
         let m = m.into_inner();
         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
         m.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
+    }
+}
+
+/// A box blur of half-width `h` along lines of `n` cells (`along` apart in
+/// `v`), `rows` lines, each `across` on from the last.
+fn blur(v: &mut [[f32; 3]], n: usize, rows: usize, h: usize, along: usize, across: usize) {
+    let w = (2 * h + 1) as f32;
+    let mut line = vec![[0.0f32; 3]; n];
+    for r in 0..rows {
+        let at = |i: usize| r * across + i * along;
+        for (i, c) in line.iter_mut().enumerate() {
+            *c = v[at(i)];
+        }
+        let mut sum = [0.0f32; 3];
+        for c in line.iter().take(h.min(n - 1) + 1) {
+            for ch in 0..3 {
+                sum[ch] += c[ch];
+            }
+        }
+        for i in 0..n {
+            for ch in 0..3 {
+                v[at(i)][ch] = sum[ch] / w;
+            }
+            if i + h + 1 < n {
+                for ch in 0..3 {
+                    sum[ch] += line[i + h + 1][ch];
+                }
+            }
+            if i >= h {
+                for ch in 0..3 {
+                    sum[ch] -= line[i - h][ch];
+                }
+            }
+        }
     }
 }

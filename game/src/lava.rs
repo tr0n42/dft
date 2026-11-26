@@ -20,7 +20,9 @@ pub const LAVA_SHADER: Handle<Shader> = uuid_handle!("6b0b6f4e-3c1d-4a43-9d3e-1f
 const HEAT_TEX: u32 = 256;
 /// The molten rock's light: colour and strength.
 const LIGHT: [f32; 3] = [255.0, 120.0, 40.0];
-const LIGHT_I: f32 = 0.6;
+const LIGHT_I: f32 = 0.35;
+/// The lava pattern repeats every this many metres (shaders/lava.wgsl's PERIOD).
+const PERIOD_M: f64 = 65536.0;
 
 pub struct LavaPlugin;
 
@@ -71,6 +73,9 @@ struct Lava {
     at: (f64, f64),
     side: f64,
     has_heat: bool,
+    /// When it was taken (real s): a grid gone stale (zoomed out, where the
+    /// simulation stops sending it) is no longer used.
+    heat_at: f64,
     quad: Handle<Mesh>,
     overlays: HashMap<crate::tiles::Key, (Entity, Handle<LavaMaterial>)>,
 }
@@ -80,11 +85,11 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, mut meshes: 
     img.sampler = ImageSampler::nearest();
     let heat = images.add(img);
     let quad = meshes.add(Rectangle::new(1.0, 1.0));
-    commands.insert_resource(Lava { heat, at: (0.0, 0.0), side: 1.0, has_heat: false, quad, overlays: HashMap::new() });
+    commands.insert_resource(Lava { heat, at: (0.0, 0.0), side: 1.0, has_heat: false, heat_at: f64::NEG_INFINITY, quad, overlays: HashMap::new() });
 }
 
 /// The simulation's newest heat grid, into the texture.
-fn take_heat(run: Option<Res<crate::Run>>, mut lava: ResMut<Lava>, mut images: ResMut<Assets<Image>>) {
+fn take_heat(run: Option<Res<crate::Run>>, mut lava: ResMut<Lava>, mut images: ResMut<Assets<Image>>, time: Res<Time<Real>>) {
     let Some(run) = run else { return };
     let Some(h) = run.0.out.lock().heat.take() else { return };
     let n = h.n.min(HEAT_TEX as usize);
@@ -100,6 +105,7 @@ fn take_heat(run: Option<Res<crate::Run>>, mut lava: ResMut<Lava>, mut images: R
     lava.at = (h.x0, h.y0);
     lava.side = h.g * HEAT_TEX as f64;
     lava.has_heat = true;
+    lava.heat_at = time.elapsed_secs_f64();
 }
 
 /// An overlay over every tile on screen with molten rock, laid exactly
@@ -125,15 +131,11 @@ fn overlays(
         seen.insert(k);
         let s = k.span();
         let (x0, y0) = (k.ix as f64 * s, k.iy as f64 * s);
-        // The pattern's block: a metre close up, four texels (about four
-        // pixels) zoomed out, so it reads as the mockup's blocks at any
-        // zoom; corners in whole blocks, so tiles meet without a seam.
-        let block = (4.0 * s / crate::tiles::TEX as f64).max(1.0);
         let p = LavaParams {
-            // (Wrapped every 65,536 blocks, far out: the pattern's one seam
-            // is 32,768 blocks from the centre, off any body but the biggest.)
-            origin: Vec4::new((x0 / block + 32768.0).rem_euclid(65536.0) as f32, (y0 / block + 32768.0).rem_euclid(65536.0) as f32, (s / block) as f32, t),
-            heat: Vec4::new((x0 - lava.at.0) as f32, (y0 - lava.at.1) as f32, lava.side as f32, if lava.has_heat { 1.0 } else { 0.0 }),
+            // The tile's corner in metres, wrapped every 65,536 m (the
+            // pattern repeats at that, so it has no seam).
+            origin: Vec4::new(x0.rem_euclid(PERIOD_M) as f32, y0.rem_euclid(PERIOD_M) as f32, 0.0, t),
+            heat: Vec4::new((x0 - lava.at.0) as f32, (y0 - lava.at.1) as f32, lava.side as f32, if lava.has_heat && time.elapsed_secs_f64() - lava.heat_at < 1.0 { 1.0 } else { 0.0 }),
             size: Vec4::new(s as f32, 0.0, 0.0, 0.0),
         };
         let size = sprite.custom_size.unwrap_or(Vec2::ONE);
@@ -160,12 +162,15 @@ fn overlays(
                 lava.overlays.insert(k, (e, h));
             }
         }
-        // The light off it, from the middle of its molten rock.
-        // (Full strength however little of the tile is molten: a thin seam
-        // glows as well as a pool, and neighbouring tiles' lights add up.)
-        let _ = l.share;
-        let reach = (s * 2.5).clamp(32.0, 800.0);
-        crate::fx::emit(l.at.0, l.at.1, reach, LIGHT, LIGHT_I);
+        // The light off it: from where it is molten, spilling a few metres
+        // round, the same in metres at every zoom (fx::glow).
+        let m = crate::tiles::LAVA_MASK;
+        let q = s / m as f64;
+        for (o, &n) in l.mask.iter().enumerate() {
+            if n > 0 {
+                crate::fx::glow(x0 + (o % m) as f64 * q, y0 + (o / m) as f64 * q, q, n as f32 / 64.0, LIGHT, LIGHT_I);
+            }
+        }
     }
     // Overlays of tiles not on screen now: hidden, and forgotten once there
     // are many.

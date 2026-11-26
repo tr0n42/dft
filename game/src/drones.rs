@@ -1210,9 +1210,11 @@ fn draw(
 }
 
 
+/// How long a buried blast's heat is seen glowing (s; it was 4: Benjamin,
+/// 26 Nov, it should fade fairly quickly).
+const BURIED_LIFE_S: f64 = 2.5;
+
 /// How long an explosion this big takes to burn out (seconds).
-/// How long a buried blast's heat is seen glowing (s).
-const BURIED_LIFE_S: f64 = 4.0;
 
 fn boom_life(size_m: f32) -> f64 {
     (1.4 + 0.06 * size_m as f64).min(6.0)
