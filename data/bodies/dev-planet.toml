@@ -35,6 +35,7 @@ polar_depth_m = 40
 herds_per_km = 3.0
 herd_size = [4, 9]
 kg = [40, 400]
+ranged_share = 0.15             # about one herd in seven spits at machines near it
 
 [sun]
 day_k = 300

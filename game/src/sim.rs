@@ -185,6 +185,8 @@ pub struct Out {
     pub booms: Vec<dft_sim::swarm::Boom>,
     /// Sapper plumes (where, how hard), for the dust columns.
     pub plumes: Vec<(f64, f64, f32)>,
+    /// Animals burst by abductors' lasers (where, kg), for the red bursts.
+    pub gore: Vec<(f64, f64, f32)>,
     /// The ground's height round the body (see Sim::ground_heights), and
     /// which sweep it is from.
     pub heights: Option<(u64, Arc<Vec<f32>>)>,
@@ -403,6 +405,28 @@ fn run(shared: &Shared) {
             if s.deploy_only.is_none() {
                 s.deploy_only = s.eco.units.game_deploys.clone();
             }
+            // (--units: these instead; with free drones, kept out for free
+            // as the director would want them.)
+            if let Some(list) = crate::UNITS.get() {
+                s.deploy_only = Some(list.clone());
+                if s.free_drones.is_some() && s.free_units.is_empty() {
+                    let u = &s.eco.units;
+                    s.free_units = list
+                        .iter()
+                        .map(|&k| {
+                            use dft_sim::production::Unit;
+                            let n = match k {
+                                Unit::Sapper => u.sapper.keep,
+                                Unit::Tunneler => u.tunneler.keep,
+                                Unit::HeatSink => u.heatsink.keep,
+                                Unit::Forester => u.forester.keep,
+                                _ => u.abductor.keep,
+                            };
+                            (k, n)
+                        })
+                        .collect();
+                }
+            }
             // No fabricator or bays yet: units are built the moment they're ordered.
             s.instant_build = true;
             for (at, size, scrap) in std::mem::take(&mut *shared.blasts.lock()) {
@@ -557,6 +581,7 @@ fn run(shared: &Shared) {
                 };
                 let mut booms = s.take_booms();
                 let mut plumes = std::mem::take(&mut s.plumes);
+                let mut gore = std::mem::take(&mut s.gore);
                 let mut happenings = s.take_happenings();
                 // The screen's copy of the ground: the leaves changed since,
                 // then a few hundred of those waiting, nearest the view first.
@@ -689,6 +714,9 @@ fn run(shared: &Shared) {
                 }
                 if out.plumes.len() < 200 {
                     out.plumes.append(&mut plumes);
+                }
+                if out.gore.len() < 200 {
+                    out.gore.append(&mut gore);
                 }
                 if out.booms.len() < 2000 {
                     out.booms.append(&mut booms);

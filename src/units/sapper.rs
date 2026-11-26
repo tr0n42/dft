@@ -45,7 +45,15 @@ pub struct Sapper {
     pub(super) ground_r: f64,
     /// Kilograms of uranium in its charge (0: a conventional charge).
     pub(super) fissile: f64,
+    /// Drilling sideways (a unit vector) to keep its blast clear of a
+    /// tunneler; (0, 0) when drilling down.
+    pub(super) side: (f64, f64),
+    /// Metres drilled sideways so far.
+    pub(super) sideways: f64,
 }
+
+/// Farthest a sapper drills sideways to keep clear of tunnelers (m).
+pub(super) const SIDEWAYS_MAX_M: f64 = 200.0;
 
 /// At most this many cells of a blast on screen are thrown as flying
 /// pieces, and at most this many blown out of its plume; the rest lies as
@@ -67,9 +75,67 @@ pub(super) const MELT_COOL_S: f64 = 25.0;
 pub(super) const SAPPER_COOK_K: f64 = 800.0;
 
 impl Sim {
-    /// Where a sapper is wanted: the flock where the going is hardest
-    /// (slowest per kg lately), away from where other sappers are headed.
+    /// A sapper's blast radius (m) for its yield.
+    pub(super) fn sapper_radius(&self) -> f64 {
+        let sp = &self.eco.units.sapper;
+        sp.radius_m_per_cbrt_kt * sp.yield_kt.max(0.0).cbrt()
+    }
+
+    /// How deep a sapper goes off (m under the ground where it landed): from
+    /// its yield (Benjamin, 25 Nov), or the old rule (blast radius + bury_m).
+    pub(super) fn sapper_depth(&self) -> f64 {
+        let sp = &self.eco.units.sapper;
+        if sp.depth_m_per_cbrt_kt > 0.0 {
+            sp.depth_m_per_cbrt_kt * sp.yield_kt.max(0.0).cbrt()
+        } else {
+            self.sapper_radius() + sp.bury_m
+        }
+    }
+
+    /// How much slower than in hardness-3 rock flock `i` has been cutting
+    /// lately, per kg (1: as fast; 0 if it has cut too little to tell).
+    pub(super) fn flock_stall(&self, i: usize) -> f64 {
+        let f = &self.flock[i];
+        // At least a few loads' worth lately, or it can't be told.
+        if f.kg < 3.0 * self.eco.harvester.cargo_kg {
+            return 0.0;
+        }
+        let soft = self.eco.harvester.dig_s_for(3.0) / self.eco.harvester.cargo_kg.max(1.0) / (self.up("dig speed") * self.perk_dig).max(1e-9);
+        f.dig_s / f.kg / soft.max(1e-12)
+    }
+
+    /// Flocks where the cutters are struggling (cutting `stall_ratio` times
+    /// slower than in soft rock), worst first, leaving out those a sapper is
+    /// already headed for: (flock, how much slower).
+    pub(super) fn stalled_sites(&self) -> Vec<(usize, f64)> {
+        let sp = &self.eco.units.sapper;
+        let keep_off = self.sapper_radius() * sp.loosen_top.max(1.0) * 2.0;
+        let mut out: Vec<(usize, f64)> = self
+            .live_sites()
+            .into_iter()
+            .filter_map(|i| {
+                let k = self.flock_stall(i);
+                if k < sp.stall_ratio {
+                    return None;
+                }
+                let (x, y) = self.site_pos(i);
+                let taken = self.units.sappers.iter().any(|s| dist2(s.goal, (x, y)) < keep_off * keep_off);
+                (!taken).then_some((i, k))
+            })
+            .collect();
+        out.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        out
+    }
+
+    /// Where a sapper is wanted: the flock struggling most (with need-driven
+    /// ordering), else the flock where the going is hardest (slowest per kg
+    /// lately), away from where other sappers are headed.
     pub(super) fn sapper_site(&self) -> Option<usize> {
+        if self.eco.units.sapper.stall_ratio > 0.0 {
+            if let Some(&(i, _)) = self.stalled_sites().first() {
+                return Some(i);
+            }
+        }
         let sites = self.live_sites();
         let mut best: Option<(usize, f64)> = None;
         for &i in &sites {
@@ -89,6 +155,15 @@ impl Sim {
     pub(super) fn launch_sapper(&mut self) {
         // Its charge, as cast when its bay started it.
         let fissile = self.units.charges.pop_front().unwrap_or_else(|| self.fissile_per_charge());
+        // No flock on view struggling, but a far sector is: it goes off
+        // there, as math.
+        let near = self.eco.units.sapper.stall_ratio <= 0.0 || !self.stalled_sites().is_empty();
+        if !near {
+            if let Some(&(k, _)) = self.far_stalled().first() {
+                self.far_sapper_blast(k);
+                return;
+            }
+        }
         let Some(site) = self.sapper_site() else { return };
         let (hx, hy) = self.site_pos(site);
         let a = hy.atan2(hx);
@@ -96,9 +171,21 @@ impl Sim {
         let goal = (a.cos() * (g + 1.0), a.sin() * (g + 1.0));
         let start = self.mother_over(a);
         let id = self.units.new_id();
+        let want = self.sapper_depth();
+        self.units.sappers.push(Sapper { id, state: SapState::Fly, pos: start, prev: start, moved_at: self.tick, goal, path: Vec::new(), along: 0.0, drilled: 0.0, armed_s: 0.0, want, ground_r: g, fissile, side: (0.0, 0.0), sideways: 0.0 });
+        self.director_log_push(format!("a sapper is sent where the cutters struggle ({:.0} m deep, {} kt)", want, self.eco.units.sapper.yield_kt));
+    }
+
+    /// Where a blast at `at` would catch a tunneler (its head or its body
+    /// within the loosened column and a margin): the nearest such point.
+    pub(super) fn tunneler_in_blast(&self, at: (f64, f64)) -> Option<(f64, f64)> {
         let sp = &self.eco.units.sapper;
-        let r = sp.radius_m_per_cbrt_kt * sp.yield_kt.max(0.0).cbrt();
-        self.units.sappers.push(Sapper { id, state: SapState::Fly, pos: start, prev: start, moved_at: self.tick, goal, path: Vec::new(), along: 0.0, drilled: 0.0, armed_s: 0.0, want: r + sp.bury_m, ground_r: g, fissile });
+        let r = self.sapper_radius();
+        let clear = r * sp.loosen_top.max(1.0) + 2.0 * sp.kill_margin_m + 12.0;
+        self.tunneler_points()
+            .into_iter()
+            .filter(|&p| dist2(p, at) < clear * clear)
+            .min_by(|a, b| dist2(*a, at).total_cmp(&dist2(*b, at)))
     }
 
     /// From where it landed, its way down: the deepest open cell it can
@@ -162,7 +249,18 @@ impl Sim {
             s.moved_at = self.tick;
             // Anything that destroys a sapper sets it off: buried by falling
             // rock, or touched by magma or a blast's heat.
-            if s.state != SapState::Fly && s.armed_s >= 0.0 && !(s.state == SapState::Arm && s.armed_s >= sp.arm_s) && self.sapper_destroyed(s.pos) {
+            // (Not while drilling: its own spoil falling back into the hole
+            // is pushed up past it by the drill. Drilling into magma it stops
+            // and arms, and the magma then destroys it.)
+            // Buried while crawling (rubble came down on it): it drills on.
+            if s.state == SapState::Crawl && {
+                let c = cell_of(s.pos);
+                let m = self.world.material(c.0, c.1);
+                m != VACUUM && self.world.planet.mats.get(m).state == State::Solid
+            } {
+                s.state = SapState::Drill;
+            }
+            if !matches!(s.state, SapState::Fly | SapState::Drill) && s.armed_s >= 0.0 && !(s.state == SapState::Arm && s.armed_s >= sp.arm_s) && self.sapper_destroyed(s.pos) {
                 self.units.destroyed += 1;
                 blasts.push((s.pos, s.fissile));
                 s.armed_s = -1.0;
@@ -192,16 +290,18 @@ impl Sim {
                     }
                 }
                 SapState::Drill => {
-                    // Straight down, a shaft three wide; what it bores through
-                    // spouts up out of the hole (a share is kept).
+                    // Straight down (or sideways, keeping clear of a
+                    // tunneler), a shaft three wide; what it bores through
+                    // spouts up out of the hole and lands round it.
                     let down = unit_of(s.pos);
+                    let sideways = s.side != (0.0, 0.0);
+                    let dir = if sideways { s.side } else { (-down.0, -down.1) };
                     let mut stop = false;
                     for _ in 0..sp.drill_speed.ceil().max(1.0) as usize {
-                        let next = (s.pos.0 - down.0, s.pos.1 - down.1);
-                        let c = cell_of(next);
-                        let side = (-down.1, down.0);
+                        let next = (s.pos.0 + dir.0, s.pos.1 + dir.1);
+                        let across = (-dir.1, dir.0);
                         for o in [-1.0, 0.0, 1.0] {
-                            let q = cell_of((next.0 + side.0 * o, next.1 + side.1 * o));
+                            let q = cell_of((next.0 + across.0 * o, next.1 + across.1 * o));
                             let m = self.world.material(q.0, q.1);
                             if m != VACUUM && self.world.planet.mats.get(m).state == State::Liquid {
                                 stop = true;
@@ -213,10 +313,8 @@ impl Sim {
                             // just stops at and arms.
                             break;
                         }
-                        // What it bores through spouts up out of the hole and
-                        // comes down round it as loose rubble.
                         for (k, o) in [-1.0, 0.0, 1.0].into_iter().enumerate() {
-                            let q = cell_of((next.0 + side.0 * o, next.1 + side.1 * o));
+                            let q = cell_of((next.0 + across.0 * o, next.1 + across.1 * o));
                             let Some(m) = self.world.lift_cell(q.0, q.1) else { continue };
                             self.undope(q, false);
                             self.progress.remove(&q);
@@ -225,6 +323,7 @@ impl Sim {
                             let h = hash(self.tick, q.0, q.1, 0xD811 + k as u64);
                             let vs = 45.0 + 35.0 * crate::noise::unit(h);
                             let vx = (crate::noise::unit(hash(h, 1, 0, 0)) - 0.5) * 3.0;
+                            let side = (-down.1, down.0);
                             let from = (s.pos.0 + down.0 * 2.0, s.pos.1 + down.1 * 2.0);
                             if let Some(t) = self.bodies.throw(&mut self.world, from, m, (down.0 * vs + side.0 * vx, down.1 * vs + side.1 * vx)) {
                                 self.loose.insert(t);
@@ -233,23 +332,48 @@ impl Sim {
                                 self.scrap_landed(t);
                             }
                         }
-                        let _ = c;
                         s.pos = next;
-                        s.drilled += 1.0;
-                        if s.ground_r - len(s.pos) >= s.want || s.drilled >= sp.drill_m {
-                            stop = true;
-                            break;
+                        if sideways {
+                            s.sideways += 1.0;
+                            if s.sideways >= SIDEWAYS_MAX_M || self.tunneler_in_blast(s.pos).is_none() {
+                                stop = true;
+                                break;
+                            }
+                        } else {
+                            s.drilled += 1.0;
+                            if s.ground_r - len(s.pos) >= s.want || s.drilled >= sp.drill_m {
+                                stop = true;
+                                break;
+                            }
                         }
                     }
                     if stop {
                         s.state = SapState::Arm;
+                        s.side = (0.0, 0.0);
                     }
                 }
                 SapState::Arm => {
-                    s.armed_s += 1.0;
-                    if s.armed_s >= sp.arm_s {
-                        blasts.push((s.pos, s.fissile));
-                        s.armed_s = -1.0;
+                    // A tunneler within reach of its blast: it drills
+                    // sideways away from it first (Benjamin: sappers never
+                    // catch a tunneler; they can dig sideways to steer clear).
+                    let near = self.tunneler_in_blast(s.pos);
+                    if near.is_some() && s.sideways >= SIDEWAYS_MAX_M {
+                        // As far sideways as it goes: it waits, armed, for
+                        // the tunneler to move on.
+                        s.armed_s = 0.0;
+                    } else if let Some(t) = near {
+                        let down = unit_of(s.pos);
+                        let side = (-down.1, down.0);
+                        let away = if (s.pos.0 - t.0) * side.0 + (s.pos.1 - t.1) * side.1 >= 0.0 { side } else { (-side.0, -side.1) };
+                        s.side = away;
+                        s.state = SapState::Drill;
+                        s.armed_s = 0.0;
+                    } else {
+                        s.armed_s += 1.0;
+                        if s.armed_s >= sp.arm_s {
+                            blasts.push((s.pos, s.fissile));
+                            s.armed_s = -1.0;
+                        }
                     }
                 }
             }
@@ -261,18 +385,16 @@ impl Sim {
         }
     }
 
-    /// Whether whatever is round a sapper at `p` destroys it: its own cell
-    /// filled in (buried by falling rock or rubble), or magma or ground hot
-    /// from a blast touching it.
+    /// Whether whatever is round a sapper at `p` destroys it: magma, or
+    /// ground hot from a blast, touching it.
     pub(super) fn sapper_destroyed(&self, p: (f64, f64)) -> bool {
         let c = cell_of(p);
         let m = self.world.material(c.0, c.1);
-        if m != VACUUM {
-            let mat = self.world.planet.mats.get(m);
-            // (Water it can sit in; rock, rubble or magma on top of it, no.)
-            if !(mat.state == State::Liquid && self.units.freeze_to.get(m as usize).copied().flatten().is_none()) {
-                return true;
-            }
+        // (Rock or rubble coming down on it doesn't: it is sealed in, which
+        // a charge doesn't mind, and one buried while crawling drills on.
+        // Magma flowing over it does.)
+        if m != VACUUM && self.units.freeze_to.get(m as usize).copied().flatten().is_some() {
+            return true;
         }
         for d in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
             let n = (c.0 + d.0, c.1 + d.1);
@@ -636,6 +758,10 @@ impl Sim {
             }
         }
         let _ = thrown;
+        // The loosened column over it, up to the surface (Benjamin, 25 Nov:
+        // the yield sets the depth, deep enough that the ground over it is
+        // loosened for the cutters to scoop up).
+        let top = if self.eco.units.sapper.depth_m_per_cbrt_kt > 0.0 { self.sapper_column(at, r, blast, &broken, &mut rubble) } else { at };
         self.units.cracked += cracked + broken.len() as u64;
         // The plume: most blasts find a way up.
         if seen && crate::noise::unit(hash(blast, 0, 0, 77)) < 0.9 && !rubble.is_empty() {
@@ -683,6 +809,137 @@ impl Sim {
         }
         // Sappers caught in it go off too, a moment later.
         self.sappers_caught(at, r * 0.9);
+        // Drones caught in it: the director never pulls them back.
+        self.blast_harm(at, top, r);
+    }
+
+    /// The loosened column of a blast at `at` (radius `r`): every solid cell
+    /// from the charge up to the surface, blast-wide at the bottom and
+    /// `loosen_top` radii each side at the top, not already broken, is left
+    /// loose (rubble) where it is, or for hard rock now and then held in big
+    /// cracked pieces (Benjamin: leaving big chunks is good). Returns where
+    /// the column breaks the surface; the rubble is added to `rubble`.
+    pub(super) fn sapper_column(&mut self, at: (f64, f64), r: f64, blast: u64, broken: &CellMap<(f64, f64)>, rubble: &mut Vec<(i64, i64)>) -> (f64, f64) {
+        let lt = self.eco.units.sapper.loosen_top.max(1.0);
+        let up = unit_of(at);
+        let side = (-up.1, up.0);
+        let a = at.1.atan2(at.0);
+        // The surface over it, looked at either side of its own shaft (straight
+        // down the shaft, the first solid cell is the bottom of the hole).
+        let ground = self.ground_beside(at, r);
+        let height = (ground - len(at)).max(1.0);
+        let piece = |x: i64, y: i64, size: f64| -> u64 {
+            let (i, j) = ((x as f64 / size).floor() as i64, (y as f64 / size).floor() as i64);
+            hash(0x91ED, i, j, 0)
+        };
+        let mut cracked = 0u64;
+        let mut seen = CellSet::default();
+        let mut h = -r * 0.5;
+        while h <= height + 1.0 {
+            let half = r * (1.0 + (lt - 1.0) * (h / height).clamp(0.0, 1.0));
+            let mut s = -half;
+            while s <= half {
+                let c = cell_of((at.0 + up.0 * h + side.0 * s, at.1 + up.1 * h + side.1 * s));
+                s += 0.7;
+                if !seen.insert(c) || broken.contains_key(&c) || self.loose.contains(&c) {
+                    continue;
+                }
+                let m = self.world.material(c.0, c.1);
+                if m == VACUUM || self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
+                    continue;
+                }
+                let mat = self.world.planet.mats.get(m);
+                if mat.state != State::Solid {
+                    continue;
+                }
+                let hd = (mat.hardness as f64 / 10.0).clamp(0.05, 0.95);
+                // Hard rock: some of it holds in big pieces, cracked through.
+                if hd > 0.6 {
+                    let size = 6.0 + 10.0 * hd;
+                    let id = piece(c.0, c.1, size);
+                    if crate::noise::unit(hash(id, blast as i64, 0, 62)) < (hd - 0.5) * 1.1 {
+                        if self.fractured.insert(c) {
+                            cracked += 1;
+                        }
+                        self.world.set_look(c.0, c.1, Look::HELD);
+                        continue;
+                    }
+                }
+                self.loose.insert(c);
+                self.settling.insert(c);
+                self.world.set_look(c.0, c.1, Look::RUBBLE);
+                rubble.push(c);
+            }
+            h += 0.7;
+        }
+        self.units.cracked += cracked;
+        (a.cos() * ground, a.sin() * ground)
+    }
+
+    /// What a blast does to the swarm (Benjamin, 25 Nov: blasts kill
+    /// cutters; haulers are damaged and can die; nothing is pulled back).
+    /// Cutters in the loosened column from `at` up to `top` (and
+    /// kill_margin_m round it) are wrecked; haulers near `top` lose life,
+    /// the nearer the more.
+    pub(super) fn blast_harm(&mut self, at: (f64, f64), top: (f64, f64), r: f64) {
+        let sp = &self.eco.units.sapper;
+        let (lt, margin, harm_r) = (sp.loosen_top.max(1.0), sp.kill_margin_m, sp.hauler_harm_r * r);
+        let up = unit_of(at);
+        let side = (-up.1, up.0);
+        let height = ((top.0 - at.0) * up.0 + (top.1 - at.1) * up.1).max(1.0);
+        let now = self.time();
+        let speed = self.leg_speed();
+        let mut dead: Vec<(u32, (f64, f64))> = Vec::new();
+        for (id, d) in self.drones.iter().enumerate() {
+            if !d.alive {
+                continue;
+            }
+            let leg = self.leg_of(d, speed);
+            if leg.state == Leg::RESTING {
+                continue;
+            }
+            // Where it is, where its trip goes or came from, and where it
+            // last cut: a cutter working in the column is caught (off
+            // screen, cutters do their trips at once and wait at their
+            // hauler, so where they work tells, not where they are).
+            let inside = |p: (f64, f64)| {
+                let (dx, dy) = (p.0 - at.0, p.1 - at.1);
+                let along = dx * up.0 + dy * up.1;
+                if along < -r - margin || along > height + margin {
+                    return false;
+                }
+                let half = r * (1.0 + (lt - 1.0) * (along / height).clamp(0.0, 1.0)) + margin;
+                (dx * side.0 + dy * side.1).abs() <= half
+            };
+            let p = leg.at(now);
+            if inside(p) || (leg.state != 0 && (inside(leg.from) || inside(leg.to))) || d.last.is_some_and(|c| inside(mid(c))) {
+                dead.push((id as u32, p));
+            }
+        }
+        let killed = dead.len() as u64;
+        for (id, p) in dead {
+            self.wreck_drone(id, p, (0.0, 0.0));
+        }
+        self.units.blast_kills += killed;
+        let life = self.eco.hauler.life_s;
+        let mut hurt = 0u64;
+        for k in 0..self.haulers.len() {
+            if !self.haulers[k].alive {
+                continue;
+            }
+            let p = self.hauler_pos(k);
+            let d = dist2(p, top).sqrt().min(dist2(p, at).sqrt());
+            let harm = (1.0 - d / harm_r.max(1.0)).clamp(0.0, 1.0);
+            if harm > 0.0 {
+                // Within the first third of the reach: wrecked.
+                self.haulers[k].life_left -= life * harm * 1.5;
+                hurt += 1;
+            }
+        }
+        self.units.blast_hurt_haulers += hurt;
+        if killed > 0 || hurt > 0 {
+            self.director_log_push(format!("a blast kills {killed} cutters and damages {hurt} haulers"));
+        }
     }
 
     /// An open way up from cell `from` to open sky over the ground (through

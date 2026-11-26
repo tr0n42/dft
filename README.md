@@ -12,6 +12,7 @@ Builds any body from a data file and a seed. Nothing about a body is stored:
 - `cargo run --release --bin tutorials`: compares ways of pacing the second tutorial asteroid
 - `run-refsheet.bat`: rebuilds the reference sheets in `reference\` (pictures and a spec sheet per body); add `--glamour 0.5` in the file to see the glamour pass instead
 - `run-stress.bat`: pushes bodies and swarms past their usual sizes and reports the cost (see `src\bin\stress.rs` for the settings)
+- `lab-units.bat` (`src/bin/unitlab.rs`): each ground unit on its testbed, minute by minute, with its cost; `run-test-sappers.bat`, `run-test-tunnelers.bat`, `run-test-walkers.bat`, `run-test-all-units.bat` show them in the game (`--units`)
 - `bench-units.bat`: "500k cutters with X", each unit's cost per stage, kept in `perf\history.csv`; `cargo run --release --bin samecheck` proves a refactor changed nothing
 - `run-dev-planet.bat`: the Dev planet, a 5 km test world where every drone has work (and placeholder animals)
 - `run-abundance.bat`: measures how much of every element each body holds (whole body and outer 500 m) and writes `data\reference\abundance.csv`
@@ -36,7 +37,7 @@ Builds any body from a data file and a seed. Nothing about a body is stored:
 - `src/recipes.rs`: the element stockpile (raw and refined) and building from part recipes
 - `src/bin/abundance.rs`: element abundance per body, specialty odds
 - `src/swarm.rs`: the seed swarm, drones (individuals plus a packet beyond the cap), Mass and Energy, building, upgrades, launch; the main tick, flocks and production
-- `src/units/*.rs`: one file per unit (cutter, hauler, sapper, tunneler, heatsink, forester, abductor) and `platform.rs`, what they share (modules of swarm)
+- `src/units/*.rs`: one file per unit (cutter, hauler, sapper, tunneler, heatsink, forester, abductor; `opener.rs` is the tunneler as a ground unit since 25 Nov, `tunneler.rs` the old Tunneler's shafts) and `platform.rs`, what they share (modules of swarm)
 - `src/fauna.rs`: placeholder animals (bodies with a `[fauna]` section: the Dev planet)
 - `src/sandbox.rs`: falling sand, heat and reactions on the cells near activity; mass is always kept
 - `src/bodies.rs`: loose rigid bodies (Rapier, deterministic mode): rock cut free by digging falls, tumbles and sets down again; wrecked drones become scrap

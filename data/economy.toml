@@ -258,12 +258,20 @@ game_deploys = []
 
 [units.sapper]
 energy_cost = 400
-keep = 3                     # sappers out at once
+keep = 3                     # sappers out at once, at most
 yield_kt = 5.0               # bigger booms are more fun (blast radius 24 m)
 radius_m_per_cbrt_kt = 14    # blast radius: 14 m at 1 kt, 18 m at 2 kt, 30 m at 10 kt
-bury_m = 50                  # goes off this far under the ground beyond its blast radius (the proving ground's 50 m)
+bury_m = 50                  # (old rule, unused while depth_m_per_cbrt_kt is set)
+# Benjamin, 25 Nov: depth from yield, deep enough to loosen the ground over
+# it for the cutters to scoop up. 46 m at 1 kt: 79 m at 5 kt, 170 m at 50 kt.
+depth_m_per_cbrt_kt = 46
+loosen_top = 1.6             # the loosened column: blast-wide at the charge, 1.6 radii each side at the surface
+stall_ratio = 3.0            # ordered where a flock cuts 3x slower per kg than in hardness-3 rock (granite and harder)...
+order_gap_s = 90             # ...at most one every 90 s: fewer, bigger booms
+kill_margin_m = 4            # cutters in the loosened column (and 4 m round it) die
+hauler_harm_r = 3.0          # haulers within 3 blast radii of where it breaks the surface are damaged
 crawl_m = 220                # crawls this far through cracks and caves looking for a deep spot...
-drill_m = 25                 # ...and drills about this far down where there is none (not going off at the surface)
+drill_m = 400                # ...and drills the rest of the way (as deep as the yield wants, up to this)
 fly_speed = 30
 crawl_speed = 9
 drill_speed = 3.5
@@ -299,26 +307,61 @@ make = [
 ]
 
 [units.tunneler]
+# The opener (Benjamin, 25 Nov): the vanguard. Sees behind the fog, heads for
+# the best ground to open (value to the space-bound swarm against what the
+# swarm needs now, for the dig), breaks magma layers for the heat sinks and
+# hard rock for the cutters, caps magma, and goes off at its end.
 energy_cost = 5000
 per_cutters = 1500           # about one per this many cutters, at least one...
-keep = 2                     # ...at most this many
+keep = 2                     # ...at most this many (performance first, then materials)
 upkeep = 1.0                 # E per second while boring
 bore_m = 12                  # its shaft: as wide as it is
-drill_power = 100            # cuts rock this many times faster than a cutter
+drill_power = 400            # cuts rock this many times faster than a cutter (0.8 m a second through granite)
 energy_per_tonne = 0.5
-spoil_recovery = 0.5
+spoil_recovery = 1.0         # (unused: its crew clears all of it)
 max_length_m = 600
 hub_every_m = 150            # cutters get a staging point this often down the shaft
+max_lean_deg = 20            # at most 20 degrees off straight down (upgrades widen it)...
+turn_deg_per_m = 0.6         # ...turning 0.6 degrees a metre: tunnels curve
+fly_speed = 30
+space_weight = 1.0           # worth to the space-bound swarm (worth past plain rock)...
+need_weight = 0.6            # ...against what the swarm needs now
+depth_scale_m = 300          # a target 300 m down is worth half as much as one at the top
+min_score = 0.05
+magma_score = 1.5            # a magma layer to break...
+hard_score = 0.8             # ...and hard rock under struggling flocks, as this much worth
+ahead_m = 3000               # it looks this far past the mother swarm's reach...
+scan_step_m = 96             # ...every 96 m...
+max_depth_m = 2000           # ...down to 2 km
+min_radius = 0.1             # never into the innermost tenth of the body
+reach_m = 400                # from its head, this far on down
+crew = 200                   # its own cutters, clearing its spoil (30 t a second, about 1 m of shaft)...
+crew_kg_per_s = 150          # ...this much each a second...
+crew_backlog_t = 3000        # ...it waits while 3,000 t is waiting for them
+cap_m = 4                    # magma frozen 4 m past its drill when it caps a breach
+back_m = 80                  # then it backs up 80 m and seeks another deposit
+drill_heat_k = 900           # its nuclear drill heats the rock round its head
+yield_kt = 50                # its end: its drill's uranium goes off where it is...
+fissile_kg = 40              # ...a final gift of matter
 
 [units.heatsink]
+# Benjamin, 25 Nov: two roles. Small pools it cools completely from over them;
+# at a tunneler's cap (or a wide pool under open space) it freezes a passage
+# down through the magma, as wide as a tunneler with frozen walls, its crew
+# digging out the middle. Cooling never fails (hotter magma just takes
+# longer); with no work left it powers down, left as scrap to reclaim.
 energy_cost = 2000
-keep = 3
+keep = 3                     # at most this many (performance first, then materials)
 speed = 25
-life_s = 900                 # over magma this long, it burns out
+life_s = 900                 # (unused: cooling never fails)
 grow_m_per_s = 0.5           # its tentacles grow down through the magma this fast...
-reach_m = 30                 # ...this far
-freeze_per_s = 4             # cells of magma frozen to stone a second
-power_per_tonne = 8          # E beamed up per tonne frozen
+reach_m = 30                 # ...this far: a pool it can reach all of from one spot is "small"
+freeze_per_s = 40            # cells of magma frozen to stone a second, at their freezing point
+power_per_tonne = 0          # (no power beamed yet: the economy is undecided)
+wall_m = 3                   # a passage's frozen walls, each side of a tunneler's 12 m
+passage_max_m = 400          # the longest passage it freezes down through magma
+crew = 60                    # its own cutters, digging out the passage's middle...
+crew_kg_per_s = 150          # ...this much each a second
 min_freeze_k = 350           # magma, molten metal and sulfur; not water, brine or methane
 
 [units.forester]
@@ -334,6 +377,9 @@ laser_m = 30                 # ...10 to 30 m out, 15 to 40 m long
 bag_kg = 80000               # full, it drops its bag for couriers to carry up...
 pickup_s = 20                # ...who reach it after this (s)...
 courier_speed = 60           # ...plus its distance from the mother swarm at this speed (m/s)
+fly_speed = 40               # flies folded past the swarm's edge, a bit like a UFO (abductors too)...
+fly_alt_m = 120              # ...this high over the ground, then drops
+hp = 2000                    # a forester's health
 
 [units.abductor]
 energy_cost = 3000
@@ -342,7 +388,10 @@ reach_m = 12                 # snatches an animal this close...
 chase_m = 250                # ...runs down ones this near...
 chase_speed = 10             # ...this fast (they flee at 7 m/s); strides to farther herds
 bag_kg = 2000                # stasis sacs full: dropped for the couriers
-live_multiplier = 2.0        # a live catch is worth twice its mass
+live_multiplier = 1.0        # a live catch is worth its mass (25 Nov; was 2)
+laser_m = 120                # its laser bursts what spits or runs within 120 m: gore and biomass, never fire
+hp = 100000                  # nearly invulnerable (a spit does 5)
+laser_every_s = 2            # a shot every 2 s at spitters, every 3 s at runners out of its palps' reach
 
 # ---- The fuser (a refinery module) ----
 # Fuses two atoms into one heavier one: their atomic numbers add up (iron 26

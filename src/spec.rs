@@ -611,6 +611,9 @@ pub struct FaunaSpec {
     pub herds_per_km: f64,
     pub herd_size: [u32; 2],
     pub kg: [f64; 2],
+    /// Share of herds with a ranged attack: they spit at machines near them.
+    #[serde(default)]
+    pub ranged_share: f64,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

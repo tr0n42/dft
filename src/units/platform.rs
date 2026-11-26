@@ -113,8 +113,34 @@ pub struct Units {
     pub(super) walkers: Vec<Walker>,
     /// Full bags on the ground, waiting for couriers.
     pub(super) bags: Vec<Bag>,
-    /// Tunnelers (built as units: wide shafts; see `Sim::tunnel_work`).
+    /// Tunnelers built as units before 25 Nov (wide shafts; old saves only).
     pub(super) bores: Vec<Bore>,
+    /// Tunnelers: the openers (units/opener.rs), and where those flying
+    /// down will start their shafts.
+    pub(super) openers: Vec<Opener>,
+    pub(super) opener_mouths: Vec<(u32, (f64, f64))>,
+    /// Magma breaches the openers capped: jobs for the heat sinks.
+    pub(super) heat_jobs: Vec<HeatJob>,
+    /// What a kg of each material is worth to an opener now, and whether
+    /// one would find work (looked at now and then).
+    pub(super) mat_value: Vec<f64>,
+    pub(super) opener_work: bool,
+    /// Breaches capped, tunnelers gone off at their end.
+    pub caps: u64,
+    pub tunneler_blasts: u64,
+    /// Fires burning out of sight (as math), and plant cells they burned.
+    pub(super) fires_out: Vec<Fire>,
+    pub burned_out_of_sight: u64,
+    /// Walkers retired (done: reclaimed by the couriers) and wrecked.
+    pub walkers_retired: u64,
+    pub walkers_lost: u64,
+    /// Heat sinks wrecked (magma reached them) and powered down (no work
+    /// left), and passages frozen through magma.
+    pub bots_lost: u64,
+    pub bots_retired: u64,
+    pub passages: u64,
+    /// Deep jobs given up because magma had risen over them (not saved).
+    pub stale_jobs: u64,
     pub(super) next_id: u32,
     /// Open pools of magma near the flocks (their surface cells), and
     /// stands of plants (direction, cells of plant there), found lately.
@@ -151,6 +177,36 @@ pub struct Units {
     pub(super) dope: CellMap<f64>,
     pub doped_kg: f64,
     pub undoped_kg: f64,
+    /// Cutters killed and haulers damaged by blasts.
+    pub blast_kills: u64,
+    pub blast_hurt_haulers: u64,
+    /// The tick before which no new sapper is ordered (order_gap_s).
+    pub(super) next_sapper_tick: u64,
+}
+
+/// What the ground units have done, for tests and reports.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GroundReport {
+    /// Sapper blasts (near and far), far ones, cutters killed and haulers
+    /// damaged by blasts.
+    pub blasts: u64,
+    pub far_blasts: u64,
+    pub blast_kills: u64,
+    pub blast_hurt_haulers: u64,
+    /// Flocks struggling with hard ground now.
+    pub stalled: usize,
+    /// Tunnelers: how deep each is under the ground beside it (m), magma
+    /// breaches capped, tunnelers gone off at their end.
+    pub tunneler_depths: Vec<f64>,
+    pub caps: u64,
+    pub tunneler_blasts: u64,
+    /// Heat jobs, passages frozen through, heat sinks wrecked and powered
+    /// down, kg frozen.
+    pub heat_jobs: usize,
+    pub passages: u64,
+    pub bots_lost: u64,
+    pub bots_retired: u64,
+    pub frozen_kg: f64,
 }
 
 /// A specialist as the screen needs it: it moves from `from` to `to`
@@ -211,7 +267,7 @@ impl Units {
     pub fn count(&self, u: Unit) -> usize {
         match u {
             Unit::Sapper => self.sappers.len(),
-            Unit::Tunneler => self.bores.len(),
+            Unit::Tunneler => self.bores.len() + self.openers.len(),
             Unit::HeatSink => self.bots.len(),
             Unit::Forester | Unit::Abductor => self.walkers.iter().filter(|w| w.kind == u).count(),
             _ => 0,
@@ -221,6 +277,29 @@ impl Units {
     pub(super) fn new_id(&mut self) -> u32 {
         self.next_id += 1;
         self.next_id
+    }
+}
+
+impl Sim {
+    /// Points along every tunneler (its head and its body back up its
+    /// shaft), which blasts must keep clear of.
+    pub(super) fn tunneler_points(&self) -> Vec<(f64, f64)> {
+        let mut v = Vec::new();
+        for b in &self.units.bores {
+            if !b.active {
+                continue;
+            }
+            for k in 0..4 {
+                let back = k as f64 * 20.0;
+                v.push((b.x - b.hx * back, b.y - b.hy * back));
+            }
+        }
+        // An opener is about 60 m long: its head and its body back up its shaft.
+        for o in &self.units.openers {
+            v.push(o.head);
+            v.extend(o.path.iter().rev().take(15).copied());
+        }
+        v
     }
 }
 
@@ -239,6 +318,44 @@ pub(super) fn cell_of(p: (f64, f64)) -> (i64, i64) {
 
 pub(super) fn mid(c: (i64, i64)) -> (f64, f64) {
     (c.0 as f64 + 0.5, c.1 as f64 + 0.5)
+}
+
+impl Sim {
+    /// Fly `p` toward `to` over the ground, never through it: up (or down)
+    /// to `cruise_m` over the higher ground of here and there, round the
+    /// body at that height, then straight to `to`. `step` metres this
+    /// second; true once there.
+    pub(super) fn fly_over(&self, p: &mut (f64, f64), to: (f64, f64), step: f64, cruise_m: f64) -> bool {
+        let (a, ta) = (p.1.atan2(p.0), to.1.atan2(to.0));
+        let r = len(*p).max(1.0);
+        let left = ang_dist(a, ta) * r;
+        // Near enough over it: straight in.
+        if left <= 40.0 {
+            return approach(p, to, step);
+        }
+        let cruise = self.ground_at(a, true).max(self.ground_at(ta, true)).max(len(to)) + cruise_m;
+        let mut rr = r;
+        let mut step = step;
+        if (cruise - rr).abs() > 2.0 {
+            let dr = (cruise - rr).clamp(-step, step);
+            rr += dr;
+            step -= dr.abs();
+        }
+        let mut na = a;
+        if step > 0.0 {
+            let mut d = ta - a;
+            while d > std::f64::consts::PI {
+                d -= std::f64::consts::TAU;
+            }
+            while d < -std::f64::consts::PI {
+                d += std::f64::consts::TAU;
+            }
+            let k = (step / rr.max(1.0)).min(d.abs());
+            na = a + k * d.signum();
+        }
+        *p = (na.cos() * rr, na.sin() * rr);
+        false
+    }
 }
 
 /// Move `p` toward `to` by at most `step`; true if it got there.
@@ -290,6 +407,15 @@ impl Sim {
         r.max(0.0)
     }
 
+    /// The ground over `p`, looked for either side of it (`w` m each way and
+    /// half that): straight down a shaft dug along the radius, the first
+    /// solid cell is the shaft's bottom.
+    pub(super) fn ground_beside(&self, p: (f64, f64), w: f64) -> f64 {
+        let a = p.1.atan2(p.0);
+        let r0 = len(p).max(1.0);
+        [-1.0, -0.5, 0.5, 1.0].iter().map(|k| self.ground_at(a + k * w / r0, true)).fold(r0, f64::max)
+    }
+
     /// The flocks working now (landing points and shaft points with cutters).
     pub(super) fn live_sites(&self) -> Vec<usize> {
         (0..self.hubs.len()).filter(|&i| self.hubs[i].kind != HubKind::Refiner && !self.flock[i].dead && !self.wet_hubs.contains(&i)).collect()
@@ -308,37 +434,71 @@ impl Sim {
             if self.prod.bays_of(u) == 0 || self.deploy_only.as_ref().is_some_and(|l| !l.contains(&u)) {
                 continue;
             }
-            let want = match u {
-                Unit::Sapper => {
-                    // Only with a charge in stock or the uranium to make one.
-                    if self.can_make(u) {
-                        spec.sapper.keep as usize
-                    } else {
-                        0
-                    }
-                }
-                Unit::Tunneler => ((self.harvesters_alive() as f64 / spec.tunneler.per_cutters.max(1.0)) as usize).clamp(1, spec.tunneler.keep.max(1) as usize),
-                Unit::HeatSink => (spec.heatsink.keep as usize).min(self.units.molten.len()),
-                Unit::Forester => {
-                    if self.units.flora.is_empty() {
-                        0
-                    } else {
-                        spec.forester.keep as usize
-                    }
-                }
-                Unit::Abductor => {
-                    if self.fauna.animals.is_empty() {
-                        0
-                    } else {
-                        spec.abductor.keep as usize
-                    }
-                }
-                _ => 0,
-            };
+            let want = self.specialist_want(u);
             let have = self.units.count(u) + self.prod.queued(u) + self.prod.building(u);
             if have < want {
                 self.prod.orders.push_back(Order::Special(u));
             }
+        }
+    }
+
+    /// How many of `u` the director wants out (and on order) now. With
+    /// need-driven ordering this may start a unit's order clock, so it is
+    /// asked once a second per unit at most (the director, or the
+    /// benchmarks' free units).
+    pub(super) fn specialist_want(&mut self, u: Unit) -> usize {
+        let spec = &self.eco.units;
+        let free = self.free_drones.is_some();
+        let have = self.units.count(u) + self.prod.queued(u) + self.prod.building(u);
+        match u {
+            Unit::Sapper => {
+                // Only with a charge in stock or the uranium to make one.
+                if !free && !self.can_make(u) {
+                    0
+                } else if spec.sapper.stall_ratio > 0.0 {
+                    // Made to order (Benjamin, 25 Nov): only while some
+                    // flock is struggling with hard ground, one more at a
+                    // time, at most one every order_gap_s, at most `keep`
+                    // out at once.
+                    let (keep, gap) = (spec.sapper.keep as usize, spec.sapper.order_gap_s.max(1.0));
+                    if self.tick < self.units.next_sapper_tick || have >= keep || (self.stalled_sites().is_empty() && self.far_stalled().is_empty()) {
+                        have.min(keep)
+                    } else {
+                        self.units.next_sapper_tick = self.tick + self.ticks(gap);
+                        have + 1
+                    }
+                } else {
+                    spec.sapper.keep as usize
+                }
+            }
+            // Very expensive: capped by performance first (keep), materials
+            // second (the replicator's stock); only while there is ground
+            // worth opening (looked at every 30 s).
+            Unit::Tunneler => {
+                if self.units.opener_work {
+                    ((self.harvesters_alive() as f64 / spec.tunneler.per_cutters.max(1.0)) as usize).clamp(1, spec.tunneler.keep.max(1) as usize)
+                } else {
+                    0
+                }
+            }
+            // As many as there is work for (pools to cool, deep jobs to
+            // open), at most `keep` (performance first, then materials).
+            Unit::HeatSink => (self.units.bots.len() + self.heat_work_waiting()).min(spec.heatsink.keep as usize),
+            Unit::Forester => {
+                if self.units.flora.is_empty() {
+                    0
+                } else {
+                    spec.forester.keep as usize
+                }
+            }
+            Unit::Abductor => {
+                if self.fauna.animals.is_empty() {
+                    0
+                } else {
+                    spec.abductor.keep as usize
+                }
+            }
+            _ => 0,
         }
     }
 
@@ -384,6 +544,11 @@ impl Sim {
             return;
         }
         if self.tick % self.ticks(SCAN_EVERY_S) == 0 {
+            if self.prod.bays_of(Unit::Tunneler) > 0 {
+                let q = clock();
+                self.opener_scan();
+                self.unit_prof[U_TUNNELER] += clock() - q;
+            }
             if self.prod.bays_of(Unit::HeatSink) > 0 {
                 let q = clock();
                 self.scan_molten();
@@ -405,6 +570,7 @@ impl Sim {
         self.unit_prof[U_HEATSINK] += q - q1;
         let ab = self.unit_prof[U_ABDUCTOR];
         self.walkers_work();
+        self.fires_work();
         self.prof2[9] += clock() - q;
         // (Walkers are timed together; the abductors' hunts on their own.)
         self.unit_prof[U_FORESTER] += clock() - q - (self.unit_prof[U_ABDUCTOR] - ab);
@@ -441,27 +607,35 @@ impl Sim {
         for s in &self.units.sappers {
             out.push(UnitView { kind: Unit::Sapper, id: s.id, state: s.state as u8, from: s.prev, to: s.pos, t0: t(s.moved_at), t1: t(s.moved_at) + sec, a: s.armed_s as f32, b: s.drilled as f32, c: 0.0, mark: s.goal , lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
         }
+        self.opener_views(&mut out);
         for b in &self.units.bores {
             out.push(UnitView { kind: Unit::Tunneler, id: (b.resume_at as u32) ^ 0x7000_0000, state: b.active as u8, from: b.prev, to: (b.x, b.y), t0: t(b.moved_at), t1: t(b.moved_at) + sec, a: b.hx as f32, b: b.hy as f32, c: b.length as f32, mark: (b.x, b.y) , lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
         }
         for b in &self.units.bots {
             let tip = b.tips.first().map(|&c| mid(c)).unwrap_or(mid(b.spot));
-            out.push(UnitView { kind: Unit::HeatSink, id: b.id, state: b.state as u8, from: b.prev, to: b.pos, t0: t(b.moved_at), t1: t(b.moved_at) + sec, a: b.reach as f32, b: (b.life / self.eco.units.heatsink.life_s.max(1.0)) as f32, c: b.tips.len() as f32, mark: tip , lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
+            // (Deep: its crew's size in `lift`, the dug face in `claw`.)
+            let (crew, face) = match b.job.and_then(|id| self.units.heat_jobs.iter().find(|j| j.id == id)) {
+                Some(j) if b.state == HeatState::Work => (self.eco.units.heatsink.crew as f32, (j.at.0 + j.down.0 * b.dug_m, j.at.1 + j.down.1 * b.dug_m)),
+                _ => (0.0, b.pos),
+            };
+            out.push(UnitView { kind: Unit::HeatSink, id: b.id, state: b.state as u8, from: b.prev, to: b.pos, t0: t(b.moved_at), t1: t(b.moved_at) + sec, a: b.reach as f32, b: b.front_m as f32, c: b.tips.len() as f32, mark: tip, lift: crew, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: face, cut_at: -1e9 });
         }
         for w in &self.units.walkers {
             let firing = self.tick.saturating_sub(w.laser_at) < self.ticks(1.0) && w.laser_at > 0;
+            // (Flying shows as the folded package, state 0, with c = 3.)
+            let (state, flying) = if w.state == WalkState::Fly { (0u8, true) } else { (w.state as u8, false) };
             let cutting = self.tick.saturating_sub(w.cut_at) < self.ticks(1.0) && w.cut_at > 0;
             out.push(UnitView {
                 kind: w.kind,
                 id: w.id,
-                state: w.state as u8,
+                state,
                 from: w.prev,
                 to: w.pos,
                 t0: t(w.moved_at),
                 t1: t(w.moved_at) + sec,
                 a: w.facing as f32,
                 b: (w.bag / if w.kind == Unit::Abductor { self.eco.units.abductor.bag_kg } else { self.eco.units.forester.bag_kg }.max(1.0)) as f32,
-                c: if firing { 2.0 } else if cutting { 1.0 } else { 0.0 },
+                c: if flying { 3.0 } else if firing { 2.0 } else if cutting { 1.0 } else { 0.0 },
                 mark: if firing { w.laser } else { w.claw },
                 lift: w.lift as f32,
                 sweep_from: w.laser_from,
@@ -477,6 +651,26 @@ impl Sim {
             out.push(UnitView { kind: b.kind, id: b.id, state: 9, from: b.pos, to: b.pos, t0: due, t1: due, a: 1.0, b: 1.0, c: 0.0, mark: b.pos, lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
         }
         out
+    }
+
+    /// What the ground units have done so far.
+    pub fn ground_report(&self) -> GroundReport {
+        let u = &self.units;
+        GroundReport {
+            blasts: u.blasts,
+            far_blasts: self.far.blasts,
+            blast_kills: u.blast_kills,
+            blast_hurt_haulers: u.blast_hurt_haulers,
+            stalled: self.stalled_sites().len(),
+            tunneler_depths: u.openers.iter().map(|o| self.ground_beside(o.head, 20.0) - len(o.head)).collect(),
+            caps: u.caps,
+            tunneler_blasts: u.tunneler_blasts,
+            heat_jobs: u.heat_jobs.len(),
+            passages: u.passages,
+            bots_lost: u.bots_lost,
+            bots_retired: u.bots_retired,
+            frozen_kg: u.frozen_kg,
+        }
     }
 
     /// Specialists of this kind out now.
@@ -508,16 +702,39 @@ impl Sim {
             }
         }
         let u = &self.units;
-        v.push(format!("  blasts {} ({} set off by being destroyed; {} cells cracked) · frozen {:.0} t · plants taken {:.0} t, fires {}, leaps {}", u.blasts, u.destroyed, u.cracked, u.frozen_kg / 1000.0, u.harvested_kg / 1000.0, u.fires, u.leaps));
+        v.push(format!("  blasts {} ({} set off by being destroyed; {} cells cracked; killed {} cutters, damaged {} haulers) · frozen {:.0} t · plants taken {:.0} t, fires {}, leaps {}", u.blasts, u.destroyed, u.cracked, u.blast_kills, u.blast_hurt_haulers, u.frozen_kg / 1000.0, u.harvested_kg / 1000.0, u.fires, u.leaps));
+        if self.prod.bays_of(Unit::Sapper) > 0 {
+            let st: Vec<String> = self.units.sappers.iter().map(|s| format!("{:?} {:.0}/{:.0} m", s.state, s.ground_r - len(s.pos), s.want)).collect();
+            let mut ks: Vec<f64> = self.live_sites().into_iter().map(|i| self.flock_stall(i)).filter(|k| *k > 0.0).collect();
+            ks.sort_by(|a, b| b.total_cmp(a));
+            let top: Vec<String> = ks.iter().take(4).map(|k| format!("{k:.1}x")).collect();
+            v.push(format!("  flocks struggling with hard ground: {} (slowest per kg vs soft rock: {}) · sappers: {}", self.stalled_sites().len(), top.join(" "), st.join(", ")));
+        }
+        if self.prod.bays_of(Unit::Tunneler) > 0 {
+            let st: Vec<String> = u
+                .openers
+                .iter()
+                .map(|o| {
+                    let g = self.ground_beside(o.head, 20.0);
+                    format!("{:?} {:.0} m down for {:?} ({:.0} kt dug, spoil {:.0} t)", o.state, g - len(o.head), o.aim, o.dug_kg / 1e6, o.spoil_kg / 1000.0)
+                })
+                .collect();
+            v.push(format!("  tunnelers: {} · magma capped {} · heat jobs {} ({} through) · gone off {}", st.join("; "), u.caps, u.heat_jobs.len(), u.heat_jobs.iter().filter(|j| j.through.is_some()).count(), u.tunneler_blasts));
+        }
         if self.prod.bays_of(Unit::HeatSink) > 0 {
-            v.push(format!("  open magma pools near the flocks: {}", u.molten.len()));
+            let st: Vec<String> = u.bots.iter().map(|b| if b.job.is_some() { format!("{:?} deep: frozen {:.0} m, dug {:.0} m", b.state, b.front_m, b.dug_m) } else { format!("{:?} pool", b.state) }).collect();
+            v.push(format!("  small magma pools near the flocks: {} · heat sinks: {} · passages through {} · wrecked {}, powered down {}, stale jobs given up {}", u.molten.len(), st.join("; "), u.passages, u.bots_lost, u.bots_retired, u.stale_jobs));
         }
         if self.prod.bays_of(Unit::Forester) > 0 {
             v.push(format!("  stands of plants found: {}", u.flora.len()));
         }
+        if self.prod.bays_of(Unit::Forester) > 0 || self.prod.bays_of(Unit::Abductor) > 0 {
+            let st: Vec<String> = u.walkers.iter().map(|w| format!("{} {:?}", if w.kind == Unit::Abductor { "abductor" } else { "forester" }, w.state)).collect();
+            v.push(format!("  walkers: {} · retired {} (reclaimed), wrecked {} · fires out of sight {} ({} plant cells burned as math)", st.join(", "), u.walkers_retired, u.walkers_lost, u.fires_out.len(), u.burned_out_of_sight));
+        }
         if self.skills.fauna {
             let f = &self.fauna;
-            v.push(format!("  animals: {} left · {} caught alive ({:.1} t) · {} lost otherwise", f.animals.len(), f.caught, f.caught_kg / 1000.0, f.lost));
+            v.push(format!("  animals: {} left ({} spit) · {} caught alive ({:.1} t) · {} burst by lasers ({:.1} t of biomass) · {} lost otherwise · spit killed {} cutters, hit walkers {} times", f.animals.len(), f.animals.iter().filter(|a| a.ranged).count(), f.caught, f.caught_kg / 1000.0, f.burst, f.burst_kg / 1000.0, f.lost, f.spit_kills, f.spit_hits));
         }
         v.extend(self.charge_lines());
         v
@@ -691,7 +908,7 @@ impl Sim {
             for _ in 0..r.u32()? {
                 path.push(get_cell(r)?);
             }
-            u.sappers.push(Sapper { id, state, pos: (f[0], f[1]), prev: (f[0], f[1]), moved_at: tick, goal: (f[2], f[3]), path, along: f[4], drilled: f[5], armed_s: f[6], want: f[7], ground_r: f[8], fissile: 0.0 });
+            u.sappers.push(Sapper { id, state, pos: (f[0], f[1]), prev: (f[0], f[1]), moved_at: tick, goal: (f[2], f[3]), path, along: f[4], drilled: f[5], armed_s: f[6], want: f[7], ground_r: f[8], fissile: 0.0, side: (0.0, 0.0), sideways: 0.0 });
         }
         for _ in 0..r.u32()? {
             let id = r.u32()?;
@@ -701,7 +918,7 @@ impl Sim {
             for v in f.iter_mut() {
                 *v = r.f64()?;
             }
-            u.bots.push(HeatBot { id, state, pos: (f[0], f[1]), prev: (f[0], f[1]), moved_at: tick, spot, hover: (f[2], f[3]), reach: f[4], life: f[5], idle_s: f[6], frozen_kg: f[7], tips: Vec::new() });
+            u.bots.push(HeatBot { id, state, pos: (f[0], f[1]), prev: (f[0], f[1]), moved_at: tick, spot, hover: (f[2], f[3]), reach: f[4], life: f[5], idle_s: f[6], frozen_kg: f[7], tips: Vec::new(), job: None, path: Vec::new(), along: 0, front_m: 0.0, dug_m: 0.0, bank: 0.0, clear_m: 0.0 });
         }
         for _ in 0..r.u32()? {
             let id = r.u32()?;
@@ -713,7 +930,7 @@ impl Sim {
                 *v = r.f64()?;
             }
             let pos = (f[0], f[1]);
-            u.walkers.push(Walker { id, kind, state, pos, prev: pos, moved_at: tick, goal_a: f[2], facing: f[3], life: f[4], timer: f[5], bag: f[6], taken_kg: f[7], laser: pos, laser_at: 0, claw: pos, cut_at: 0, lift: LIFT_MIN_M, load: Vec::new(), jump: None, laser_from: pos });
+            u.walkers.push(Walker { id, kind, state, pos, prev: pos, moved_at: tick, goal_a: f[2], facing: f[3], life: f[4], timer: f[5], bag: f[6], taken_kg: f[7], laser: pos, laser_at: 0, claw: pos, cut_at: 0, lift: LIFT_MIN_M, load: Vec::new(), jump: None, laser_from: pos, fly_to: pos, hp: 1.0 });
         }
         for _ in 0..r.u32()? {
             let mut f = [0.0; 8];
@@ -723,6 +940,239 @@ impl Sim {
             let active = r.u8()? != 0;
             let resume_at = r.u64()?;
             u.bores.push(Bore { x: f[0], y: f[1], hx: f[2], hy: f[3], aim: (f[4], f[5]), length: f[6], progress_s: f[7], active, resume_at, prev: (f[0], f[1]), moved_at: tick });
+        }
+        Ok(())
+    }
+
+    /// What version 16 added (the ground units' second design, 25 Nov):
+    /// sappers' sideways drilling, the sapper order clock, blast harm.
+    pub(super) fn write_units_16(&self, o: &mut crate::save::W) {
+        let u = &self.units;
+        o.u64(u.next_sapper_tick);
+        // How hard each flock's going has been lately (sappers are ordered
+        // by it).
+        o.u32(self.flock.len() as u32);
+        for f in &self.flock {
+            o.f64(f.kg);
+            o.f64(f.dig_s);
+        }
+        o.u64(u.blast_kills);
+        o.u64(u.blast_hurt_haulers);
+        for s in &u.sappers {
+            o.f64(s.side.0);
+            o.f64(s.side.1);
+            o.f64(s.sideways);
+            o.f64(s.want);
+        }
+        o.f64s(&self.far.loose_kg);
+        o.u64(self.far.blasts);
+        // Openers and heat jobs.
+        let put_pts = |o: &mut crate::save::W, v: &[(f64, f64)]| {
+            o.u32(v.len() as u32);
+            for p in v {
+                o.f64(p.0);
+                o.f64(p.1);
+            }
+        };
+        o.u64(u.caps);
+        o.u64(u.tunneler_blasts);
+        o.u32(u.openers.len() as u32);
+        for p in &u.openers {
+            o.u32(p.id);
+            o.u8(p.state as u8);
+            o.u8(p.aim as u8);
+            for v in [p.head.0, p.head.1, p.heading.0, p.heading.1, p.target.0, p.target.1, p.progress_s, p.length, p.since_hub, p.dug_kg, p.idle_s] {
+                o.f64(v);
+            }
+            o.u32(p.back_to as u32);
+            o.u32(p.caps);
+            put_pts(o, &p.path);
+            o.u32(p.spoil.len() as u32);
+            for &(m, kg) in &p.spoil {
+                o.u16(m);
+                o.f64(kg);
+            }
+        }
+        o.u32(u.opener_mouths.len() as u32);
+        for &(id, p) in &u.opener_mouths {
+            o.u32(id);
+            o.f64(p.0);
+            o.f64(p.1);
+        }
+        o.u64(u.bots_lost);
+        o.u64(u.bots_retired);
+        o.u64(u.passages);
+        for b in &u.bots {
+            o.u32(b.job.unwrap_or(u32::MAX));
+            put_pts(o, &b.path);
+            o.u32(b.along as u32);
+            o.f64(b.front_m);
+            o.f64(b.dug_m);
+            o.f64(b.bank);
+            o.f64(b.clear_m);
+        }
+        o.u64(u.walkers_retired);
+        o.u64(u.walkers_lost);
+        o.u64(u.burned_out_of_sight);
+        for w in &u.walkers {
+            o.u8(w.state as u8);
+            o.f64(w.fly_to.0);
+            o.f64(w.fly_to.1);
+            o.f64(w.hp);
+        }
+        o.u32(u.fires_out.len() as u32);
+        for f in &u.fires_out {
+            o.u64(f.burned);
+            o.u32(f.front.len() as u32);
+            for &c in &f.front {
+                put_cell(o, c);
+            }
+        }
+        let fa = &self.fauna;
+        o.u64(fa.burst);
+        o.f64(fa.burst_kg);
+        o.u64(fa.spit_kills);
+        o.u64(fa.spit_hits);
+        o.u32(fa.animals.len() as u32);
+        for an in &fa.animals {
+            o.u8(an.ranged as u8);
+        }
+        o.u32(u.heat_jobs.len() as u32);
+        for j in &u.heat_jobs {
+            o.u32(j.id);
+            for v in [j.at.0, j.at.1, j.down.0, j.down.1] {
+                o.f64(v);
+            }
+            put_pts(o, &j.shaft);
+            o.u8(j.taken as u8 | (j.used as u8) << 1 | (j.through.is_some() as u8) << 2);
+            let t = j.through.unwrap_or((0.0, 0.0));
+            o.f64(t.0);
+            o.f64(t.1);
+            o.u32(j.wrecks);
+        }
+    }
+
+    pub(super) fn read_units_16(&mut self, r: &mut crate::save::R) -> Result<(), String> {
+        self.units.next_sapper_tick = r.u64()?;
+        let nf = r.u32()? as usize;
+        for k in 0..nf {
+            let (kg, dig) = (r.f64()?, r.f64()?);
+            if let Some(f) = self.flock.get_mut(k) {
+                f.kg = kg;
+                f.dig_s = dig;
+            }
+        }
+        let u = &mut self.units;
+        u.blast_kills = r.u64()?;
+        u.blast_hurt_haulers = r.u64()?;
+        for s in u.sappers.iter_mut() {
+            s.side = (r.f64()?, r.f64()?);
+            s.sideways = r.f64()?;
+            s.want = r.f64()?;
+        }
+        let l = r.f64s()?;
+        if l.len() == self.far.cutters.len() {
+            self.far.loose_kg = l;
+        }
+        self.far.blasts = r.u64()?;
+        let get_pts = |r: &mut crate::save::R| -> Result<Vec<(f64, f64)>, String> {
+            let n = r.u32()?;
+            let mut v = Vec::with_capacity(n as usize);
+            for _ in 0..n {
+                v.push((r.f64()?, r.f64()?));
+            }
+            Ok(v)
+        };
+        let nm = self.world.planet.mats.len();
+        let tick = self.tick;
+        let u = &mut self.units;
+        u.caps = r.u64()?;
+        u.tunneler_blasts = r.u64()?;
+        for _ in 0..r.u32()? {
+            let id = r.u32()?;
+            let state = [OpenState::Fly, OpenState::Bore, OpenState::Descend, OpenState::Back, OpenState::Done, OpenState::Sink][(r.u8()? as usize).min(5)];
+            let aim = [Aim::Value, Aim::Magma, Aim::Hard][(r.u8()? as usize).min(2)];
+            let mut f = [0.0; 11];
+            for v in f.iter_mut() {
+                *v = r.f64()?;
+            }
+            let back_to = r.u32()? as usize;
+            let caps = r.u32()?;
+            let path = get_pts(r)?;
+            let mut spoil = Vec::new();
+            for _ in 0..r.u32()? {
+                let (m, kg) = (r.u16()?, r.f64()?);
+                if (m as usize) < nm {
+                    spoil.push((m, kg));
+                }
+            }
+            let spoil_kg = spoil.iter().map(|e| e.1).sum();
+            u.openers.push(Opener { id, state, head: (f[0], f[1]), heading: (f[2], f[3]), prev: (f[0], f[1]), moved_at: tick, path, target: (f[4], f[5]), aim, progress_s: f[6], length: f[7], since_hub: f[8], back_to, spoil, spoil_kg, dug_now: 0.0, caps, dug_kg: f[9], idle_s: f[10] });
+        }
+        for _ in 0..r.u32()? {
+            let id = r.u32()?;
+            u.opener_mouths.push((id, (r.f64()?, r.f64()?)));
+        }
+        u.bots_lost = r.u64()?;
+        u.bots_retired = r.u64()?;
+        u.passages = r.u64()?;
+        for b in u.bots.iter_mut() {
+            let j = r.u32()?;
+            b.job = (j != u32::MAX).then_some(j);
+            b.path = get_pts(r)?;
+            b.along = r.u32()? as usize;
+            b.front_m = r.f64()?;
+            b.dug_m = r.f64()?;
+            b.bank = r.f64()?;
+            b.clear_m = r.f64()?;
+        }
+        u.walkers_retired = r.u64()?;
+        u.walkers_lost = r.u64()?;
+        u.burned_out_of_sight = r.u64()?;
+        for w in u.walkers.iter_mut() {
+            let st = r.u8()?;
+            if st == WalkState::Fly as u8 {
+                w.state = WalkState::Fly;
+            }
+            w.fly_to = (r.f64()?, r.f64()?);
+            w.hp = r.f64()?;
+        }
+        for _ in 0..r.u32()? {
+            let burned = r.u64()?;
+            let mut f = Fire { burned, ..Default::default() };
+            for _ in 0..r.u32()? {
+                let c = get_cell(r)?;
+                f.seen.insert(c);
+                f.front.push_back(c);
+            }
+            u.fires_out.push(f);
+        }
+        {
+            let fa = &mut self.fauna;
+            fa.burst = r.u64()?;
+            fa.burst_kg = r.f64()?;
+            fa.spit_kills = r.u64()?;
+            fa.spit_hits = r.u64()?;
+            let n = r.u32()? as usize;
+            for k in 0..n {
+                let b = r.u8()? != 0;
+                if let Some(an) = fa.animals.get_mut(k) {
+                    an.ranged = b;
+                }
+            }
+        }
+        let u = &mut self.units;
+        for _ in 0..r.u32()? {
+            let id = r.u32()?;
+            let mut f = [0.0; 4];
+            for v in f.iter_mut() {
+                *v = r.f64()?;
+            }
+            let shaft = get_pts(r)?;
+            let b = r.u8()?;
+            let t = (r.f64()?, r.f64()?);
+            let wrecks = r.u32()?;
+            u.heat_jobs.push(HeatJob { id, at: (f[0], f[1]), down: (f[2], f[3]), shaft, taken: b & 1 != 0, used: b & 2 != 0, through: (b & 4 != 0).then_some(t), wrecks });
         }
         Ok(())
     }
@@ -750,6 +1200,12 @@ impl Sim {
             mix(b.x.to_bits());
             mix(b.y.to_bits());
         }
+        for o in &u.openers {
+            mix(o.head.0.to_bits());
+            mix(o.head.1.to_bits());
+            mix(o.spoil_kg.to_bits());
+        }
+        mix(u.heat_jobs.len() as u64);
     }
 }
 

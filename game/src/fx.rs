@@ -68,6 +68,8 @@ struct Bit {
     age: f32,
     life: f32,
     size: f32,
+    /// How big it may grow (m).
+    max: f32,
     c: [f32; 3],
 }
 
@@ -121,7 +123,7 @@ pub fn spark(x: f64, y: f64, n: usize, c: [f32; 3], speed: f64) {
         let v = speed * (0.3 + rand(&mut q));
         let life = 0.4 + rand(&mut q) as f32 * 0.7;
         let (ux, uy) = up_of(x, y);
-        q.new.push(Bit { kind: Kind::Spark, x, y, vx: a.cos() * v + ux * 4.0, vy: a.sin() * v + uy * 4.0, age: 0.0, life, size: 1.0, c });
+        q.new.push(Bit { kind: Kind::Spark, x, y, vx: a.cos() * v + ux * 4.0, vy: a.sin() * v + uy * 4.0, age: 0.0, life, size: 1.0, max: 5.0, c });
     }
 }
 
@@ -134,18 +136,23 @@ pub fn smoke(x: f64, y: f64, c: [f32; 3]) {
     let rise = 2.0 + rand(&mut q) * 3.0;
     let life = 2.5 + rand(&mut q) as f32 * 2.0;
     let off = rand(&mut q) - 0.5;
-    q.new.push(Bit { kind: Kind::Smoke, x: x + tx * off, y: y + ty * off, vx: tx * side + ux * rise, vy: ty * side + uy * rise, age: 0.0, life, size: 1.0, c });
+    q.new.push(Bit { kind: Kind::Smoke, x: x + tx * off, y: y + ty * off, vx: tx * side + ux * rise, vy: ty * side + uy * rise, age: 0.0, life, size: 1.0, max: 5.0, c });
 }
 
 /// Dust thrown up from (x, y): a pillar of it from a plume or a drill hole.
 pub fn dust(x: f64, y: f64, c: [f32; 3], rise: f64, spread: f64, life: f32) {
+    dust_sized(x, y, c, rise, spread, life, 1.0);
+}
+
+/// Dust in blocks starting `size` metres across (growing to five times it).
+pub fn dust_sized(x: f64, y: f64, c: [f32; 3], rise: f64, spread: f64, life: f32, size: f32) {
     let mut q = QUEUE.lock().unwrap();
     let (ux, uy) = up_of(x, y);
     let (tx, ty) = (-uy, ux);
     let side = (rand(&mut q) - 0.5) * spread;
     let up = rise * (0.6 + 0.8 * rand(&mut q));
     let life = life * (0.7 + 0.6 * rand(&mut q) as f32);
-    q.new.push(Bit { kind: Kind::Dust, x, y, vx: tx * side + ux * up, vy: ty * side + uy * up, age: 0.0, life, size: 1.0, c });
+    q.new.push(Bit { kind: Kind::Dust, x, y, vx: tx * side + ux * up, vy: ty * side + uy * up, age: 0.0, life, size, max: 5.0 * size, c });
 }
 
 /// Away from the body's centre at (x, y).
@@ -207,6 +214,9 @@ fn lin(c: [f32; 3], a: f32) -> [f32; 4] {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// A plume shorter than this on screen (pixels) isn't drawn.
+const PLUME_MIN_PX: f64 = 20.0;
+
 fn draw(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -254,19 +264,42 @@ fn draw(
             plumes.push((x, y, pw, dur + 0.6));
         }
     }
+    // (Benjamin, 25 Nov: a plume is as big as its blast, so a big one shows
+    // from far out; one that would be only a few pixels isn't drawn. Its
+    // column is about 126 m times the square root of its power high; zoomed
+    // out its dust comes in bigger blocks, a couple of pixels each.)
+    // ---- Gore: an animal burst by an abductor's laser (Benjamin, 25 Nov:
+    // for fun). A red burst, chunks thrown, a red mist settling. ----
+    if let Some(run) = &run {
+        for (x, y, kg) in std::mem::take(&mut run.0.out.lock().gore) {
+            let n = (4.0 + kg / 25.0).min(24.0) as usize;
+            spark(x, y + 1.0, n, [200.0, 30.0, 40.0], 18.0);
+            spark(x, y + 1.0, n / 3 + 1, [150.0, 40.0, 48.0], 10.0);
+            for _ in 0..(n / 2 + 2) {
+                dust(x, y + 1.0, [140.0, 20.0, 28.0], 3.0, 6.0, 2.5);
+            }
+            emit(x, y + 1.0, 8.0, [255.0, 80.0, 60.0], 1.2);
+        }
+    }
+    let mpp = view.mpp.max(1e-6);
     plumes.retain_mut(|p| {
         p.3 -= dt;
         if p.3 <= 0.0 {
             return false;
         }
+        let tall_px = 126.0 * (p.2 as f64).max(0.0).sqrt() / mpp;
+        if tall_px < PLUME_MIN_PX {
+            return true;
+        }
+        let block = (2.0 * mpp).max(1.0).min(126.0 * (p.2 as f64).sqrt() / 20.0) as f32;
         let mut q = QUEUE.lock().unwrap();
         if rand(&mut q) < 0.9 {
             drop(q);
-            dust(p.0, p.1 + 2.0, [110.0, 100.0, 88.0], (14.0 + 14.0) * 0.75 * (p.2 as f64).sqrt(), 6.0, 6.0);
+            dust_sized(p.0, p.1 + 2.0, [110.0, 100.0, 88.0], (14.0 + 14.0) * 0.75 * (p.2 as f64).sqrt(), 6.0 * block as f64, 6.0, block);
         } else {
             drop(q);
         }
-        emit(p.0, p.1, 6.0, [255.0, 170.0, 80.0], 0.8);
+        emit(p.0, p.1, 6.0 * block as f64, [255.0, 170.0, 80.0], 0.8);
         true
     });
     let new = {
@@ -300,7 +333,7 @@ fn draw(
                 // Rising slows; it spreads as it goes.
                 p.vx *= 1.0 - 0.35 * d;
                 p.vy *= 1.0 - 0.35 * d;
-                p.size = (p.size + dt * 1.2).min(5.0);
+                p.size = (p.size + dt * 1.2 * (p.max / 5.0)).min(p.max);
             }
         }
         p.x += p.vx * d;

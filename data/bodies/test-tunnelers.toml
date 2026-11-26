@@ -1,0 +1,93 @@
+# Tunneler and heat-sink testbed: a small world with ore stocks in its
+# granite crust and a magma layer about 300 m down, round the core. Not a
+# world for players: run-test-tunnelers.bat (or unitlab) uses it.
+#
+# What it shows: tunnelers (the openers) heading for the best ground through
+# the fog, shafts curving within 20 degrees of straight down, breaking into
+# the magma layer and capping it; heat-sink bots coming down the shaft to
+# freeze a passage through it; tunnelers going on down from the passage's
+# bottom; and a tunneler with nothing left to open going off where it is.
+name = "Tunneler testbed"
+archetype = "barren-world"
+seed = 82001
+radius_m = 3000
+heart = false
+regolith_depth_m = 2
+regolith_material = "soil"
+regolith_max_slope = 0.6
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+oxygen = 0.0
+space_k = 250
+polar_cooling_k = 0
+polar_depth_m = 0
+
+[sun]
+day_k = 280
+day_s = 600
+start_deg = 0
+
+[shape]
+roughness = 0.004
+wavelength_m = 1200
+
+[[layer]]
+name = "core"
+outer = 0.55
+material = "iron-nickel"
+temperature_k = 1100
+boundary_noise = 0.01
+
+[[layer]]
+name = "lower mantle"
+outer = 0.8
+material = "peridotite"
+temperature_k = 1000
+boundary_noise = 0.01
+
+# The magma layer round the core: a band about 90 m thick, its top about
+# 300 m under the ground.
+[[layer]]
+name = "magma"
+outer = 0.83
+material = "magma"
+temperature_k = 1500
+boundary_noise = 0.004
+
+[[layer]]
+name = "crust"
+outer = 1.0
+material = "granite"
+temperature_k = 260
+
+[strata]
+depth_m = 30
+fold_amplitude_m = 6
+fold_wavelength_m = 600
+pinch = 0.5
+pinch_wavelength_m = 300
+
+[[strata.band]]
+material = "sandstone"
+thickness_m = [3, 8]
+weight = 2
+
+[[strata.band]]
+material = "shale"
+thickness_m = [2, 6]
+weight = 2
+
+# Ore-ringed stocks in the crust: what the tunnelers' value sense finds.
+[[intrusion]]
+material = "granite"
+kind = "felsic"
+count = 25
+radius_m = [30, 70]
+top_depth_m = [60, 220]
+dikes = [1, 2]
+dike_material = "andesite"
+veins = [8, 16]
+vein_width_m = [1, 3]
+halo_m = 100
+aureole_m = 8
+skarn_m = 4

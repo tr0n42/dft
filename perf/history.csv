@@ -1,2 +1,7 @@
 date,machine,commit,stage,body,km,drones,game_s,real_s,fingerprint,note,cutters,haulers,sappers,tunnelers,heat-sink bots,foresters,abductors,sand and heat,rock bodies,life,platform other,animals
 2026-11-13 16:56,BKONEN-R16-W11,d9521e9+changes,1,living-world,35,500000,1200,189.1,eedd04ec8d2e5e28,units split into files,89.78,2.25,0.04,0.00,0.00,0.00,0.00,34.73,7.58,0.88,22.31
+2026-11-26 03:11,DESKTOP-59HSAU6,f596b09,1,living-world,35,500000,1200,264.2,80e903062c12726d,baseline before ground-units run,93.92,3.39,0.04,0.00,0.00,0.00,0.00,94.37,11.00,0.76,16.68,0.00
+2026-11-26 03:16,DESKTOP-59HSAU6,f596b09,2,living-world,35,500000,1200,299.7,42ad364cdacb5d21,baseline before ground-units run,104.23,3.46,1.38,0.00,0.00,0.00,0.00,110.65,11.99,0.68,17.31,0.00
+2026-11-26 03:24,DESKTOP-59HSAU6,f596b09,3,living-world,35,500000,1200,457.0,3ba0308381da018a,baseline before ground-units run,157.61,4.11,1.77,0.30,0.00,0.00,0.00,179.37,14.41,0.75,22.43,0.00
+2026-11-26 03:29,DESKTOP-59HSAU6,f596b09,4,living-world,35,500000,1200,302.1,6c0b8bbaf5391baa,baseline before ground-units run,107.10,3.67,1.23,0.28,2.61,0.00,0.00,105.85,12.92,0.53,17.56,0.00
+2026-11-26 03:34,DESKTOP-59HSAU6,f596b09,5,living-world,35,500000,1200,283.4,bab0887cac708fb4,baseline before ground-units run,100.21,3.43,1.53,0.21,2.62,1.09,0.00,98.50,11.47,0.62,16.44,0.00

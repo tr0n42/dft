@@ -28,6 +28,13 @@ pub(super) const FALL_KILLS_M: f64 = 30.0;
 /// How often a new herd wanders in while the body has fewer animals than
 /// at the start (s).
 pub(super) const ARRIVE_EVERY_S: f64 = 20.0;
+/// Calm animals out of sight are stepped every this many seconds.
+pub(super) const OFF_STEP: u64 = 10;
+/// Animals with a ranged attack spit at machines this close (m), every this
+/// many seconds, doing this much harm to a walker.
+pub(super) const SPIT_M: f64 = 60.0;
+pub(super) const SPIT_EVERY_S: u64 = 6;
+pub(super) const SPIT_HARM: f64 = 5.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimalState {
@@ -47,6 +54,8 @@ pub struct Animal {
     pub(super) facing: f64,
     pub(super) state: AnimalState,
     pub(super) panic_s: f64,
+    /// It has a ranged attack (its herd spits at machines near it).
+    pub(super) ranged: bool,
 }
 
 /// Every animal on the body, and what has become of the rest.
@@ -65,6 +74,12 @@ pub struct Fauna {
     pub caught: u64,
     pub caught_kg: f64,
     pub lost: u64,
+    /// Burst by abductors' lasers (and their kg); machines hit by spit:
+    /// cutters killed, walkers hit.
+    pub burst: u64,
+    pub burst_kg: f64,
+    pub spit_kills: u64,
+    pub spit_hits: u64,
 }
 
 /// An animal as the screen needs it: it moves from `from` to `to` between
@@ -79,6 +94,8 @@ pub struct AnimalView {
     pub kg: f32,
     pub facing: f32,
     pub fleeing: bool,
+    /// It spits at machines (a ranged attack).
+    pub ranged: bool,
 }
 
 impl AnimalView {
@@ -144,7 +161,8 @@ impl Sim {
             self.fauna.next_id += 1;
             let pos = (a.cos() * g, a.sin() * g);
             let facing = if u(hash(seed, h, j, 0xFA4)) < 0.5 { -1.0 } else { 1.0 };
-            self.fauna.animals.push(Animal { id: self.fauna.next_id, herd: h as u32, pos, prev: pos, moved_at: self.tick, kg, facing, state: AnimalState::Graze, panic_s: 0.0 });
+            let ranged = u(hash(seed, h, 0, 0xFA6)) < f.ranged_share;
+            self.fauna.animals.push(Animal { id: self.fauna.next_id, herd: h as u32, pos, prev: pos, moved_at: self.tick, kg, facing, state: AnimalState::Graze, panic_s: 0.0, ranged });
         }
     }
 
@@ -170,6 +188,7 @@ impl Sim {
         threats.extend(u.sappers.iter().map(|s| s.pos));
         threats.extend(u.bots.iter().map(|b| b.pos));
         threats.extend(u.bores.iter().map(|b| (b.x, b.y)));
+        threats.extend(u.openers.iter().map(|o| o.head));
         for i in self.live_sites() {
             threats.push(self.site_pos(i));
         }
@@ -194,7 +213,18 @@ impl Sim {
         }
         let tick = self.tick;
         let mut dead = Vec::new();
+        // Out of sight and far from any machine, a calm animal is stepped
+        // only every OFF_STEP seconds, that many seconds at once (Benjamin:
+        // animals may be approximated off screen).
+        let sec = tick / self.ticks(1.0).max(1);
+        let walkers: Vec<(f64, f64)> = self.units.walkers.iter().map(|w| w.pos).collect();
         for k in 0..self.fauna.animals.len() {
+            let calm = self.fauna.animals[k].state == AnimalState::Graze && !scared.iter().any(|s| s.0 == self.fauna.animals[k].herd);
+            let away = calm && !self.sandbox.sees(cell_of(self.fauna.animals[k].pos)) && !walkers.iter().any(|w| dist2(*w, self.fauna.animals[k].pos) < 400.0 * 400.0);
+            if away && (sec + self.fauna.animals[k].id as u64) % OFF_STEP != 0 {
+                continue;
+            }
+            let steps = if away { OFF_STEP as f64 } else { 1.0 };
             let mut an = self.fauna.animals[k].clone();
             an.prev = an.pos;
             an.moved_at = tick;
@@ -226,7 +256,7 @@ impl Sim {
                 dead.push(k);
                 continue;
             }
-            let speed = if an.state == AnimalState::Flee { FLEE_SPEED } else { GRAZE_SPEED };
+            let speed = if an.state == AnimalState::Flee { FLEE_SPEED } else { GRAZE_SPEED } * steps;
             let na = a + an.facing * speed / g.max(1.0);
             // Not into water or lava, nor up or down a cliff: turn about.
             match self.dry_ground(na) {
@@ -241,6 +271,42 @@ impl Sim {
         for k in dead.into_iter().rev() {
             self.fauna.animals.remove(k);
             self.fauna.lost += 1;
+        }
+        self.fauna_spit();
+    }
+
+    /// Animals with a ranged attack spit at the machines near them, every
+    /// SPIT_EVERY_S: a walker is hit (an abductor's health pool shrugs most
+    /// of it off), else a working flock loses a cutter.
+    fn fauna_spit(&mut self) {
+        let sec = self.tick / self.ticks(1.0).max(1);
+        if sec % SPIT_EVERY_S != 0 {
+            return;
+        }
+        let spitters: Vec<(f64, f64)> = self.fauna.animals.iter().filter(|an| an.ranged).map(|an| an.pos).collect();
+        if spitters.is_empty() {
+            return;
+        }
+        let sites: Vec<(usize, (f64, f64))> = self.live_sites().into_iter().map(|i| (i, self.site_pos(i))).collect();
+        for p in spitters {
+            if let Some(w) = self.units.walkers.iter_mut().find(|w| w.state != WalkState::Fly && dist2(w.pos, p) < SPIT_M * SPIT_M) {
+                w.hp -= SPIT_HARM;
+                self.fauna.spit_hits += 1;
+                continue;
+            }
+            if let Some(&(h, _)) = sites.iter().find(|(_, s)| dist2(*s, p) < SPIT_M * SPIT_M) {
+                // One of that flock's cutters (a few looked at, by hash).
+                let n = self.drones.len().max(1);
+                for k in 0..64u64 {
+                    let id = (hash(self.tick, h as i64, k as i64, 0x5917) % n as u64) as usize;
+                    if self.drones[id].alive && self.drones[id].home == h {
+                        let at = self.site_pos(h);
+                        self.wreck_drone(id as u32, at, (0.0, 0.0));
+                        self.fauna.spit_kills += 1;
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -277,7 +343,7 @@ impl Sim {
         self.fauna
             .animals
             .iter()
-            .map(|an| AnimalView { id: an.id, from: an.prev, to: an.pos, t0: t(an.moved_at), t1: t(an.moved_at) + sec, kg: an.kg as f32, facing: an.facing as f32, fleeing: an.state == AnimalState::Flee })
+            .map(|an| AnimalView { id: an.id, from: an.prev, to: an.pos, t0: t(an.moved_at), t1: t(an.moved_at) + sec, kg: an.kg as f32, facing: an.facing as f32, fleeing: an.state == AnimalState::Flee, ranged: an.ranged })
             .collect()
     }
 
@@ -320,7 +386,7 @@ impl Sim {
                 *x = r.f64()?;
             }
             let pos = (v[0], v[1]);
-            f.animals.push(Animal { id, herd, pos, prev: pos, moved_at: tick, kg: v[2], facing: v[3], state, panic_s: v[4] });
+            f.animals.push(Animal { id, herd, pos, prev: pos, moved_at: tick, kg: v[2], facing: v[3], state, panic_s: v[4], ranged: false });
         }
         Ok(())
     }

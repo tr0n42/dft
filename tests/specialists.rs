@@ -57,7 +57,11 @@ fn run(s: &mut Sim, until: f64) {
 
 #[test]
 fn sappers_and_tunnelers_work_anywhere() {
-    let mut s = Sim::new(World::new(dft_sim::load_body(&data(), "tutorial-1-2km").unwrap()), eco());
+    // (Sappers as a kept count here: made to order, they wait for cutters
+    // struggling with hard rock; see tests/ground_units.rs.)
+    let mut e = eco();
+    e.units.sapper.stall_ratio = 0.0;
+    let mut s = Sim::new(World::new(dft_sim::load_body(&data(), "tutorial-1-2km").unwrap()), e);
     // A lifeless rubble asteroid: no magma, no plants, so only those two.
     assert!(s.prod.bays_of(Unit::Sapper) > 0 && s.prod.bays_of(Unit::Tunneler) > 0);
     assert_eq!(s.prod.bays_of(Unit::HeatSink), 0);
@@ -112,7 +116,14 @@ fn specialists_survive_a_save() {
 /// leaves some unreacted uranium in its rubble for the cutters.
 #[test]
 fn the_fuser_keeps_sappers_coming() {
-    let mut s = Sim::new(World::new(body("lava-world", 3.0)), eco());
+    // (Sappers as a kept count: this is about their charges, not when they
+    // are ordered.)
+    let mut e = eco();
+    e.units.sapper.stall_ratio = 0.0;
+    // (Sappers only: tunnelers and heat sinks opening the lava world's magma
+    // ocean set its liquid moving, which a test sees all of.)
+    e.units.bay.retain(|b| matches!(b.unit, Unit::Cutter | Unit::Hauler | Unit::Sapper));
+    let mut s = Sim::new(World::new(body("lava-world", 3.0)), e);
     assert!(s.prod.bays_of(Unit::Sapper) > 0);
     watch(&mut s, 2400);
     let made: f64 = s.fuser.made.iter().sum();
@@ -134,6 +145,11 @@ fn the_fuser_keeps_sappers_coming() {
 #[test]
 fn conventional_charges_without_uranium() {
     let mut e = eco();
+    e.units.sapper.stall_ratio = 0.0;
+    e.units.bay.retain(|b| matches!(b.unit, Unit::Cutter | Unit::Hauler | Unit::Sapper));
+    // (Cast as soon as the stockpile holds one: with only cutters mining it
+    // takes too long to hold two.)
+    e.units.sapper.charge_keep_back = 0.0;
     e.fuser.fuse.clear();
     e.production.start_refined.remove("U");
     // (Where the swarm landed when this was written: over the top of the map.)

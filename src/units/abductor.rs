@@ -24,10 +24,71 @@ impl Sim {
     pub(super) fn abductor_goal(&self, from: f64, me: u32) -> Option<f64> {
         let r = self.world.planet.radius;
         let busy = |a: f64| self.units.walkers.iter().any(|w| w.kind == Unit::Abductor && w.id != me && ang_dist(w.goal_a, a) * r < 150.0);
+        // Launched (me = 0): where the fauna is thickest, anywhere (it flies
+        // there); on the ground: the nearest animal no other abductor is after.
+        if me == 0 {
+            let angs: Vec<f64> = self.fauna.animals.iter().map(|an| an.pos.1.atan2(an.pos.0)).collect();
+            let mut best: Option<(f64, usize)> = None;
+            for &a in &angs {
+                if busy(a) {
+                    continue;
+                }
+                let n = angs.iter().filter(|&&b| ang_dist(a, b) * r < 200.0).count();
+                if best.is_none_or(|b| n > b.1) {
+                    best = Some((a, n));
+                }
+            }
+            if let Some(b) = best {
+                return Some(b.0);
+            }
+        }
         let near = |free: bool| {
             self.fauna.animals.iter().map(|an| an.pos.1.atan2(an.pos.0)).filter(|&a| !free || !busy(a)).min_by(|x, y| ang_dist(*x, from).total_cmp(&ang_dist(*y, from)))
         };
         near(true).or_else(|| near(false))
+    }
+
+    /// Its laser (Benjamin, 25 Nov: it never starts fires; it bursts fauna
+    /// into gore and biomass): an animal that spits at machines, or one
+    /// running from it out of its palps' reach, within `laser_m`. The
+    /// burst's biomass is credited as the cutters scoop it up; the gore is
+    /// drawn by the game. Returns whether it fired.
+    pub(super) fn abductor_laser(&mut self, w: &mut Walker, runners: bool) -> bool {
+        let spec = self.eco.units.abductor.clone();
+        // (Its laser recharges between shots.)
+        let gap = if runners { spec.laser_every_s * 1.5 } else { spec.laser_every_s };
+        if w.laser_at > 0 && self.tick.saturating_sub(w.laser_at) < self.ticks(gap) {
+            return false;
+        }
+        let a = w.pos.1.atan2(w.pos.0);
+        let r = len(w.pos).max(1.0);
+        let along = |an: &Animal| ang_dist(an.pos.1.atan2(an.pos.0), a) * r;
+        let pick = self
+            .fauna
+            .animals
+            .iter()
+            .enumerate()
+            .filter(|(_, an)| (an.ranged || (runners && an.state == AnimalState::Flee && along(an) > spec.reach_m)) && along(an) <= spec.laser_m)
+            .min_by(|x, y| (!x.1.ranged, along(x.1)).partial_cmp(&(!y.1.ranged, along(y.1))).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i);
+        let Some(i) = pick else { return false };
+        let an = self.fauna.animals.remove(i);
+        self.fauna.alarms.push((an.herd, an.pos));
+        self.fauna.burst += 1;
+        self.fauna.burst_kg += an.kg;
+        w.laser_from = (w.pos.0 + unit_of(w.pos).0 * w.lift, w.pos.1 + unit_of(w.pos).1 * w.lift);
+        w.laser = an.pos;
+        w.laser_at = self.tick;
+        // Biomass, scooped up by the cutters.
+        let comp: std::collections::BTreeMap<String, f64> = FLESH.iter().map(|(e, k)| (e.to_string(), *k)).collect();
+        self.stock.add_composition(&self.world.planet.mats.elements, &comp, an.kg);
+        self.mass += an.kg;
+        self.delivered_credited += an.kg;
+        self.window_mined += an.kg;
+        if self.gore.len() < 64 {
+            self.gore.push((an.pos.0, an.pos.1, an.kg as f32));
+        }
+        true
     }
 
     /// A second of an abductor's hunt where it stands: snatch the nearest
@@ -36,8 +97,16 @@ impl Sim {
         let spec = self.eco.units.abductor.clone();
         let a = w.pos.1.atan2(w.pos.0);
         let r = len(w.pos).max(1.0);
+        // Spitters first: its laser. Then whatever its palps can reach,
+        // snatched alive; runners out of reach get the laser now and then.
+        if self.abductor_laser(w, false) {
+            return;
+        }
+        if self.nearest_animal(w.pos).is_none_or(|(_, d)| d > spec.reach_m) && self.abductor_laser(w, true) {
+            return;
+        }
         match self.nearest_animal(w.pos) {
-            None => w.life = w.life.min(30.0),
+            None => self.walker_go_or_retire(w, None),
             Some((i, d)) if d <= spec.reach_m => {
                 // Into a stasis sac, alive.
                 let p = self.fauna.animals[i].pos;
@@ -51,10 +120,11 @@ impl Sim {
                 }
             }
             Some((i, d)) if d > spec.chase_m => {
-                // Too far to run down: stride (and leap) toward it.
+                // Too far to run down: stride (and leap) toward it, unless a
+                // new abductor would get there sooner.
                 let p = self.fauna.animals[i].pos;
-                w.goal_a = self.abductor_goal(a, w.id).unwrap_or(p.1.atan2(p.0));
-                w.state = WalkState::Stride;
+                let next = self.abductor_goal(a, w.id).unwrap_or(p.1.atan2(p.0));
+                self.walker_go_or_retire(w, Some(next));
             }
             Some((i, d)) => {
                 let p = self.fauna.animals[i].pos;
@@ -77,7 +147,8 @@ impl Sim {
     }
 
     /// A sac of live animals reaches the mother swarm: credit it, worth
-    /// `live_multiplier` times its mass.
+    /// `live_multiplier` times its mass (1 since 25 Nov: a live catch is
+    /// worth its mass).
     pub(super) fn credit_live(&mut self, kg: f64) {
         let comp: std::collections::BTreeMap<String, f64> = FLESH.iter().map(|(e, k)| (e.to_string(), *k)).collect();
         self.stock.add_composition(&self.world.planet.mats.elements, &comp, kg);

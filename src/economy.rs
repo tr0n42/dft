@@ -509,8 +509,29 @@ pub struct SapperSpec {
     /// with the cube root of the yield).
     pub yield_kt: f64,
     pub radius_m_per_cbrt_kt: f64,
-    /// It wants to go off this far under the ground beyond its blast radius.
+    /// It wants to go off this far under the ground beyond its blast radius
+    /// (only when `depth_m_per_cbrt_kt` is 0, the old rule).
     pub bury_m: f64,
+    /// Benjamin, 25 Nov: depth comes from the yield. It goes off this far
+    /// under the ground for 1 kt (m; it grows with the cube root of the
+    /// yield): deep enough that the blast loosens the whole column of
+    /// ground over it into rubble the cutters just scoop up.
+    pub depth_m_per_cbrt_kt: f64,
+    /// The loosened column: as wide as the blast at the charge (its radius
+    /// each side), widening to this many radii each side at the surface.
+    pub loosen_top: f64,
+    /// Ordered only where the cutters struggle: a flock cutting at least
+    /// this many times slower per kg than in hardness-3 rock. (0: the old
+    /// fixed `keep` count.) At most `keep` out at once, and a new one at
+    /// most every `order_gap_s` (fewer, bigger booms).
+    pub stall_ratio: f64,
+    pub order_gap_s: f64,
+    /// A blast's harm: cutters in the loosened column (and this many metres
+    /// round it) are killed; haulers within `hauler_harm_r` radii of where
+    /// it breaks the surface are damaged, the nearer the worse (killed
+    /// within the first third).
+    pub kill_margin_m: f64,
+    pub hauler_harm_r: f64,
     /// Farthest it crawls through cracks and caves (m of path), and drills
     /// down where there is no way deep enough (m).
     pub crawl_m: f64,
@@ -578,6 +599,47 @@ pub struct TunnelerUnitSpec {
     pub spoil_recovery: f64,
     pub max_length_m: f64,
     pub hub_every_m: f64,
+    /// The opener (Benjamin, 25 Nov). Its shaft leans at most this far off
+    /// straight down (an upgrade widens it), turning at most this many
+    /// degrees a metre (a gradient: tunnels curve).
+    pub max_lean_deg: f64,
+    pub turn_deg_per_m: f64,
+    /// Flying down to its shaft (m/s); backing up and down shafts at half.
+    pub fly_speed: f64,
+    /// What it weighs: value to the space-bound swarm (a material's worth
+    /// past plain rock) and to the swarm now (elements its recipes need that
+    /// the stockpile is short of), per cell; a target's score is its worth
+    /// over (1 + depth / depth_scale_m). Targets under min_score aren't
+    /// worth opening. A magma layer to break, and hard rock under
+    /// struggling flocks, score as this much worth.
+    pub space_weight: f64,
+    pub need_weight: f64,
+    pub depth_scale_m: f64,
+    pub min_score: f64,
+    pub magma_score: f64,
+    pub hard_score: f64,
+    /// Where it looks: past the mother swarm's reach by ahead_m, columns
+    /// every scan_step_m, down to max_depth_m (and never under min_radius of
+    /// the body's radius); from its head, reach_m on down.
+    pub ahead_m: f64,
+    pub scan_step_m: f64,
+    pub max_depth_m: f64,
+    pub min_radius: f64,
+    pub reach_m: f64,
+    /// Its crew: cutters built with it, clearing kg a second each; it waits
+    /// while more than crew_backlog_t tonnes of spoil is waiting.
+    pub crew: u32,
+    pub crew_kg_per_s: f64,
+    pub crew_backlog_t: f64,
+    /// Capping magma: frozen this far past its drill; then it backs up
+    /// this far before seeking another deposit.
+    pub cap_m: f64,
+    pub back_m: f64,
+    /// Its nuclear drill heats the rock round its head to this (K).
+    pub drill_heat_k: f64,
+    /// Its end: its drill's charge (kt) and the uranium in it (kg).
+    pub yield_kt: f64,
+    pub fissile_kg: f64,
 }
 
 /// A heat-sink bot: hovers over magma, growing cooling tentacles down
@@ -594,8 +656,17 @@ pub struct HeatSinkSpec {
     /// Its tentacles' reach (m): growing this fast, up to this far.
     pub grow_m_per_s: f64,
     pub reach_m: f64,
-    /// Cells it freezes a second.
+    /// Cells it freezes a second (at their freezing point: hotter ones take
+    /// longer).
     pub freeze_per_s: u32,
+    /// Deep jobs (Benjamin, 25 Nov): the passage's frozen walls (m each side
+    /// of a tunneler's width), and the longest passage it freezes.
+    pub wall_m: f64,
+    pub passage_max_m: f64,
+    /// Its crew: cutters built with it, digging out the passage's middle,
+    /// kg a second each.
+    pub crew: u32,
+    pub crew_kg_per_s: f64,
     /// Power it beams up per tonne frozen (E).
     pub power_per_tonne: f64,
     /// Only liquids that freeze at or above this are worth it (magma, molten
@@ -628,6 +699,12 @@ pub struct ForesterSpec {
     /// the mother swarm at this speed (m/s).
     pub pickup_s: f64,
     pub courier_speed: f64,
+    /// Benjamin, 25 Nov: harvester bodies fly (folded, a bit like a UFO)
+    /// past the swarm's edge, at this speed (m/s) and this height over the
+    /// ground (m), then drop. Its health.
+    pub fly_speed: f64,
+    pub fly_alt_m: f64,
+    pub hp: f64,
 }
 
 /// An abductor: a spider on three legs that snatches live animals (only
@@ -647,6 +724,12 @@ pub struct AbductorSpec {
     pub bag_kg: f64,
     /// Live animals are worth this many times their mass.
     pub live_multiplier: f64,
+    /// Its laser's reach (m), for animals that spit or run; its health (a
+    /// huge pool: nearly invulnerable).
+    pub laser_m: f64,
+    pub hp: f64,
+    /// Seconds its laser takes to recharge (half as long again for runners).
+    pub laser_every_s: f64,
 }
 
 impl Economy {

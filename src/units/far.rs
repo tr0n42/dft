@@ -69,6 +69,12 @@ const OPEN_PER_S: usize = 2;
 pub struct Far {
     /// Cutters working each far sector.
     pub cutters: Vec<u64>,
+    /// Ground a far sapper loosened in each sector and not yet eaten (kg):
+    /// its cutters take it at the pace of loose rubble (Benjamin, 25 Nov:
+    /// off screen, a sapper is pure math).
+    pub loose_kg: Vec<f64>,
+    /// Sappers gone off in far sectors.
+    pub blasts: u64,
     /// Wear: cutters due to retire, as a fraction, per sector.
     wear: Vec<f64>,
     /// Sectors the swarm has reached (cutters or flocks there, or once had).
@@ -159,6 +165,7 @@ impl Sim {
         }
         let n = self.world.far.levels.len();
         self.far.cutters = vec![0; n];
+        self.far.loose_kg = vec![0.0; n];
         self.far.wear = vec![0.0; n];
         self.far.open = vec![false; n];
         self.far.wet = vec![false; n];
@@ -400,13 +407,16 @@ impl Sim {
             self.far_wear(k, dt);
         }
         if !self.brownout() {
-            let plans: Vec<(usize, f64, f64, Vec<(MatId, f64)>)> = {
+            let plans: Vec<(usize, f64, f64, Vec<(MatId, f64)>, f64)> = {
                 use rayon::prelude::*;
                 let me: &Sim = self;
                 due.par_iter().filter(|&&k| me.far.cutters[k] > 0).filter_map(|&k| me.far_plan(k, dt)).collect()
             };
-            for (k, from, to, eaten) in plans {
+            for (k, from, to, eaten, loose) in plans {
                 self.far_apply(k, from, to, &eaten);
+                if let Some(l) = self.far.loose_kg.get_mut(k) {
+                    *l = (*l - loose).max(0.0);
+                }
             }
         }
         self.far.total = self.far.cutters.iter().sum();
@@ -649,7 +659,7 @@ impl Sim {
     /// bites due are worked out side by side): what its cutters would cut in
     /// `dt` seconds, taken off the top of its ground. (Its level from and
     /// to, and kg per material.) None: nothing to cut.
-    fn far_plan(&self, k: usize, dt: f64) -> Option<(usize, f64, f64, Vec<(MatId, f64)>)> {
+    fn far_plan(&self, k: usize, dt: f64) -> Option<(usize, f64, f64, Vec<(MatId, f64)>, f64)> {
         // (No more work at once than its surface has room for: the rest
         // wait for room, see `far_spread`.)
         let cutters = (self.far.cutters[k] as f64).min(self.far_cover(k) as f64);
@@ -683,6 +693,7 @@ impl Sim {
         }
         let mats = &self.world.planet.mats;
         let mut budget = 0.0;
+        let mut loose_used = 0.0;
         let mut eaten: Vec<(MatId, f64)> = Vec::new();
         let width = (a1 - a0) * lvl.max(1.0);
         let mut most = 1.0f64;
@@ -714,6 +725,16 @@ impl Sim {
                     None => 60.0,
                 };
                 budget = cutters * hold * PACE * dt / trip.max(1.0);
+                // Ground a far sapper loosened goes first, at the pace of
+                // loose rubble; the time left over cuts as before.
+                let loose = self.far.loose_kg.get(k).copied().unwrap_or(0.0);
+                if loose > 0.0 {
+                    let dens = found.first().map(|f| mats.get(f.0).density).unwrap_or(2500.0).max(1.0);
+                    let loose_trip = self.eco.harvester.loose_s * hold / dens + 8.0;
+                    let can = cutters * hold * PACE * dt / loose_trip.max(1.0);
+                    loose_used = loose.min(can);
+                    budget = loose_used + budget * (1.0 - loose_used / can.max(1e-9));
+                }
                 // (In steps of a metre, or bigger for a big bite.)
                 most = (budget / per_m.max(1.0) / (LOOKS as f64 - 2.0)).max(1.0);
                 if budget <= 0.0 {
@@ -753,7 +774,7 @@ impl Sim {
                 break;
             }
         }
-        (lvl < from).then_some((k, from, lvl, eaten))
+        (lvl < from).then_some((k, from, lvl, eaten, loose_used))
     }
 
     /// A bite worked out by `far_plan`, taken: the sector's level comes
@@ -1126,6 +1147,85 @@ impl Sim {
         !self.far.is_far[self.far_sector_at(p)]
     }
 
+    /// Far sectors where the cutters struggle: the ground at the top of the
+    /// sector (its sampled columns' commonest hardness) cuts `stall_ratio`
+    /// times slower than hardness-3 rock, and no far blast's loosened ground
+    /// is left there. Worst first: (sector, how much slower).
+    pub(super) fn far_stalled(&self) -> Vec<(usize, f64)> {
+        let sp = &self.eco.units.sapper;
+        if sp.stall_ratio <= 0.0 || self.far.cutters.is_empty() {
+            return Vec::new();
+        }
+        let soft = self.eco.harvester.dig_s_for(3.0);
+        let mut out = Vec::new();
+        for k in 0..self.far_n() {
+            if !self.far.is_far[k] || self.far.cutters[k] == 0 || self.far.wet[k] || self.far.loose_kg[k] > 0.0 {
+                continue;
+            }
+            let lvl = self.world.far.levels[k] as f64;
+            if !lvl.is_finite() {
+                continue;
+            }
+            let (a0, a1) = self.far_span(k);
+            let mut hs: Vec<u8> = Vec::new();
+            for j in 0..SAMPLES {
+                let a = a0 + (a1 - a0) * (j as f64 + 0.5) / SAMPLES as f64;
+                let r = lvl - 0.5;
+                let m = self.world.material_bare((a.cos() * r).floor() as i64, (a.sin() * r).floor() as i64);
+                if m != VACUUM && self.world.planet.mats.get(m).state == State::Solid {
+                    hs.push(self.world.planet.mats.get(m).hardness);
+                }
+            }
+            if hs.len() < SAMPLES / 2 {
+                continue;
+            }
+            hs.sort_unstable();
+            let ratio = self.eco.harvester.dig_s_for(hs[hs.len() / 2]) / soft;
+            if ratio >= sp.stall_ratio {
+                out.push((k, ratio));
+            }
+        }
+        out.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        out
+    }
+
+    /// A sapper sent to far sector k: pure math (Benjamin, 25 Nov). Its
+    /// loosened column (as deep as its yield wants, blast-wide at the bottom
+    /// and loosen_top radii each side at the top) is booked as loose ground
+    /// the sector's cutters eat first, fast; and the share of the sector's
+    /// cutters working where the column breaks the surface die.
+    pub(super) fn far_sapper_blast(&mut self, k: usize) {
+        let sp = self.eco.units.sapper.clone();
+        let r = self.sapper_radius();
+        let depth = self.sapper_depth();
+        let lt = sp.loosen_top.max(1.0);
+        let (a0, a1) = self.far_span(k);
+        let lvl = self.world.far.levels[k] as f64;
+        let a = 0.5 * (a0 + a1);
+        let r_at = if lvl.is_finite() { lvl - 0.5 } else { self.world.planet.radius };
+        let m = self.world.material_bare((a.cos() * r_at).floor() as i64, (a.sin() * r_at).floor() as i64);
+        let dens = if m != VACUUM { self.world.planet.mats.get(m).density } else { 2700.0 };
+        // Its area: a trapezium, 2r wide at the charge and 2r*lt at the top.
+        let cells = depth * r * (1.0 + lt);
+        self.far.loose_kg[k] += cells * dens;
+        let width = (a1 - a0) * r_at.max(1.0);
+        let share = ((2.0 * r * lt + 2.0 * sp.kill_margin_m) / width.max(1.0)).min(1.0);
+        let gone = ((self.far.cutters[k] as f64 * share).round() as u64).min(self.far.cutters[k]);
+        if gone > 0 {
+            self.far.cutters[k] -= gone;
+            self.far.total = self.far.total.saturating_sub(gone);
+            self.deaths += gone;
+            self.recycled += gone;
+            let scrap = gone as f64 * self.eco.harvester.mass_cost;
+            self.far_credit(scrap, scrap);
+        }
+        self.far.blasts += 1;
+        self.units.blasts += 1;
+        self.explosions += 1;
+        self.units.blast_kills += gone;
+        self.director_log_push(format!("a sapper goes off in far sector {k} (out of sight): {:.0} kt of ground loosened, {gone} cutters killed", cells * dens / 1e6));
+    }
+
     pub(super) fn write_far(&self, o: &mut crate::save::W) {
         let n = self.far.cutters.len();
         o.u64(n as u64);
@@ -1144,7 +1244,7 @@ impl Sim {
 
     pub(super) fn read_far(&mut self, r: &mut crate::save::R) -> Result<(), String> {
         let n = r.u64()? as usize;
-        let mut f = Far { cutters: vec![0; n], wear: vec![0.0; n], open: vec![false; n], wet: vec![false; n], is_far: vec![false; n], must: vec![false; n], ..Default::default() };
+        let mut f = Far { cutters: vec![0; n], loose_kg: vec![0.0; n], wear: vec![0.0; n], open: vec![false; n], wet: vec![false; n], is_far: vec![false; n], must: vec![false; n], ..Default::default() };
         for k in 0..n {
             f.cutters[k] = r.u64()?;
             f.wear[k] = r.f64()?;

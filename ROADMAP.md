@@ -77,10 +77,17 @@ in HANDOFF.md.
 | Stage | Adds | State |
 | --- | --- | --- |
 | 1 | cutters + haulers | working; Benjamin's design pass is next. Baseline 189 s real for 20 game min |
-| 2 | sappers | working (blast, charges, fuser); waits for stage 1 |
-| 3 | tunnelers | working (the old Tunneler's shaft); waits |
-| 4 | heat-sink bots | working; the bench needs magma near the flocks (the Dev planet has it) |
-| 5 | foresters, abductors | working; abductors hunt the Dev planet's placeholder animals |
+| 2 | sappers | **v2 built 25-26 Nov, waiting on Benjamin's look**: made to order where cutters struggle, depth from yield, loosened column, blasts kill |
+| 3 | tunnelers | **v2 built**: the opener (value targets through the fog, curved shafts, magma caps, crew, self-destruct) |
+| 4 | heat-sink bots | **v2 built**: small pools cooled; frozen passages through magma under caps, with a crew |
+| 5 | foresters, abductors | **v2 built**: UFO flight past the swarm's edge, retire when a new one is quicker, fire out of sight, spitting animals, laser gore; the mockup's look |
+
+**Ground units v2 (25-26 Nov):** agreed class by class with Benjamin
+(`docs/design/ground-units.md`), built and tested overnight; how it went,
+problem by problem: `docs/ground-units-notes.md`; the v2 page with demos and
+summaries per unit (link in HANDOFF.md). Testbeds: `data/bodies/test-sappers.toml`,
+`test-tunnelers.toml`, the Dev planet (now with spitting herds);
+`run-test-*.bat`, `lab-units.bat`; tests in `tests/ground_units.rs`.
 
 Loose bolts found so far (measured, not fixed) are listed in HANDOFF.md.
 

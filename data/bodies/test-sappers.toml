@@ -1,0 +1,81 @@
+# Sapper testbed: a small world of hard rock under a thin skin, so the
+# cutters run into granite and gneiss within minutes and the director has to
+# send sappers (made to order, where the cutters struggle). Not a world for
+# players: run-test-sappers.bat (or unitlab) uses it.
+#
+# What it shows: sappers ordered only where flocks stall on hard rock, at
+# most one every order_gap_s; each one crawls or drills to its yield's depth
+# (79 m at 5 kt), goes off, and loosens the column over it to the surface;
+# cutters caught in it die, haulers near it are damaged.
+name = "Sapper testbed"
+archetype = "barren-world"
+seed = 81001
+radius_m = 3000
+heart = false
+regolith_depth_m = 1
+regolith_material = "soil"
+regolith_max_slope = 0.6
+atmosphere_m = 0
+atmosphere_colour = [0, 0, 0]
+oxygen = 0.0
+space_k = 250
+polar_cooling_k = 0
+polar_depth_m = 0
+
+[sun]
+day_k = 280
+day_s = 600
+start_deg = 0
+
+[shape]
+roughness = 0.004
+wavelength_m = 1200
+
+[[layer]]
+name = "core"
+outer = 0.3
+material = "iron-nickel"
+temperature_k = 1500
+boundary_noise = 0.01
+
+[[layer]]
+name = "mantle"
+outer = 0.85
+material = "peridotite"
+temperature_k = 900
+boundary_noise = 0.02
+
+[[layer]]
+name = "crust"
+outer = 1.0
+material = "granite"
+temperature_k = 260
+
+# A few metres of soft rock over the granite: gone in minutes.
+[strata]
+depth_m = 8
+fold_amplitude_m = 3
+fold_wavelength_m = 500
+pinch = 0.5
+pinch_wavelength_m = 300
+
+[[strata.band]]
+material = "sandstone"
+thickness_m = [2, 4]
+weight = 2
+
+[[strata.band]]
+material = "shale"              # uranium black shale (the sappers' charges)
+thickness_m = [1, 3]
+weight = 2
+
+[[intrusion]]
+material = "gabbro"
+kind = "mafic"
+count = 10
+radius_m = [40, 100]
+top_depth_m = [20, 120]
+dikes = [1, 2]
+veins = [2, 4]
+halo_m = 60
+aureole_m = 6

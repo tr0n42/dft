@@ -267,10 +267,21 @@ pub fn draw(units: &[UnitView], now: f64, real_t: f64, v: &View, bounds: [f64; 4
                 }
             }
             Unit::Tunneler => {
-                // Along its shaft, nose (the drill) at the head.
+                // Along its shaft, nose (the drill) at the head. States (the
+                // opener): 0 flying down, 1 boring, 2 down a passage, 3
+                // backing up, 4 done (arming), 5 sinking back down to go off.
                 let heading = (un.b as f32).atan2(un.a as f32);
+                let boring = un.state == 1 && un.sweep_from.0 > 0.0;
+                let arming = un.state == 4;
+                // Its crew: cutters carrying its spoil off from the shaft's
+                // mouth (on screen only, as many as look right, up to 60).
+                if un.lift > 0.0 && (boring || un.c > 0.02) {
+                    let up = { let r = (un.mark.0 * un.mark.0 + un.mark.1 * un.mark.1).sqrt().max(1.0); (un.mark.0 / r, un.mark.1 / r) };
+                    let over = (un.mark.0 + up.0 * 24.0, un.mark.1 + up.1 * 24.0);
+                    draw_crew(pos, col, v, cell_px, un.id, (un.lift as usize).min(60), un.mark, over, 10.0, real_t, lc);
+                }
                 let mut pen = Pen { pos: &mut *pos, col: &mut *col, p, half, angle: heading };
-                let turn = (tt * 6.0) as i32;
+                let turn = if boring { (tt * 6.0) as i32 } else { 0 };
                 for (row, line) in tunneler.iter().enumerate() {
                     for (c, &ch) in line.iter().enumerate() {
                         if ch == b' ' {
@@ -285,22 +296,42 @@ pub fn draw(units: &[UnitView], now: f64, real_t: f64, v: &View, bounds: [f64; 4
                             }
                             b'j' | b's' => sinew(un.id, u, w),
                             b'b' => bone(un.id, u, w),
-                            b'L' => light(lamp),
-                            _ => {
-                                // The cone turns: its bands run along it.
-                                let band = (c as i32 + row as i32 + turn).rem_euclid(3) == 0;
-                                if un.state == 1 && band {
-                                    lin(0.82, 0.8, 0.74)
+                            b'L' => {
+                                if arming {
+                                    // Its end: the lights blink fast.
+                                    if (tt * 10.0).sin() > 0.0 { lin(1.0, 0.35, 0.25) } else { light(0.2) }
                                 } else {
-                                    lin(0.45, 0.45, 0.47)
+                                    light(lamp)
                                 }
+                            }
+                            _ => {
+                                // The cone turns, grimy, its bands running
+                                // along it; red-hot toward the tip while it
+                                // bores (its nuclear drill heats the rock).
+                                let band = (c as i32 + row as i32 + turn).rem_euclid(3) == 0;
+                                let grime = shade(un.id, c as i32 + turn, row as i32);
+                                let hot = if boring { ((c as f32 - 31.0) / 13.0).clamp(0.0, 1.0) } else { 0.0 };
+                                let base = if boring && band { 0.72 + 0.12 * grime } else { 0.36 + 0.14 * grime };
+                                lin(base + 0.5 * hot * hot, base * (1.0 - 0.35 * hot), base * (1.0 - 0.7 * hot))
                             }
                         };
                         pen.block(u as f32, w as f32, k);
                     }
                 }
+                // Its nose glows and spits while it bores.
+                if boring {
+                    let (s, c) = heading.sin_cos();
+                    let nose = (x + c as f64 * 1.0, y + s as f64 * 1.0);
+                    crate::fx::emit(nose.0, nose.1, 10.0, [255.0, 150.0, 70.0], 0.9);
+                    if dft_sim::noise::unit(dft_sim::noise::hash(un.id as u64, (real_t * 30.0) as i64, 0, 0x7B1)) < 0.6 {
+                        crate::fx::spark(nose.0, nose.1, 1, [255.0, 200.0, 120.0], 12.0);
+                    }
+                }
+                if arming {
+                    crate::fx::emit(x, y, 14.0, [255.0, 90.0, 60.0], if (tt * 10.0).sin() > 0.0 { 1.2 } else { 0.2 });
+                }
                 // Tentacles back from its flanks, gripping the shaft walls.
-                if un.state == 1 {
+                if un.state == 1 || un.state == 4 {
                     for (j, side) in [(0, 1i32), (1, -1), (2, 1), (3, -1)] {
                         let u0 = -30 + j * 7;
                         let reach = 2 + ((tt * 0.8 + j as f32 * 1.7).sin() * 1.5).round() as i32;
@@ -309,8 +340,15 @@ pub fn draw(units: &[UnitView], now: f64, real_t: f64, v: &View, bounds: [f64; 4
                 }
             }
             Unit::HeatSink => {
-                let mut pen = Pen { pos: &mut *pos, col: &mut *col, p, half, angle: up_angle };
                 let working = un.state == 1;
+                // On a deep job its crew digs out the passage's middle under
+                // it (claw: the dug face), carrying it up past the bot.
+                if working && un.lift > 0.0 {
+                    let up = { let r = (x * x + y * y).sqrt().max(1.0); (x / r, y / r) };
+                    let over = (x + up.0 * 14.0, y + up.1 * 14.0);
+                    draw_crew(pos, col, v, cell_px, un.id, (un.lift as usize).min(40), un.claw, over, 5.0, real_t, lc);
+                }
+                let mut pen = Pen { pos: &mut *pos, col: &mut *col, p, half, angle: up_angle };
                 pen.rows(&HEATSINK, -7, -5, |ch, u, w| {
                     Some(match ch {
                         b'r' => {
@@ -364,6 +402,40 @@ pub fn draw(units: &[UnitView], now: f64, real_t: f64, v: &View, bounds: [f64; 4
             }
             _ => {}
         }
+    }
+}
+
+/// A unit's own crew of cutters (couriers of its spoil, drawn only: the
+/// simulation counts their work): `n` small grey drones flying a ribbon
+/// between the work face `from` and a point `to` over it and back, spread
+/// `spread` metres either side, each its own pace. Each drone is the game's
+/// small block cutter: a body and a light in the swarm's colour.
+#[allow(clippy::too_many_arguments)]
+fn draw_crew(pos: &mut Vec<[f32; 3]>, col: &mut Vec<[f32; 4]>, v: &View, cell_px: f32, id: u32, n: usize, from: (f64, f64), to: (f64, f64), spread: f64, real_t: f64, lc: [f32; 3]) {
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    let side = (-dy / len, dx / len);
+    let half = cell_px * 0.5;
+    let up = (from.1.atan2(from.0) - std::f64::consts::FRAC_PI_2) as f32;
+    for i in 0..n {
+        let r = |k: u64| dft_sim::noise::unit(dft_sim::noise::hash(id as u64, i as i64, k as i64, 0xC4E)) as f64;
+        // Up full, down empty: a trip in 6-10 s, each its own phase.
+        let ph = (real_t / (6.0 + 4.0 * r(1)) + r(2)).fract();
+        let along = if ph < 0.5 { ph * 2.0 } else { 2.0 - ph * 2.0 };
+        let off = (r(3) - 0.5) * 2.0 * spread + (real_t * (1.0 + r(4)) + 6.0 * r(5)).sin() * 1.5;
+        let wx = from.0 + dx * along + side.0 * off;
+        let wy = from.1 + dy * along + side.1 * off;
+        let p = v.to_screen(wx, wy);
+        let shade = 0.3 + 0.12 * r(6) as f32;
+        let body = lin(shade, shade * 1.03, shade * 1.05);
+        // A two-by-two body, a light on top.
+        for (u, w) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)] {
+            crate::drones::rot_square(pos, p.x, p.y, half, up, u, w, 1.0);
+            col.extend_from_slice(&[body; 6]);
+        }
+        let lamp = if ph < 0.5 { 1.0 } else { 0.55 };
+        crate::drones::rot_square(pos, p.x, p.y, half, up, 1.0, 1.0, 1.0);
+        col.extend_from_slice(&[lin(lc[0] * lamp, lc[1] * lamp, lc[2] * lamp); 6]);
     }
 }
 
@@ -619,6 +691,17 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
                 }
             }
         }
+        return;
+    }
+    // ---- Flying folded, a bit like a UFO: a wobble and a glow under it ----
+    if un.state == 0 && un.c >= 3.0 {
+        let bob = ((t * 2.3 + un.id as f32).sin() * 1.5).round();
+        draw_package(pen, &mut blk, forester, 0.0, bob, t, lamp);
+        for (k, u) in [-6.0f32, -2.0, 2.0, 6.0].iter().enumerate() {
+            let on = ((t * 6.0) as i32 + k as i32) % 4 == 0;
+            blk(pen, *u, -2.0 + bob, if on { lamp } else { sc(lamp, 0.35) });
+        }
+        emit(0.0, -6.0, 12.0, lamp, 0.7);
         return;
     }
     // ---- Falling, folded into its package ----
@@ -1276,6 +1359,19 @@ pub fn draw_animals(animals: &[dft_sim::swarm::AnimalView], now: f64, real_t: f6
         if an.fleeing {
             let tail = (u0 - 1) * f;
             pen.block(tail as f32, (high + 1) as f32, lin(0.95, 0.95, 0.92));
+        }
+        // Spitters (a ranged attack): a sickly green spine along the back,
+        // and a gob now and then.
+        if an.ranged {
+            for i in 0..long {
+                let u = (u0 + i) * f;
+                if i % 2 == 0 {
+                    pen.block(u as f32, (high + 1) as f32, lin(0.45, 0.75, 0.2));
+                }
+            }
+            if ((tt * 0.25 + an.id as f32 * 0.37).fract()) < 0.04 {
+                crate::fx::spark(x, y + 2.0 + high as f64, 2, [140.0, 220.0, 60.0], 14.0);
+            }
         }
     }
 }

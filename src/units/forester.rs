@@ -22,6 +22,10 @@ pub enum WalkState {
     Work,
     /// Leaping over ground too steep to walk (a cliff, a mountain).
     Jump,
+    /// Flying folded from the mother swarm, past its edge if need be, a bit
+    /// like a UFO, to over where it is useful; then it drops (Benjamin, 25
+    /// Nov: harvester bodies can travel past the swarm's edge).
+    Fly,
 }
 
 #[derive(Debug, Clone)]
@@ -56,7 +60,26 @@ pub struct Walker {
     pub(super) laser_from: (f64, f64),
     /// What is in its bag: cells of each material.
     pub(super) load: Vec<(MatId, f64)>,
+    /// Where it is flying to (over its first target), and its health (an
+    /// abductor's pool is huge: nearly invulnerable).
+    pub(super) fly_to: (f64, f64),
+    pub(super) hp: f64,
 }
+
+/// A fire out of sight (Benjamin, 25 Nov: fire spreads to everything
+/// ignitable nearby): burned as math, a few cells a second from its front,
+/// spreading to the plant cells beside what burns; handed to the sandbox as
+/// real fire once the camera sees it.
+#[derive(Debug, Clone, Default)]
+pub struct Fire {
+    pub(super) front: std::collections::VecDeque<(i64, i64)>,
+    pub(super) seen: CellSet,
+    pub(super) burned: u64,
+}
+
+/// Plant cells an out-of-sight fire burns a second, and most a fire burns.
+pub(super) const FIRE_PER_S: usize = 30;
+pub(super) const FIRE_MAX_CELLS: u64 = 20_000;
 
 /// A walker's leap over ground too steep to walk.
 #[derive(Debug, Clone, Copy)]
@@ -176,22 +199,127 @@ impl Sim {
     }
 
     pub(super) fn launch_walker(&mut self, u: Unit) {
-        if u == Unit::Abductor {
-            // To the nearest herd no other abductor is after.
-            let Some(a) = self.abductor_goal(self.mother.centre, 0) else { return };
-            let start = self.mother_over(a);
-            let id = self.units.new_id();
-            let life = self.eco.units.forester.life_s;
-            self.units.walkers.push(Walker { id, kind: u, state: WalkState::Drop, pos: start, prev: start, moved_at: self.tick, goal_a: a, facing: 1.0, life, timer: 0.0, bag: 0.0, taken_kg: 0.0, laser: start, laser_at: 0, claw: start, cut_at: 0, lift: LIFT_MIN_M, load: Vec::new(), jump: None, laser_from: start });
-            return;
-        }
-        // The thickest stand no other walker is on.
-        let busy = |a: f64, ws: &Vec<Walker>| ws.iter().any(|w| ang_dist(w.goal_a, a) * self.world.planet.radius < 150.0);
-        let Some(&(a, _)) = self.units.flora.iter().find(|(a, _)| !busy(*a, &self.units.walkers)).or_else(|| self.units.flora.first()) else { return };
+        // Where it is most useful, anywhere on the body (it flies past the
+        // swarm's edge): the thickest life no other walker is after.
+        let a = if u == Unit::Abductor {
+            match self.abductor_goal(self.mother.centre, 0) {
+                Some(a) => a,
+                None => return,
+            }
+        } else {
+            let busy = |a: f64, ws: &Vec<Walker>| ws.iter().any(|w| ang_dist(w.goal_a, a) * self.world.planet.radius < 150.0);
+            match self.units.flora.iter().find(|(a, _)| !busy(*a, &self.units.walkers)).or_else(|| self.units.flora.first()) {
+                Some(&(a, _)) => a,
+                None => return,
+            }
+        };
         let start = self.mother_over(a);
         let id = self.units.new_id();
-        let life = self.eco.units.forester.life_s;
-        self.units.walkers.push(Walker { id, kind: u, state: WalkState::Drop, pos: start, prev: start, moved_at: self.tick, goal_a: a, facing: 1.0, life, timer: 0.0, bag: 0.0, taken_kg: 0.0, laser: start, laser_at: 0, claw: start, cut_at: 0, lift: LIFT_MIN_M, load: Vec::new(), jump: None, laser_from: start });
+        let fs = &self.eco.units.forester;
+        let g = self.ground_at(a, true);
+        let fly_to = (a.cos() * (g + fs.fly_alt_m), a.sin() * (g + fs.fly_alt_m));
+        let hp = if u == Unit::Abductor { self.eco.units.abductor.hp } else { fs.hp };
+        let life = fs.life_s;
+        self.units.walkers.push(Walker { id, kind: u, state: WalkState::Fly, pos: start, prev: start, moved_at: self.tick, goal_a: a, facing: 1.0, life, timer: 0.0, bag: 0.0, taken_kg: 0.0, laser: start, laser_at: 0, claw: start, cut_at: 0, lift: LIFT_MIN_M, load: Vec::new(), jump: None, laser_from: start, fly_to, hp });
+    }
+
+    /// A walker with nothing within reach looks at the next place it could
+    /// work (direction `next`, None: nowhere). Benjamin, 25 Nov: it dies and
+    /// is reclaimed if walking there would take longer than building a new
+    /// one and sending it; else it strides there.
+    pub(super) fn walker_go_or_retire(&mut self, w: &mut Walker, next: Option<f64>) {
+        let Some(x) = next else {
+            self.walker_retire(w);
+            return;
+        };
+        let a = w.pos.1.atan2(w.pos.0);
+        let r = len(w.pos).max(1.0);
+        let fs = &self.eco.units.forester;
+        let walk_s = ang_dist(x, a) * r / fs.stride_speed.max(0.1);
+        let build_s = self.eco.units.bay.iter().find(|b| b.unit == w.kind).map(|b| b.build_s).unwrap_or(45.0);
+        let start = self.mother_over(x);
+        let g = self.ground_at(x, true);
+        let fly_s = ((start.0 - x.cos() * g).powi(2) + (start.1 - x.sin() * g).powi(2)).sqrt() / fs.fly_speed.max(1.0);
+        if walk_s > build_s + fly_s + 8.0 {
+            self.walker_retire(w);
+        } else {
+            w.goal_a = x;
+            w.state = WalkState::Stride;
+        }
+    }
+
+    /// A walker done here for good: it powers down, its bag and its body
+    /// left for the couriers to carry up and reclaim.
+    pub(super) fn walker_retire(&mut self, w: &mut Walker) {
+        self.drop_bag(w);
+        if let Ok(scrap) = self.world.planet.mats.id("drone-scrap") {
+            let kg = self.unit_mass(w.kind);
+            let d = self.world.planet.mats.get(scrap).density.max(1.0);
+            w.load.push((scrap, kg / d));
+            w.bag += kg;
+            self.drop_bag(w);
+        }
+        w.life = 0.0;
+        w.bag = 0.0;
+        self.units.walkers_retired += 1;
+        let n = w.kind.name();
+        let an = if n.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+        self.director_log_push(format!("{an} {n} is done here: it powers down, reclaimed by the couriers"));
+    }
+
+    /// What one unit of `u` is built of (kg): its parts' materials.
+    pub(super) fn unit_mass(&self, u: Unit) -> f64 {
+        let r = &self.eco.recipe;
+        r.counts(r.of(u)).iter().enumerate().map(|(i, &n)| n as f64 * r.part[i].make.iter().map(|c| c.kg).sum::<f64>()).sum()
+    }
+
+    /// Fires out of sight, a second: each burns a few plant cells from its
+    /// front (their mass lost to the sky, as the sandbox's fires do), and
+    /// spreads to the plant cells beside them. Once the camera sees one, the
+    /// sandbox takes it over as real fire.
+    pub(super) fn fires_work(&mut self) {
+        if self.units.fires_out.is_empty() {
+            return;
+        }
+        let mut fires = std::mem::take(&mut self.units.fires_out);
+        for f in fires.iter_mut() {
+            if f.front.iter().any(|c| self.sandbox.sees(*c)) {
+                // In view: real fire from here on.
+                for &c in f.front.iter().take(400) {
+                    if self.units.is_flora.get(self.world.material(c.0, c.1) as usize).copied().unwrap_or(false) {
+                        self.sandbox.heat_cell(&self.world, c, 1100.0);
+                    }
+                }
+                f.front.clear();
+                continue;
+            }
+            let mut n = 0;
+            while n < FIRE_PER_S && f.burned < FIRE_MAX_CELLS {
+                let Some(c) = f.front.pop_front() else { break };
+                let m = self.world.material(c.0, c.1);
+                if !self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
+                    continue;
+                }
+                if let Some(gone) = self.world.lift_cell(c.0, c.1) {
+                    self.world.lose_aloft(gone);
+                    self.progress.remove(&c);
+                    self.reserved.remove(&c);
+                    self.open_cell(c);
+                    self.apply_sandbox(vec![Change { cell: c, from: m, to: VACUUM }]);
+                }
+                f.burned += 1;
+                self.units.burned_out_of_sight += 1;
+                n += 1;
+                for d in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                    let q = (c.0 + d.0, c.1 + d.1);
+                    if f.seen.insert(q) && self.units.is_flora.get(self.world.material(q.0, q.1) as usize).copied().unwrap_or(false) {
+                        f.front.push_back(q);
+                    }
+                }
+            }
+        }
+        fires.retain(|f| !f.front.is_empty() && f.burned < FIRE_MAX_CELLS);
+        self.units.fires_out = fires;
     }
 
     pub(super) fn walkers_work(&mut self) {
@@ -206,6 +334,18 @@ impl Sim {
             w.life -= 1.0;
             let a = w.pos.1.atan2(w.pos.0);
             match w.state {
+                WalkState::Fly => {
+                    // Folded, flying at its height over the ground.
+                    let fs = &self.eco.units.forester;
+                    let (speed, alt) = (fs.fly_speed, fs.fly_alt_m);
+                    let mut p = w.pos;
+                    let there = self.fly_over(&mut p, w.fly_to, speed, alt);
+                    w.pos = p;
+                    if there {
+                        w.state = WalkState::Drop;
+                        w.timer = 0.0;
+                    }
+                }
                 WalkState::Drop => {
                     // Falls under gravity from the replicator's gantry.
                     let g = self.ground_at(a, true);
@@ -292,6 +432,18 @@ impl Sim {
                 }
             }
             self.units.walkers[k] = w;
+        }
+        // Wrecked (its health gone): it goes up, its bag left behind.
+        for k in 0..self.units.walkers.len() {
+            if self.units.walkers[k].hp <= 0.0 && self.units.walkers[k].life > 0.0 {
+                let mut w = self.units.walkers[k].clone();
+                self.drop_bag(&mut w);
+                let at = (w.pos.0 + unit_of(w.pos).0 * w.lift, w.pos.1 + unit_of(w.pos).1 * w.lift);
+                self.explode(at, 20, 16.0);
+                w.life = 0.0;
+                self.units.walkers_lost += 1;
+                self.units.walkers[k] = w;
+            }
         }
         // A walker at the end of its life leaves its bag for the couriers.
         for k in 0..self.units.walkers.len() {
@@ -555,6 +707,7 @@ impl Sim {
             let from_m = d * (10.0 + 20.0 * crate::noise::unit(hash(h, 2, 0, 0)));
             let to_m = from_m + d * (15.0 + 25.0 * crate::noise::unit(hash(h, 3, 0, 0)));
             let mut lit = 0;
+            let mut unseen: Vec<(i64, i64)> = Vec::new();
             let (mut first, mut last) = (None, None);
             let n = (to_m - from_m).abs().ceil() as i64;
             for k in 0..=n {
@@ -571,13 +724,26 @@ impl Sim {
                 for hgt in -2..6 {
                     let c = cell_of((ux * (g + hgt as f64), uy * (g + hgt as f64)));
                     if flora(self, c) {
-                        self.sandbox.heat_cell(&self.world, c, 1100.0);
+                        if self.sandbox.sees(c) {
+                            self.sandbox.heat_cell(&self.world, c, 1100.0);
+                        } else {
+                            // Out of sight: a fire burned as math.
+                            unseen.push(c);
+                        }
                         lit += 1;
                         break;
                     }
                 }
             }
             self.units.fires += lit;
+            if !unseen.is_empty() && self.units.fires_out.len() < 64 {
+                let mut f = Fire::default();
+                for c in unseen {
+                    f.seen.insert(c);
+                    f.front.push_back(c);
+                }
+                self.units.fires_out.push(f);
+            }
             if let (Some(f), Some(l)) = (first, last) {
                 w.laser_from = f;
                 w.laser = l;
@@ -607,13 +773,8 @@ impl Sim {
                 None => {
                     let busy = |x: f64, ws: &Vec<Walker>| ws.iter().any(|o| o.id != w.id && ang_dist(o.goal_a, x) * self.world.planet.radius < 150.0);
                     let next = self.units.flora.iter().filter(|(x, _)| ang_dist(*x, a) * r > 60.0).filter(|(x, _)| !busy(*x, &self.units.walkers)).min_by(|p, q| ang_dist(p.0, a).total_cmp(&ang_dist(q.0, a))).map(|p| p.0);
-                    match next {
-                        Some(x) => {
-                            w.goal_a = x;
-                            w.state = WalkState::Stride;
-                        }
-                        None => w.life = w.life.min(30.0),
-                    }
+                    let _ = fs;
+                    self.walker_go_or_retire(w, next);
                 }
             }
         }

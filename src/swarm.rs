@@ -36,6 +36,8 @@ mod fleet;
 mod sapper;
 #[path = "units/tunneler.rs"]
 mod tunneler;
+#[path = "units/opener.rs"]
+mod opener;
 #[path = "units/heatsink.rs"]
 mod heatsink;
 #[path = "units/forester.rs"]
@@ -49,10 +51,10 @@ mod far;
 pub use far::{Far, COVER_PER_M, FAR_BUDGET, FAR_MPP, SECTOR_M};
 pub use fauna::AnimalView;
 #[allow(unused_imports)]
-use {abductor::*, cutter::*, fauna::*, forester::*, heatsink::*, platform::*, sapper::*, tunneler::*};
+use {abductor::*, cutter::*, fauna::*, forester::*, heatsink::*, opener::*, platform::*, sapper::*, tunneler::*};
 pub use fleet::{Call, FleetBooks};
 pub use hauler::{Hauler, HaulerState, HaulerView};
-pub use platform::{Skills, UnitView};
+pub use platform::{GroundReport, Skills, UnitView};
 
 /// A small, fast, deterministic hash for cell coordinates. The standard one is
 /// built to resist attacks, which costs time we don't need to spend here.
@@ -731,6 +733,9 @@ pub struct Sim {
     /// Sapper plumes since the screen last looked: where the broken rock
     /// blasts out of the ground, and how hard (for the dust column).
     pub plumes: Vec<(f64, f64, f32)>,
+    /// Animals burst by abductors' lasers since the screen last looked:
+    /// where, and their kg (for the red burst).
+    pub gore: Vec<(f64, f64, f32)>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1082,6 +1087,7 @@ impl Sim {
             leg_track: None,
             life,
             plumes: Vec::new(),
+            gore: Vec::new(),
         };
         sim
     }
@@ -2891,10 +2897,14 @@ impl Sim {
                 self.spawn_harvester();
             }
             // Specialists for the benchmarks: one more a second while short.
-            for k in 0..self.free_units.len() {
-                let (u, n) = self.free_units[k];
-                if (self.units.count(u) as u32) < n {
-                    self.launch_special(u);
+            // (As many as the director would want, up to n.)
+            if self.tick % self.ticks(1.0) == 0 {
+                for k in 0..self.free_units.len() {
+                    let (u, n) = self.free_units[k];
+                    let want = self.specialist_want(u).min(n as usize);
+                    if self.units.count(u) < want {
+                        self.launch_special(u);
+                    }
                 }
             }
             // Never short of energy, so nothing browns out.
@@ -3454,6 +3464,7 @@ impl Sim {
             + self.hubs.iter().filter(|h| h.kind == HubKind::Refiner).count() as f64 * self.eco.refiner.upkeep
             + self.tunnelers.iter().filter(|b| b.active).count() as f64 * self.eco.tunneler.upkeep
             + self.units.bores.iter().filter(|b| b.active).count() as f64 * self.eco.units.tunneler.upkeep
+            + self.units.openers.iter().filter(|o| o.state == OpenState::Bore).count() as f64 * self.eco.units.tunneler.upkeep
     }
 
     /// The scripted idle player: at each check-in, buy the cheapest affordable
@@ -4130,7 +4141,7 @@ pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches f
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 15; // 15: the far field; 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
+const SIM_VERSION: u32 = 16; // 16: ground units v2 (25 Nov); 15: the far field; 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -4367,6 +4378,7 @@ impl Sim {
         self.write_charges(o);
         self.write_fauna(o);
         self.write_far(o);
+        self.write_units_16(o);
     }
 
     /// Rebuild a game from what `write_save` wrote, on the same body, with
@@ -4617,6 +4629,9 @@ impl Sim {
         }
         if version >= 15 {
             s.read_far(r)?;
+        }
+        if version >= 16 {
+            s.read_units_16(r)?;
         }
         s.sandbox.time_s = s.time();
         s.legs_all_changed();

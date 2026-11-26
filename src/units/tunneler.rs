@@ -129,6 +129,8 @@ impl Sim {
             let t = self.eco.tunneler.clone();
             self.bore_list(false, &t);
         }
+        // The tunneler as a ground unit (the opener, units/opener.rs).
+        self.openers_work();
         if !self.units.bores.is_empty() {
             let t = self.unit_tunneler();
             self.bore_list(true, &t);
@@ -248,7 +250,7 @@ impl Sim {
     }
 
     pub(super) fn launch_tunneler(&mut self) {
-        self.units.bores.push(Bore { x: 0.0, y: 0.0, hx: 0.0, hy: 0.0, aim: (0.0, 0.0), length: 0.0, progress_s: 0.0, active: false, resume_at: self.tick, prev: (0.0, 0.0), moved_at: self.tick });
+        self.launch_opener();
     }
 
     /// The old Tunneler's numbers, with the ground unit's own over them.

@@ -228,6 +228,9 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
             fog.mark(c, -1.0e6);
         }
     }
+    // Tunnelers see behind the fog (Benjamin, 25 Nov): round each one's head
+    // as it digs, twice a landing point's reach.
+    let diggers: Vec<(f64, f64)> = run.0.out.lock().units.iter().filter(|u| u.kind == dft_sim::production::Unit::Tunneler && u.state != 0).map(|u| u.to).collect();
     let (t, hubs) = {
         let out = run.0.out.lock();
         // Flocks every frame; far sectors' marks (a swarm worked as a
@@ -306,6 +309,15 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
         let c = cell(x, y);
         for &(dx, dy) in &hub_near {
             fog.mark((c.0 + dx, c.1 + dy), now);
+        }
+    }
+    if !diggers.is_empty() {
+        let sight = disc(2 * HUB_SENSE);
+        for (x, y) in diggers {
+            let c = cell(x, y);
+            for &(dx, dy) in &sight {
+                fog.mark((c.0 + dx, c.1 + dy), now);
+            }
         }
     }
 }

@@ -74,6 +74,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 /// What the command line asked for.
+/// The specialists to deploy this run (`--units`), over economy.toml's
+/// game_deploys.
+pub static UNITS: std::sync::OnceLock<Vec<dft_sim::production::Unit>> = std::sync::OnceLock::new();
+
 #[derive(Resource, Clone, Debug)]
 pub struct Options {
     pub body: String,
@@ -158,6 +162,29 @@ impl Options {
                     used = 1;
                 }
                 "--bench-drones" => o.free_drones = Some(val(i)?.parse().map_err(|_| "--bench-drones takes a number")?),
+                // The specialists to deploy (testbeds): "all", or a list such
+                // as "sapper,tunneler,heatsink,forester,abductor". Overrides
+                // economy.toml's game_deploys for this run.
+                "--units" => {
+                    let v = val(i)?;
+                    use dft_sim::production::Unit;
+                    let all = [Unit::Sapper, Unit::Tunneler, Unit::HeatSink, Unit::Forester, Unit::Abductor];
+                    let list: Vec<Unit> = if v == "all" {
+                        all.to_vec()
+                    } else {
+                        v.split(',')
+                            .map(|n| match n.trim() {
+                                "sapper" => Ok(Unit::Sapper),
+                                "tunneler" => Ok(Unit::Tunneler),
+                                "heatsink" => Ok(Unit::HeatSink),
+                                "forester" => Ok(Unit::Forester),
+                                "abductor" => Ok(Unit::Abductor),
+                                o => Err(format!("--units: no unit {o}")),
+                            })
+                            .collect::<Result<_, _>>()?
+                    };
+                    let _ = UNITS.set(list);
+                }
                 "--quit-after" => o.quit_after = Some(val(i)?.parse().map_err(|_| "--quit-after takes seconds")?),
                 "--camera" => {
                     // The plan is optional: the next word, unless it's another option.
