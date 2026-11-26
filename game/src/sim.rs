@@ -210,6 +210,8 @@ pub struct Out {
     pub at: Option<Instant>,
     /// The answer to `Control::summon`: the new unit's id, or why none.
     pub summoned: Option<(dft_sim::production::Unit, Result<u32, String>)>,
+    /// How hot the molten rock on screen is (see `HeatGrid`), when new.
+    pub heat: Option<HeatGrid>,
     /// Changed places since the screen last took them.
     pub blocks: HashSet<(i64, i64)>,
     /// The 8 x 8-cell squares whose cells changed in the screen's copy of the
@@ -274,6 +276,58 @@ impl Mirror {
             }
         }
     }
+}
+
+/// How hot the molten rock round the view is, for drawing it (lava.rs): a
+/// square of n x n texels `g` metres across from (x0, y0), each 0 (nothing
+/// known: drawn as ordinary) or 1 + 254 x heat, heat 0 at its freezing
+/// point to 1 at HEAT_SPAN_K over it. Only cells the simulation follows
+/// have a temperature (lava that has flowed, melt cooling), which is where
+/// the differences show.
+#[derive(Clone, Debug)]
+pub struct HeatGrid {
+    pub x0: f64,
+    pub y0: f64,
+    pub g: f64,
+    pub n: usize,
+    pub data: Vec<u8>,
+}
+
+/// Heat 1 is this far over the freezing point (K); the grid's side, at
+/// most (texels); how often it is taken (real seconds).
+const HEAT_SPAN_K: f64 = 400.0;
+const HEAT_N: usize = 256;
+const HEAT_EVERY_S: f64 = 0.25;
+
+/// The heat grid over the view `v` (cells: left, right, bottom, top).
+fn heat_grid(s: &dft_sim::swarm::Sim, v: [i64; 4]) -> HeatGrid {
+    let m = 32;
+    let (x0, x1, y0, y1) = (v[0] - m, v[1] + m, v[2] - m, v[3] + m);
+    let side = (x1 - x0).max(y1 - y0).max(1) as f64;
+    let g = (side / HEAT_N as f64).ceil().max(1.0);
+    let n = ((side / g).ceil() as usize).min(HEAT_N);
+    let mut data = vec![0u8; n * n];
+    let mats = &s.world.planet.mats;
+    for (&(cx, cy), &k) in s.sandbox.temps.iter() {
+        if cx < x0 || cx >= x1 || cy < y0 || cy >= y1 {
+            continue;
+        }
+        let mat = mats.get(s.world.material(cx, cy));
+        let Some(freeze) = mat.freezes_at_k else { continue };
+        if mat.state != dft_sim::materials::State::Liquid || freeze < 500.0 {
+            continue;
+        }
+        let i = ((cx - x0) as f64 / g) as usize;
+        let j = ((cy - y0) as f64 / g) as usize;
+        if i >= n || j >= n {
+            continue;
+        }
+        let h = ((k - freeze) / HEAT_SPAN_K).clamp(0.0, 1.0);
+        let v = 1 + (h * 254.0) as u8;
+        let o = j * n + i;
+        data[o] = data[o].max(v);
+    }
+    HeatGrid { x0: x0 as f64, y0: y0 as f64, g, n, data }
 }
 
 /// Leaves copied into the mirror per batch, at most.
@@ -382,6 +436,7 @@ fn run(shared: &Shared) {
     // The longest step this second, and the one shown.
     let mut step_max = (0.0f64, [0.0f64; 4]);
     let mut step_max_shown = (0.0f64, [0.0f64; 4]);
+    let mut heat_taken = Instant::now();
     loop {
         let c = *shared.control.lock();
         if c.quit {
@@ -441,6 +496,15 @@ fn run(shared: &Shared) {
             if let Some(u) = summon {
                 let r = s.summon(u);
                 shared.out.lock().summoned = Some((u, r));
+            }
+            // The molten rock's heat round the view, a few times a second,
+            // close enough in to see it.
+            if let Some((v, mpp)) = c.view {
+                if mpp < 4.0 && heat_taken.elapsed().as_secs_f64() >= HEAT_EVERY_S {
+                    heat_taken = Instant::now();
+                    let h = heat_grid(&s, v);
+                    shared.out.lock().heat = Some(h);
+                }
             }
             for (at, size, scrap) in std::mem::take(&mut *shared.blasts.lock()) {
                 s.big_boom(at, size, scrap);

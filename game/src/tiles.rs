@@ -226,6 +226,19 @@ struct Slot {
     /// shown (a stand-in is) until the rebuild lands. A tile the view kept
     /// wanting just keeps its picture until then, so it never blinks.
     away: bool,
+    /// Its molten rock, if any (see lava.rs).
+    lava: Option<Lava>,
+}
+
+impl Tiles {
+    /// Tile k's picture and its molten rock, if it has any and is drawn.
+    pub fn lava(&self, k: &Key) -> Option<(Handle<Image>, Lava)> {
+        let s = self.slots.get(k)?;
+        match (&s.shown, s.lava) {
+            (Shown::Sprite(_, h), Some(l)) => Some((h.clone(), l)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -488,6 +501,35 @@ pub fn collapse_radius(p: &Planet, eaten: f64) -> f64 {
     (r / full * 400.0).ceil() / 400.0 * full
 }
 
+/// The alpha marking a texel as molten rock (lava.rs draws it alive; at
+/// 254 the picture alone looks the same).
+pub const LAVA_ALPHA: u8 = 254;
+
+/// A tile's molten rock: how much of it is molten (a share of its texels),
+/// and the middle of it (m).
+#[derive(Clone, Copy, Debug)]
+pub struct Lava {
+    pub share: f32,
+    pub at: (f64, f64),
+}
+
+fn lava_of(k: Key, px: &[u8]) -> Option<Lava> {
+    let (mut n, mut sx, mut sy) = (0usize, 0.0f64, 0.0f64);
+    for (o, rgba) in px.chunks_exact(4).enumerate() {
+        if rgba[3] == LAVA_ALPHA {
+            n += 1;
+            sx += (o % TEX as usize) as f64;
+            sy += (TEX as usize - 1 - o / TEX as usize) as f64;
+        }
+    }
+    if n == 0 {
+        return None;
+    }
+    let s = k.span();
+    let t = s / TEX as f64;
+    Some(Lava { share: n as f32 / (TEX * TEX) as f32, at: (k.ix as f64 * s + (sx / n as f64 + 0.5) * t, k.iy as f64 * s + (sy / n as f64 + 0.5) * t) })
+}
+
 /// The air's most see-through strength, at the ground (it was 0.55; Benjamin,
 /// 26 Nov: the sky a bit darker and more varied).
 const AIR_ALPHA: f64 = 0.42;
@@ -557,6 +599,9 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
         return None;
     }
     let kinds = tx::kinds(&p.mats);
+    // Molten rock (a liquid that freezes well above room heat): marked in
+    // the picture (alpha LAVA_ALPHA) for lava.rs to draw alive over it.
+    let hot: Vec<bool> = p.mats.list.iter().map(|m| m.state == dft_sim::materials::State::Liquid && m.freezes_at_k.is_some_and(|f| f > 500.0)).collect();
     // The cells this tile needs: one per texel when zoomed out (sampled at the
     // middle of its block); when zoomed in, every cell it covers and a ring
     // around (the bevels look at neighbours).
@@ -820,7 +865,7 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
                     };
                     c = tx::texel(kinds.get(m as usize).copied().unwrap_or(tx::Kind::Rock), c, cx, cy, u, v, ppc, sides);
                 }
-                [c[0], c[1], c[2], 255]
+                [c[0], c[1], c[2], if hot.get(m as usize).copied().unwrap_or(false) { LAVA_ALPHA } else { 255 }]
             };
             px[o..o + 4].copy_from_slice(&rgba);
         }
@@ -996,7 +1041,7 @@ fn request(mut tiles: ResMut<Tiles>, view: Res<View>, body: Res<crate::Body>, ru
         let task = AsyncComputeTaskPool::get().spawn(async move { build(&p, k, live, collapse, heights, thin) });
         tiles.building += 1;
         if fresh {
-            tiles.slots.insert(k, Slot { shown: Shown::Pending, task: Some(task), plants: Arc::new(Vec::new()), stale: false, built_at: now, image_from: now, changed_at: 0.0, seen: frame, ghost: false, away: false });
+            tiles.slots.insert(k, Slot { shown: Shown::Pending, task: Some(task), plants: Arc::new(Vec::new()), stale: false, built_at: now, image_from: now, changed_at: 0.0, seen: frame, ghost: false, away: false, lava: None });
         } else {
             let s = tiles.slots.get_mut(&k).unwrap();
             s.task = Some(task);
@@ -1038,10 +1083,12 @@ fn collect(mut commands: Commands, mut tiles: ResMut<Tiles>, mut images: ResMut<
         let result = result.map(|(px, ghost, plants)| {
             s.ghost = ghost;
             s.plants = Arc::new(plants);
+            s.lava = lava_of(k, &px);
             px
         });
         if result.is_none() {
             s.plants = Arc::new(Vec::new());
+            s.lava = None;
         }
         s.image_from = s.built_at;
         s.away = false;
@@ -1093,7 +1140,7 @@ fn collect(mut commands: Commands, mut tiles: ResMut<Tiles>, mut images: ResMut<
 
 /// A piece of a coarser tile standing in for a finer one still on its way.
 #[derive(Component)]
-struct Patch;
+pub(crate) struct Patch;
 
 /// Put every tile where the view says, in screen pixels; finer tiles on top.
 /// Tiles finer than the zoom needs are hidden (kept for zooming back in).
@@ -1103,7 +1150,7 @@ struct Patch;
 /// ground. Each place is covered once, so nothing see-through (atmosphere,
 /// backdrop) is drawn twice, and nothing blinks while tiles arrive.
 #[allow(clippy::type_complexity)]
-fn place(
+pub(crate) fn place(
     mut commands: Commands,
     tiles: Res<Tiles>,
     view: Res<View>,

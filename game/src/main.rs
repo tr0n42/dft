@@ -57,6 +57,8 @@ mod drones;
 mod eyedropper;
 mod finder;
 mod fx;
+mod glow;
+mod lava;
 mod fog;
 mod log;
 mod saves;
@@ -458,7 +460,7 @@ fn main() {
         .insert_resource(Run(run))
         .insert_resource(o)
         .add_plugins((view::ViewPlugin, tiles::TilesPlugin, drones::DronesPlugin, dev::DevPlugin, log::LogPlugin, bench::BenchPlugin, stars::StarsPlugin, fog::FogPlugin, camera::CameraPlugin, saves::SavesPlugin, eyedropper::EyedropperPlugin, stockpile::StockpilePlugin, finder::FinderPlugin, watch::WatchPlugin))
-        .add_plugins((storage::StoragePlugin, swarmview::SwarmViewPlugin, lights::LightsPlugin, fx::FxPlugin))
+        .add_plugins((storage::StoragePlugin, swarmview::SwarmViewPlugin, lights::LightsPlugin, glow::GlowPlugin, lava::LavaPlugin, fx::FxPlugin))
         .add_systems(Startup, |mut c: Commands| {
             c.spawn(Camera2d);
         })

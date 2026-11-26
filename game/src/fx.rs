@@ -198,6 +198,8 @@ fn flash_and_shake(mut commands: Commands, time: Res<Time<Real>>, view: Res<View
 #[derive(Resource)]
 struct Meshes {
     bits: Handle<Mesh>,
+    /// Sparks: light, added over what is below (glow.rs).
+    sparks: Handle<Mesh>,
     light: Handle<Mesh>,
 }
 
@@ -221,6 +223,7 @@ fn draw(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut add_materials: ResMut<Assets<crate::glow::AddMaterial>>,
     handles: Option<Res<Meshes>>,
     view: Res<View>,
     time: Res<Time<Real>>,
@@ -233,11 +236,14 @@ fn draw(
     let _timed = crate::log::Timed::new(&mut perf, crate::log::P_LIGHTS);
     let Some(h) = handles else {
         let bits_h = meshes.add(empty());
+        let sparks_h = meshes.add(empty());
         let light_h = meshes.add(empty());
+        commands.spawn((Mesh2d(sparks_h.clone()), MeshMaterial2d(add_materials.add(crate::glow::AddMaterial::default())), Transform::from_xyz(0.0, 0.0, 16.5), NoFrustumCulling));
         // Effects over the machines; the light over everything.
         commands.spawn((Mesh2d(bits_h.clone()), MeshMaterial2d(materials.add(ColorMaterial::default())), Transform::from_xyz(0.0, 0.0, 16.0), NoFrustumCulling));
-        commands.spawn((Mesh2d(light_h.clone()), MeshMaterial2d(materials.add(ColorMaterial::default())), Transform::from_xyz(0.0, 0.0, 17.0), NoFrustumCulling));
-        commands.insert_resource(Meshes { bits: bits_h, light: light_h });
+        // (The light is added over what it falls on: see glow.rs.)
+        commands.spawn((Mesh2d(light_h.clone()), MeshMaterial2d(add_materials.add(crate::glow::AddMaterial::default())), Transform::from_xyz(0.0, 0.0, 17.0), NoFrustumCulling));
+        commands.insert_resource(Meshes { bits: bits_h, sparks: sparks_h, light: light_h });
         return;
     };
     let dt = time.delta_secs().min(0.05);
@@ -326,8 +332,13 @@ fn draw(
         let d = dt as f64;
         match p.kind {
             Kind::Spark => {
-                p.vx -= ux * 30.0 * d;
-                p.vy -= uy * 30.0 * d;
+                // The body's own pull there (Benjamin, 26 Nov: gravity from
+                // the body's mass; on a small one, what is thrown hard
+                // flies off into space).
+                let (gx, gy) = dft_sim::bodies::pull(&body.0, p.x, p.y);
+                p.vx += gx * d;
+                p.vy += gy * d;
+                let _ = (ux, uy);
             }
             Kind::Smoke | Kind::Dust => {
                 // Rising slows; it spreads as it goes.
@@ -340,16 +351,30 @@ fn draw(
         p.y += p.vy * d;
         true
     });
+    let (mut spos, mut scol) = (Vec::new(), Vec::new());
+    let mut spark_lights = 0;
     for p in bits.iter() {
         if p.x < l - 10.0 || p.x > r + 10.0 || p.y < b - 10.0 || p.y > t + 10.0 {
             continue;
         }
         let f = 1.0 - p.age / p.life;
         match p.kind {
-            Kind::Spark => quad(&mut pos, &mut col, p.x.floor(), p.y.floor(), 1.0, lin([p.c[0] / 255.0, p.c[1] / 255.0, p.c[2] / 255.0], f)),
+            Kind::Spark => {
+                // Light, added, fading in three steps (the mockup's sparks);
+                // every fourth lights the ground round it a little.
+                let k = (f * 3.0).ceil() / 3.0;
+                let c = lin([p.c[0] / 255.0, p.c[1] / 255.0, p.c[2] / 255.0], 1.0);
+                quad(&mut spos, &mut scol, p.x.floor(), p.y.floor(), 1.0, [c[0] * k, c[1] * k, c[2] * k, 1.0]);
+                spark_lights += 1;
+                if spark_lights % 4 == 0 && spark_lights < 400 {
+                    emit(p.x, p.y, 3.0, p.c, 0.3 * k);
+                }
+            }
             Kind::Smoke | Kind::Dust => {
-                // Blocks of its own size, on the grid of that size.
+                // Blocks of its own size, on the grid of that size, fading
+                // in four steps.
                 let s = p.size.round().max(1.0) as f64;
+                let f = (f * 4.0).ceil() / 4.0;
                 let a = if matches!(p.kind, Kind::Smoke) { 0.5 } else { 0.4 } * f;
                 quad(&mut pos, &mut col, (p.x / s).floor() * s, (p.y / s).floor() * s, s, lin([p.c[0] / 255.0, p.c[1] / 255.0, p.c[2] / 255.0], a));
             }
@@ -363,6 +388,15 @@ fn draw(
         let m = m.into_inner();
         m.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
         m.insert_attribute(Mesh::ATTRIBUTE_COLOR, col);
+    }
+    if spos.is_empty() {
+        spos.extend_from_slice(&[[0.0; 3]; 3]);
+        scol.extend_from_slice(&[[0.0; 4]; 3]);
+    }
+    if let Some(m) = meshes.get_mut(&h.sparks) {
+        let m = m.into_inner();
+        m.insert_attribute(Mesh::ATTRIBUTE_POSITION, spos);
+        m.insert_attribute(Mesh::ATTRIBUTE_COLOR, scol);
     }
 
     // ---- Melt left by a blast glows, flickering, until it cools ----
@@ -426,28 +460,38 @@ fn draw(
             m != dft_sim::materials::VACUUM
         };
         lit.sort_unstable();
-        for o in lit {
-            let c = buf[o];
-            let m = c[0].max(c[1]).max(c[2]);
-            if m < 1.0 / BANDS {
-                continue;
+        // (Which blocks are solid is looked up for every lit block, the
+        // generator answering for untouched ground: on all cores.)
+        use bevy::tasks::{ComputeTaskPool, ParallelSlice};
+        let parts = lit.par_chunk_map(ComputeTaskPool::get(), 1024, |_, chunk| {
+            let (mut p2, mut c2) = (Vec::new(), Vec::new());
+            for &o in chunk {
+                let c = buf[o];
+                let m = c[0].max(c[1]).max(c[2]);
+                if m < 1.0 / BANDS {
+                    continue;
+                }
+                let (i, j) = ((o % gw) as i64, (o / gw) as i64);
+                let (wx, wy) = (((i + gx0) as f64) * g, ((j + gy0) as f64) * g);
+                let half = (g / 2.0).floor();
+                let solid = solid_at((wx + half) as i64, (wy + half) as i64);
+                // Thin light in open space is dithered: every other block.
+                if !solid && m < 3.0 / BANDS && (i + j) & 1 == 1 {
+                    continue;
+                }
+                let k = if solid { LIGHT_SOLID } else { LIGHT_AIR };
+                // Added over what is there: its own colour, as strong as it is.
+                let cc = [q(c[0]) * k, q(c[1]) * k, q(c[2]) * k];
+                if cc[0].max(cc[1]).max(cc[2]) <= 0.0 {
+                    continue;
+                }
+                quad(&mut p2, &mut c2, wx, wy, g, lin(cc, 1.0));
             }
-            let (i, j) = ((o % gw) as i64, (o / gw) as i64);
-            let (wx, wy) = (((i + gx0) as f64) * g, ((j + gy0) as f64) * g);
-            let half = (g / 2.0).floor();
-            let solid = solid_at((wx + half) as i64, (wy + half) as i64);
-            // Thin light in open space is dithered: every other block.
-            if !solid && m < 3.0 / BANDS && (i + j) & 1 == 1 {
-                continue;
-            }
-            let k = if solid { LIGHT_SOLID } else { LIGHT_AIR };
-            // Added over what is there: its own colour, as strong as it is.
-            let cc = [q(c[0]) * k, q(c[1]) * k, q(c[2]) * k];
-            let a = cc[0].max(cc[1]).max(cc[2]).min(1.0);
-            if a <= 0.0 {
-                continue;
-            }
-            quad(&mut pos, &mut col, wx, wy, g, lin([cc[0] / a, cc[1] / a, cc[2] / a], a));
+            (p2, c2)
+        });
+        for (p2, c2) in parts {
+            pos.extend(p2);
+            col.extend(c2);
         }
     }
     if pos.is_empty() {
