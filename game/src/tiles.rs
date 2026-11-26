@@ -488,6 +488,31 @@ pub fn collapse_radius(p: &Planet, eaten: f64) -> f64 {
     (r / full * 400.0).ceil() / 400.0 * full
 }
 
+/// The air's most see-through strength, at the ground (it was 0.55; Benjamin,
+/// 26 Nov: the sky a bit darker and more varied).
+const AIR_ALPHA: f64 = 0.42;
+
+/// One texel of air at (x, y), `r` from the centre and a share `t` of the
+/// way up the atmosphere: denser near the ground and thinning faster with
+/// height (the sky above goes toward space), in haze layers lying along the
+/// ground (`layers`: how much they vary), lighter low down where it
+/// scatters the light, deeper in colour higher up.
+fn air(p: &dft_sim::planet::Planet, x: f64, y: f64, r: f64, t: f64, faint: f64, layers: f64) -> [u8; 4] {
+    let along = y.atan2(x) * r;
+    let fall = (1.0 - t).max(0.0).powf(1.7);
+    let n1 = dft_sim::noise::value(0xA17, along / 220.0, r / 45.0);
+    let n2 = dft_sim::noise::value(0xA18, along / 70.0, r / 14.0);
+    let v = (1.0 + layers * ((n1 - 0.5) * 1.4 + (n2 - 0.5) * 0.5)).max(0.0);
+    let a = (faint * fall * v).clamp(0.0, 0.9);
+    let c = p.palette.atmosphere;
+    let lift = 0.18 * (1.0 - t) - 0.12 * t;
+    let ch = |k: u8| {
+        let k = k as f64;
+        (if lift >= 0.0 { k + (255.0 - k) * lift } else { k * (1.0 + lift) }).clamp(0.0, 255.0) as u8
+    };
+    [ch(c[0]), ch(c[1]), ch(c[2]), (a * 255.0) as u8]
+}
+
 /// The atmosphere's floor in each published direction (see AIR_SMOOTH_M),
 /// from the ground's published heights `h`.
 fn air_floor(p: &Planet, h: &[f32]) -> Vec<f32> {
@@ -628,7 +653,11 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
     let whole = 1.0 - thin;
     let atm = p.spec.atmosphere_m * whole;
     let deep = HAZE_DEEP_M * whole;
-    let faint = 0.55 * whole.sqrt();
+    // (Thicker air is denser: the Dev planet's 600 m as it was, a hothouse's
+    // 6 km murkier. Its layers stand out more with glamour.)
+    let density = (1.0 + 0.25 * (p.spec.atmosphere_m.max(1.0) / 600.0).log10()).clamp(0.75, 1.3);
+    let faint = AIR_ALPHA * whole.sqrt() * density;
+    let layers = 0.25 + 0.5 * p.spec.glamour.unwrap_or(0.0).clamp(0.0, 1.0);
     let band = CRUMBLE * p.max_radius;
     let debris = (p.max_radius / 300.0).max(2.0);
     let mut has_ghost = false;
@@ -771,9 +800,7 @@ fn build_inner(p: &Planet, k: Key, live: Option<Arc<Shared>>, collapse: f64, hei
                     if atm <= 0.0 || h >= atm {
                         continue;
                     }
-                    let a = faint * (1.0 - h / atm);
-                    let c = p.palette.atmosphere;
-                    [c[0], c[1], c[2], (a * 255.0) as u8]
+                    air(p, fx, fy, r, h / atm, faint, layers)
                 }
             } else {
                 let mut c = dft_sim::render::colour_at(p, m, cx, cy, ground);

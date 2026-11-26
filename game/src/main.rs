@@ -23,6 +23,7 @@
 //!                         off by default: the camera only moves when you move it)
 //!   --zoom-limit          limit zooming out until the body is charted (off by default)
 //!   --no-fog              start with the fog of war off (F2 toggles it)
+//!   --old-look            draw blocks the 5 Nov way (stones, beds, bevels), not the mockup's grain
 //!   --full-detail         move loose matter everywhere, not only on screen
 //!   --camera [plan]       benchmark: a scripted camera (see bench.rs; the
 //!                         default plan without one), closing at its end
@@ -109,6 +110,8 @@ pub struct Options {
     pub watch: Option<String>,
     /// Press this unit's Watch button 30 game seconds in (--summon sapper).
     pub summon: Option<String>,
+    /// Blocks drawn the 5 Nov way (--old-look), for comparison.
+    pub old_look: bool,
     pub size: (u32, u32),
     /// A window of `size` (--size, --windowed) rather than maximized.
     pub windowed: bool,
@@ -145,6 +148,7 @@ impl Options {
             view: None,
             watch: None,
             summon: None,
+            old_look: false,
             size: (1600, 900),
             windowed: false,
             load: None,
@@ -250,6 +254,10 @@ impl Options {
                 "--frames" => o.frames = val(i)?.parse().map_err(|_| "--frames takes a number")?,
                 "--watch" => o.watch = Some(val(i)?),
                 "--summon" => o.summon = Some(val(i)?),
+                "--old-look" => {
+                    o.old_look = true;
+                    used = 1;
+                }
                 "--view" => {
                     let v: Vec<f64> = val(i)?.split(',').filter_map(|x| x.parse().ok()).collect();
                     if v.len() != 3 {
@@ -380,6 +388,9 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if o.old_look {
+        dft_sim::texture::set_style(dft_sim::texture::Style::Old);
+    }
     let recipe = Recipe { body: o.body.clone(), seed: o.seed, radius_km: o.radius_km, glamour: o.glamour };
     let started = match &o.load {
         Some(which) => saves::find(which).and_then(|p| saves::read_file(&p)).map_err(|e| format!("couldn't load the save: {e}")),

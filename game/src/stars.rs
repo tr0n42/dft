@@ -25,7 +25,10 @@ impl Plugin for StarsPlugin {
 #[derive(Component)]
 struct Sky;
 
-fn make(seed: u64) -> Vec<u8> {
+/// Space behind the body is never jet black (Benjamin, 26 Nov): a dark
+/// nebula in the body's own air colour (or a cold violet for an airless
+/// one) with a fainter warm drift, stronger with glamour.
+fn make(seed: u64, tint: [u8; 3], glamour: f64) -> Vec<u8> {
     let n = SIZE as usize;
     let mut px = vec![0u8; n * n * 4];
     // A faint haze: soft noise on a lattice that wraps at the image's edge,
@@ -44,11 +47,16 @@ fn make(seed: u64) -> Vec<u8> {
             let (fx, fy) = (x as f64 / n as f64, y as f64 / n as f64);
             let h1 = wrap_noise(seed ^ 0x51, 5, fx * 5.0, fy * 5.0);
             let h2 = wrap_noise(seed ^ 0x52, 13, fx * 13.0, fy * 13.0);
-            let haze = ((h1 * 0.7 + h2 * 0.3) - 0.55).max(0.0) * 2.2;
+            let h3 = wrap_noise(seed ^ 0x53, 31, fx * 31.0, fy * 31.0);
+            let w1 = wrap_noise(seed ^ 0x54, 4, fx * 4.0, fy * 4.0);
+            let haze = ((h1 * 0.6 + h2 * 0.3 + h3 * 0.1) - 0.42).max(0.0) * 1.9;
+            let warm = ((w1 * 0.7 + h3 * 0.3) - 0.55).max(0.0) * 2.0;
+            let k = (0.10 + 0.16 * glamour) * haze;
+            let kw = (0.04 + 0.08 * glamour) * warm;
             let o = (y * n + x) * 4;
-            px[o] = (6.0 + 10.0 * haze) as u8;
-            px[o + 1] = (7.0 + 6.0 * haze) as u8;
-            px[o + 2] = (12.0 + 18.0 * haze) as u8;
+            px[o] = (8.0 + tint[0] as f64 * k + 150.0 * kw).min(255.0) as u8;
+            px[o + 1] = (9.0 + tint[1] as f64 * k + 80.0 * kw).min(255.0) as u8;
+            px[o + 2] = (15.0 + tint[2] as f64 * k + 70.0 * kw).min(255.0) as u8;
             px[o + 3] = 255;
         }
     }
@@ -78,7 +86,7 @@ fn make(seed: u64) -> Vec<u8> {
 }
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, body: Res<crate::Body>) {
-    let mut img = Image::new(Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 }, TextureDimension::D2, make(body.0.spec.seed), TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    let mut img = Image::new(Extent3d { width: SIZE, height: SIZE, depth_or_array_layers: 1 }, TextureDimension::D2, make(body.0.spec.seed, sky_tint(&body.0), body.0.spec.glamour.unwrap_or(0.0).clamp(0.0, 1.0)), TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
     img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { address_mode_u: ImageAddressMode::Repeat, address_mode_v: ImageAddressMode::Repeat, ..ImageSamplerDescriptor::nearest() });
     let h = images.add(img);
     commands.spawn((Sprite { image: h, custom_size: Some(Vec2::splat(SIZE as f32)), rect: Some(Rect::new(0.0, 0.0, SIZE as f32, SIZE as f32)), ..default() }, Transform::from_xyz(0.0, 0.0, -500.0), Sky));
@@ -91,4 +99,10 @@ fn follow(view: Res<View>, mut q: Query<&mut Sprite, With<Sky>>) {
     let ox = turn.rem_euclid(SIZE as f32);
     sprite.custom_size = Some(Vec2::new(w, h));
     sprite.rect = Some(Rect::new(ox, 0.0, ox + w, h));
+}
+
+/// The nebula's colour: the body's air, or a cold violet with none.
+fn sky_tint(p: &dft_sim::planet::Planet) -> [u8; 3] {
+    let a = p.palette.atmosphere;
+    if p.spec.atmosphere_m > 0.0 && a.iter().map(|&c| c as u32).sum::<u32>() > 60 { a } else { [96, 84, 160] }
 }

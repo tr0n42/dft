@@ -73,6 +73,57 @@ pub fn kinds(mats: &MaterialTable) -> Vec<Kind> {
         .collect()
 }
 
+/// Which look blocks are drawn in (Benjamin, 26 Nov: the mockups' grain).
+/// Grain: ordinary rock, sediment and powder are one flat colour per block,
+/// each block lighter or darker at random, in soft bands, with the odd
+/// mineral fleck (the swarm foundry mockup's `rockC`); crystals, metals and
+/// ices keep their shine. Old: the 5 Nov block textures (stones, beds,
+/// bevels), kept for comparison (the game's --old-look).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Style {
+    Grain,
+    Old,
+}
+
+static STYLE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn set_style(s: Style) {
+    STYLE.store(if s == Style::Old { 1 } else { 0 }, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn style() -> Style {
+    if STYLE.load(std::sync::atomic::Ordering::Relaxed) == 1 { Style::Old } else { Style::Grain }
+}
+
+/// The grain: how much lighter or darker a block may be (the mockup's
+/// x0.82 to x1.12, about its own colour), the soft bands' height (m), how
+/// much they differ, and how often a block is a mineral fleck.
+const GRAIN_JITTER: f64 = 0.30;
+const GRAIN_BAND_M: f64 = 9.0;
+const GRAIN_BAND: f64 = 0.07;
+const GRAIN_FLECK: f64 = 0.015;
+/// The mockup's ore flecks, blended into the block's own colour.
+const FLECKS: [[f64; 3]; 7] = [[112.0, 96.0, 82.0], [86.0, 80.0, 74.0], [128.0, 110.0, 88.0], [96.0, 92.0, 98.0], [140.0, 84.0, 58.0], [74.0, 88.0, 96.0], [150.0, 132.0, 96.0]];
+
+/// A grainy block's colour: flat across it (the same for every pixel in it).
+fn grain(c: [u8; 3], cx: i64, cy: i64) -> [u8; 3] {
+    let h = unit(hash(0x7F1, cx, cy, 3));
+    // Soft bands following the depth (the distance from the body's
+    // centre), waving a few metres along the ground.
+    let (x, y) = (cx as f64 + 0.5, cy as f64 + 0.5);
+    let r = (x * x + y * y).sqrt();
+    let along = y.atan2(x) * r;
+    let band = ((r + 3.0 * (along * 0.05).sin()) / GRAIN_BAND_M).floor() as i64;
+    let b = 1.0 + GRAIN_BAND * (unit(hash(0x7F2, band, 0, 0)) * 2.0 - 1.0);
+    if h > 1.0 - GRAIN_FLECK {
+        let k = FLECKS[(unit(hash(0x7F3, cy, cx, 5)) * 7.0) as usize % 7];
+        let mix = |i: usize| (c[i] as f64 * 0.4 + k[i] * 0.6) * 1.18 * b;
+        return [mix(0).clamp(0.0, 255.0) as u8, mix(1).clamp(0.0, 255.0) as u8, mix(2).clamp(0.0, 255.0) as u8];
+    }
+    let f = (1.0 - GRAIN_JITTER * 0.5 + GRAIN_JITTER * h) * b;
+    scale(c, f)
+}
+
 fn scale(c: [u8; 3], f: f64) -> [u8; 3] {
     [(c[0] as f64 * f).clamp(0.0, 255.0) as u8, (c[1] as f64 * f).clamp(0.0, 255.0) as u8, (c[2] as f64 * f).clamp(0.0, 255.0) as u8]
 }
@@ -88,6 +139,9 @@ pub struct Sides {
 /// One pixel of block (cx, cy) drawn in colour `c` (already shaded), at
 /// position (u, v) inside it (0..1, v up), `ppc` pixels per cell across.
 pub fn texel(kind: Kind, c: [u8; 3], cx: i64, cy: i64, u: f64, v: f64, ppc: f64, sides: Sides) -> [u8; 3] {
+    if style() == Style::Grain && matches!(kind, Kind::Rock | Kind::Layered | Kind::Grain) {
+        return grain(c, cx, cy);
+    }
     let h = hash(0x7E7, cx, cy, 1);
     // Every block a touch lighter or darker than its neighbours.
     let mut f = 1.0 + 0.09 * (unit(h) - 0.5) * if kind == Kind::Flat { 0.0 } else { 1.0 };
