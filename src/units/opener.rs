@@ -161,11 +161,11 @@ impl Sim {
     /// Worth of the ground round `p` (a few points 8 m apart), per cell.
     fn opener_worth(&self, p: (f64, f64)) -> f64 {
         let mut sum = 0.0;
-        for (dx, dy) in [(0.0, 0.0), (8.0, 0.0), (-8.0, 0.0), (0.0, 8.0), (0.0, -8.0)] {
+        for (dx, dy) in [(0.0, 0.0), (8.0, 0.0), (-8.0, 0.0)] {
             let m = self.world.material((p.0 + dx).floor() as i64, (p.1 + dy).floor() as i64);
             sum += self.units.mat_value.get(m as usize).copied().unwrap_or(0.0);
         }
-        sum / 5.0
+        sum / 3.0
     }
 
     /// Whether `p` lies past a capped breach no passage has been opened
@@ -200,7 +200,9 @@ impl Sim {
             let m = self.mother;
             let r0 = self.world.planet.radius.max(1.0);
             let reach = (m.half + spec.ahead_m / r0).min(std::f64::consts::PI);
-            let n = ((2.0 * reach * r0 / spec.scan_step_m.max(8.0)).ceil() as usize).clamp(8, 256);
+            // (At most 96 columns, sampled every 32 m: on a big body each
+            // look deep down may build ground never looked at before.)
+            let n = ((2.0 * reach * r0 / spec.scan_step_m.max(8.0)).ceil() as usize).clamp(8, 96);
             let stalled: Vec<(f64, f64)> = self.stalled_sites().iter().map(|&(i, _)| self.site_pos(i)).collect();
             for j in 0..n {
                 let a = m.centre - reach + 2.0 * reach * (j as f64 + 0.5) / n as f64;
@@ -227,7 +229,7 @@ impl Sim {
                     if hard_here && d >= 40.0 && d <= 64.0 {
                         consider(p, Aim::Hard, spec.hard_score / (1.0 + d / d0), &mut best);
                     }
-                    d += 24.0;
+                    d += 32.0;
                 }
             }
             // A frozen passage through magma no one has gone on down: on
@@ -264,7 +266,7 @@ impl Sim {
                 // there (its depth under the head).
                 let w = self.opener_worth(p);
                 consider(p, Aim::Value, w / (1.0 + d / d0), &mut best);
-                d += 24.0;
+                d += 32.0;
             }
         }
         best

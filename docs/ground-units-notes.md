@@ -231,3 +231,23 @@ obsidian skin) went from minutes to over 50 minutes.
   short of it, never move into magma, give up a job whose spot has filled
   ("stale jobs"), and a job that wrecks two bots is dropped. 15 wrecks in
   20 minutes down to 8; the rest are magma rising onto a bot at work.
+
+### Flight paths and the 500k benchmark (26 Nov, morning)
+
+- Found (code review): flying units moved in a straight line, so a tunneler
+  flying to a new shaft far along the surface, or a walker flying to the far
+  side, would cut through the rock. `fly_over` (platform.rs): up to a
+  cruising height over the higher ground, round the body, then in.
+- Benchmark (bench-units.bat: 500,000 cutters, living world 35 km, 20 game
+  min; clean baseline from the tag on the same PC, run alone):
+  - Stage 1 identical work (same kt mined, same cutters working); the
+    fingerprint differs only because the units' hash now mixes heat jobs.
+  - Stage 2: no sapper ordered (no flock struggles on the living world in
+    20 min): made to order, as designed.
+  - Found: tunnelers cost 23 ms per game second (baseline 0.2). The look
+    through the fog sampled up to 256 columns x 83 depths x 5 cells every
+    30 s, and on a 35 km body most of that ground had never been built, so
+    each look built it. Now: scanned only while fewer than `keep` are out,
+    at most 96 columns, every 32 m, 3 cells. Under 0.5 ms; stage 3 280 s
+    real against the baseline's 278.
+  - Heat sinks 1.4 ms (baseline 2.7), foresters 0.65 (1.25), sappers 0.15.

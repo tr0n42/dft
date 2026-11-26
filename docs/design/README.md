@@ -10,7 +10,7 @@ export, so they show as `[embedded content: ...]` or picture placeholders.
 | [game-design-plan.md](game-design-plan.md) | The Dark Forest Theory — Game Design & Technical Plan | 2 Nov 2026 (rev 1157) | https://claude.ai/artifact/4Wfryd7cBArfBR7cx6SkCr |
 | [swarm-production.md](swarm-production.md) | Swarm Production Design | 9 Nov 2026 (rev 15) | https://claude.ai/artifact/3LKCygqRGZSwUVzDd1CktB |
 | [element-abundance.md](element-abundance.md) | Element Abundance Master Table | 9 Nov 2026 (rev 18) | https://claude.ai/artifact/2yb9kfVeL86XptSLn7KX7Y |
-| [ground-units.md](ground-units.md) | Ground units: agreed behaviour (written here, no live doc; wins over older docs) | 25 Nov 2026 | none |
+| [ground-units.md](ground-units.md) | Ground units: agreed behaviour (written here, no live doc; wins over older docs). Built: see ../ground-units-notes.md and the v2 page | 25 Nov 2026 | v2 page: https://claude.ai/artifact/USiKVvYxSPM5Hyu2NwwCUD |
 | [flora-design.md](flora-design.md) | Life L1 — Procedural Flora Design | 6 Nov 2026 (rev 14) | https://claude.ai/artifact/Ss3ZUbdBKLF9Kk3dJbrS4o |
 
 Not copied, because they're pages rather than docs:

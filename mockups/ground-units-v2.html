@@ -1,0 +1,2264 @@
+<title>Ground Units v2</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column (phone first). Each unit is a live block-drawn demo on a small test planet, then its written summary. Dark by design, like the swarm foundry mockup. */
+:root {
+  --void: #05070c;
+  --panel: #0b1117;
+  --edge: #1f2d2c;
+  --ink: #d5dfdb;
+  --dim: #93a19d;
+  --lamp: #2ed66e;
+  --heat: #ffa45c;
+  --warn: #ff7a6b;
+  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--void); color: var(--ink);
+  font-family: var(--body); font-size: 16px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  overflow-x: hidden;
+}
+.page { max-width: 780px; margin: 0 auto; padding-block: 28px 64px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 56px; }
+.page > *, .unit > *, .closing > *, header > * { min-width: 0; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 8vw, 46px); line-height: 1.05; letter-spacing: 0.03em; text-transform: uppercase; }
+h1 b { color: var(--lamp); font-weight: 600; }
+h2 { font-size: 26px; letter-spacing: 0.05em; text-transform: uppercase; }
+h3 { font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--lamp); }
+p { margin: 0; }
+a { color: var(--lamp); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--lamp); outline-offset: 2px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+header { display: grid; gap: 16px; }
+.intro { display: grid; gap: 12px; max-width: 65ch; }
+.intro ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.index { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.index a { display: inline-block; font-family: var(--mono); font-size: 13px; color: var(--ink); text-decoration: none; border: 1px solid var(--edge); border-radius: 3px; padding: 5px 10px; background: var(--panel); }
+.index a:hover { border-color: var(--lamp); color: var(--lamp); }
+
+.unit { display: grid; gap: 18px; scroll-margin-top: 16px; }
+.unit-head { display: grid; gap: 6px; }
+.unit-head .tag { font-family: var(--mono); font-size: 13px; color: var(--dim); }
+
+.demo { margin: 0; display: grid; gap: 0; border: 1px solid var(--edge); border-radius: 4px; overflow: hidden; background: var(--panel); }
+.stage { position: relative; background: var(--void); }
+.stage canvas { display: block; width: 100%; max-width: 100%; aspect-ratio: 16 / 10; image-rendering: pixelated; }
+.progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(46, 214, 110, 0.12); }
+.progress i { display: block; height: 100%; background: var(--lamp); transform-origin: left center; transform: scaleX(0); }
+.dock { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-top: 1px solid var(--edge); }
+.phase { flex: 1; min-width: 0; min-height: 3.1em; font-family: var(--mono); font-size: 13px; line-height: 1.5; color: var(--ink); }
+.ctl { display: flex; gap: 6px; flex-shrink: 0; }
+button {
+  font-family: var(--mono); font-size: 13px; color: var(--ink);
+  background: #101920; border: 1px solid var(--edge); border-radius: 3px;
+  padding: 7px 11px; cursor: pointer; min-height: 36px;
+}
+button:hover { border-color: var(--lamp); }
+button[aria-pressed="true"] { color: var(--lamp); border-color: var(--lamp); }
+.demo figcaption { padding: 0 12px 12px; font-size: 14px; color: var(--dim); }
+.demo figcaption b { color: var(--ink); font-weight: 500; }
+
+.summary { display: grid; gap: 18px; padding-top: 4px; }
+.summary > div { display: grid; gap: 8px; min-width: 0; }
+.summary ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.summary li { padding-left: 2px; }
+.summary .fix { display: block; color: var(--dim); }
+.summary .fix b { color: var(--lamp); font-weight: 500; }
+.summary .q li::marker { color: var(--heat); }
+.nums { margin: 0; display: grid; gap: 0; border-top: 1px solid var(--edge); }
+.nums > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--edge); }
+.nums dt { color: var(--dim); font-size: 14px; }
+.nums dd { margin: 0; font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { .nums > div { grid-template-columns: minmax(0, 1fr); gap: 2px; } .dock { flex-direction: column; } .ctl { align-self: flex-end; } }
+
+.closing { display: grid; gap: 14px; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--edge); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; min-width: 460px; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--edge); vertical-align: top; }
+th { font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); background: var(--panel); }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bats { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.bats li { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: 4px; background: var(--panel); }
+.bats code { font-family: var(--mono); font-size: 14px; color: var(--lamp); overflow-wrap: anywhere; }
+.bats span { font-size: 14px; color: var(--dim); }
+footer { font-size: 13px; color: var(--dim); }
+</style>
+
+<div class="page">
+<header>
+  <p class="eyebrow">The Dark Forest Theory · ground units · 26 November 2026</p>
+  <h1>Ground units <b>v2</b></h1>
+  <div class="intro">
+    <p>This is version 2 of the swarm's ground units, as built on 25 and 26 November 2026 from the behaviour we agreed class by class. Each unit has a live demo on a small test planet, then a write-up of what I built, what went wrong and how I fixed it, the numbers it landed on, and the questions I have for you.</p>
+    <p>How to use it:</p>
+    <ul>
+      <li>Scroll to a unit. Its demo starts when it comes into view and pauses when you scroll away, to save battery.</li>
+      <li>The line under each demo says what the unit is doing right now. <b>Replay</b> starts the demo again from the beginning.</li>
+      <li>The demos are drawings of the agreed behaviour, in the mockup's one-metre blocks. They run faster than the game, and a few depths are shortened so everything fits on screen (each demo says where). The game itself runs the real simulation.</li>
+      <li>Give feedback per unit: the "Open questions" list at the end of each one is where I most need your call.</li>
+    </ul>
+  </div>
+  <ul class="index" aria-label="Units on this page">
+    <li><a href="#sapper">Sapper</a></li>
+    <li><a href="#tunneler">Tunneler</a></li>
+    <li><a href="#heatsink">Heat-sink bot</a></li>
+    <li><a href="#forester">Forester</a></li>
+    <li><a href="#abductor">Abductor</a></li>
+    <li><a href="#couriers">Couriers</a></li>
+    <li><a href="#performance">Performance</a></li>
+  </ul>
+</header>
+
+<!-- ======================= SAPPER ======================= -->
+<section class="unit" id="sapper">
+  <div class="unit-head">
+    <h2>Sapper</h2>
+    <p class="tag">small · a 5 kt nuclear charge · made to order where cutters struggle</p>
+  </div>
+  <figure class="demo" data-demo="sapper">
+    <div class="stage"><canvas aria-label="Demo: a sapper drills under hard rock, moves sideways away from a tunneler, and goes off, loosening a column of ground up to the surface"></canvas><div class="progress"><i></i></div></div>
+    <div class="dock"><p class="phase">Loading…</p><div class="ctl"><button type="button" class="play" id="play-sapper" aria-pressed="false">Pause</button><button type="button" class="replay" id="replay-sapper">Replay</button></div></div>
+    <figcaption><b>Watch for:</b> the depth readout on its tag, the sideways move away from the tunneler, the light blinking faster once armed, the loosened column widening toward the surface, cutters falling as scrap, the hauler hit, then fresh cutters scooping rubble. Depth and blast size are true to the game (79 m, 24 m); the drilling is sped up.</figcaption>
+  </figure>
+  <section class="summary" data-unit="sapper">
+    <div>
+      <h3>What it does</h3>
+      <p>A small machine carrying a nuclear charge. When cutters hit rock so hard that they slow right down, the director sends one. It drills deep under the hard ground and goes off, and everything above it turns into loose rubble that cutters can scoop up quickly.</p>
+    </div>
+    <div>
+      <h3>What I built</h3>
+      <ul>
+        <li>The charge's size (its yield) sets everything: how deep it goes, how much ground comes loose, the damage and the plume. Depth is 46 m times the cube root of the yield in kilotons, so 79 m for today's 5 kt charge.</li>
+        <li>A loosened column: every solid cell from the charge up to the surface becomes loose rubble. It is as wide as the blast at the bottom and 1.6 times that at the top. Hard rock sometimes holds together in big cracked chunks. About 5,000 cells per blast.</li>
+        <li>Made to order instead of a fixed count. A flock counts as struggling when it has cut at least 3 loads lately and each kg takes 3 times as long as in soft rock (hardness 3; granite is about 4 times). Then a sapper is ordered, at most one every 90 seconds and at most 3 out at once.</li>
+        <li>Blasts are dangerous. Cutters in the column (and 4 m round it) are wrecked, and their scrap is kept. Haulers within 3 blast widths of where it breaks the surface are damaged, and destroyed within the first third of that.</li>
+        <li>It never catches a tunneler. If one is too close, it drills sideways (up to 200 m) to get clear, or waits armed.</li>
+        <li>Out of sight, a stalled stretch gets the same loosening done by arithmetic, with no plume, and the share of cutters working there is lost.</li>
+        <li>The plume grows with the yield and is drawn only when it would be at least 20 pixels tall on screen, so a big one shows from far out.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Problems found and how they were fixed</h3>
+      <ul>
+        <li>On the Dev planet nothing struggled for over 15 minutes, because cutters pick the easiest cells and there are 120 m of soft layers over the granite. That is the right behaviour, so no sapper was needed there.<span class="fix"><b>Fixed:</b> a sapper testbed (3 km, 8 m of soft rock over granite and gabbro). There flocks reach 4.1 times slower at about 4 minutes, and a sapper follows every 90 seconds.</span></li>
+        <li>Sappers went off at the surface. The dust from their own drilling fell back on them and counted as being buried.<span class="fix"><b>Fixed:</b> being buried never sets one off now. Only magma or the heat of another blast does.</span></li>
+        <li>The loosened column came out short (50 m, once only 1 m). It measured the surface by looking straight down, which meant down the sapper's own shaft.<span class="fix"><b>Fixed:</b> it now reads the surface on either side of the shaft.</span></li>
+        <li>Off screen almost no cutters died, because off-screen cutters do a whole trip at once and wait at their hauler.<span class="fix"><b>Fixed:</b> a cutter is caught if where it is, where it is going, where it came from or where it last cut is in the column. Off screen now loses 140 to 190 cutters a blast on the testbed, the same as on screen.</span></li>
+      </ul>
+    </div>
+    <div>
+      <h3>Where it landed (numbers)</h3>
+      <dl class="nums">
+        <div><dt>Depth at 5 kt</dt><dd>79 m</dd></div>
+        <div><dt>Blast radius at 5 kt</dt><dd>24 m</dd></div>
+        <div><dt>Loosened column, each side</dt><dd>24 m at the charge, 38 m at the surface</dd></div>
+        <div><dt>Ground loosened per blast</dt><dd>about 5,000 cells</dd></div>
+        <div><dt>When it is ordered</dt><dd>a flock 3× slower per kg than in soft rock; at most 1 every 90 s, 3 out</dd></div>
+        <div><dt>Cutters lost per blast (testbed, 20,000 cutters)</dt><dd>140–190</dd></div>
+        <div><dt>Haulers</dt><dd>damaged within 72 m, destroyed within 24 m</dd></div>
+        <div><dt>Arming</dt><dd>2.5 s</dd></div>
+        <div><dt>Cost (testbed)</dt><dd>0.3–2 ms per game second</dd></div>
+      </dl>
+    </div>
+    <div class="q">
+      <h3>Open questions for Benjamin</h3>
+      <ul>
+        <li>140 to 190 cutters lost per blast: does that feel like the right price, given the director never pulls flocks back?</li>
+        <li>One sapper every 90 seconds at most, 3 out at once: too often, or not often enough?</li>
+        <li>Is the plume the size you pictured, and should it read from even further out?</li>
+        <li>Haulers near the blast are damaged, and destroyed when very close: is that the right amount of danger?</li>
+      </ul>
+    </div>
+  </section>
+</section>
+
+<!-- ======================= TUNNELER ======================= -->
+<section class="unit" id="tunneler">
+  <div class="unit-head">
+    <h2>Tunneler</h2>
+    <p class="tag">the opener · the vanguard · sees through the fog</p>
+  </div>
+  <figure class="demo" data-demo="tunneler">
+    <div class="stage"><canvas aria-label="Demo: a tunneler bores a curving shaft through the fog to an ore deposit and a magma layer, caps the magma, backs up and finally goes off deep"></canvas><div class="progress"><i></i></div></div>
+    <div class="dock"><p class="phase">Loading…</p><div class="ctl"><button type="button" class="play" id="play-tunneler" aria-pressed="false">Pause</button><button type="button" class="replay" id="replay-tunneler">Replay</button></div></div>
+    <figcaption><b>Watch for:</b> the fog lifting round its head, the shaft curving (never more than 20° off straight down), the turning red-hot drill cone, the spoil plume out of the shaft's mouth and its own crew carrying it off, the magma freezing to dark glass at its drill, and its final blast. Depths are shortened: the magma is about 85 m down here, about 450 m on the testbed.</figcaption>
+  </figure>
+  <section class="summary" data-unit="tunneler">
+    <div>
+      <h3>What it does</h3>
+      <p>The vanguard. A big drilling machine that sees through the fog, picks the ground most worth opening (material valuable to the swarm once it leaves, and what the swarm needs now), and bores a curving shaft down to it. It caps magma so cutters don't die in it, drills through very hard rock for them, and at the very end goes off deep down as a big nuclear blast: a final gift of matter.</p>
+    </div>
+    <div>
+      <h3>What I built</h3>
+      <ul>
+        <li>A rewrite, "the opener". (The old tunneler stays only for the old perk and old saves.)</li>
+        <li>Value: every 60 seconds it rates each material by its worth in space and by how short the stockpile is of what cutters and haulers are made of.</li>
+        <li>Targets: it looks at columns every 96 m across the swarm's reach and 3 km past it, down to 2 km, checked every 24 m. It can see through the fog to do this. A target's score is its worth divided by (1 + depth ÷ 300 m), so near and needed comes first without forgetting the valuable one. Magma layers and hard rock under struggling flocks are special targets.</li>
+        <li>Steering: it turns at most 0.6° per metre and never goes past 20° off straight down, so its shafts curve.</li>
+        <li>Crew: its own cutters take all of its spoil, with the mass kept whole. It waits if they fall behind.</li>
+        <li>Magma: when magma comes within reach of its drill, it caps it (the magma 4 m past the drill freezes to glass) and leaves a job for a heat-sink bot. Then it backs up its shaft and looks for the next target.</li>
+        <li>End: with nothing left anywhere, it sinks back down its shaft, stopping 80 m short of the bottom, and goes off: 50 kt.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Problems found and how they were fixed</h3>
+      <ul>
+        <li>With a crew of 30 cutters (3.6 tonnes a second), the drill could do 130 tonnes a second but spent the whole run waiting: 156 m in 15 minutes.<span class="fix"><b>Fixed:</b> a crew of 200 (30 tonnes a second). Then the drill became the limit at 10 m a minute in granite, so its power went from 100 to 400 times a cutter's (0.8 m a second in granite), which matches the crew. It now bores about 450 m in 10 minutes.</span></li>
+        <li>Right after capping magma it found nothing further down (everything was behind the cap) and blew itself up, wasting the unit and risking the cap.<span class="fix"><b>Fixed:</b> it backs up to its shaft's mouth and searches its whole reach again for a new shaft. Only when nothing is left anywhere does it go off, well short of the cap.</span></li>
+        <li>Depth readings taken straight down a shaft found the shaft's bottom instead of the surface.<span class="fix"><b>Fixed:</b> a new reading of the surface on either side of the shaft, used by sappers too.</span></li>
+      </ul>
+    </div>
+    <div>
+      <h3>Where it landed (numbers)</h3>
+      <dl class="nums">
+        <div><dt>Boring speed in granite</dt><dd>0.8 m/s (400× a cutter)</dd></div>
+        <div><dt>Shaft in 10 minutes</dt><dd>about 450 m</dd></div>
+        <div><dt>Shaft width</dt><dd>12 m</dd></div>
+        <div><dt>Crew</dt><dd>200 cutters, 30 t/s of spoil</dd></div>
+        <div><dt>Steering</dt><dd>0.6° per metre, at most 20° off straight down</dd></div>
+        <div><dt>Fog</dt><dd>sees at double the usual radius</dd></div>
+        <div><dt>Magma cap</dt><dd>4 m past its drill</dd></div>
+        <div><dt>Final blast</dt><dd>50 kt, 80 m short of its shaft's bottom</dd></div>
+        <div><dt>Cost (testbed, 2 tunnelers, 20,000 cutters)</dt><dd>0.2–0.4 ms per game second</dd></div>
+      </dl>
+    </div>
+    <div class="q">
+      <h3>Open questions for Benjamin</h3>
+      <ul>
+        <li>About 450 m in 10 minutes and the testbed's magma reached in about 10 minutes: is that the right pace?</li>
+        <li>Its crew is 200 cutters. Is it fine that only some of them are drawn on screen?</li>
+        <li>Should the 50 kt final blast be visible from far zoom, like a big sapper plume?</li>
+        <li>How much should each upgrade widen the 20° angle?</li>
+      </ul>
+    </div>
+  </section>
+</section>
+
+<!-- ======================= HEAT SINK ======================= -->
+<section class="unit" id="heatsink">
+  <div class="unit-head">
+    <h2>Heat-sink bot</h2>
+    <p class="tag">two roles · freezes magma to stone · its own crew</p>
+  </div>
+  <figure class="demo" data-demo="heatsink">
+    <div class="stage"><canvas aria-label="Demo: a heat-sink bot freezes a passage through a magma layer under a tunneler's cap, then another cools a small surface pool"></canvas><div class="progress"><i></i></div></div>
+    <div class="dock"><p class="phase">Loading…</p><div class="ctl"><button type="button" class="play" id="play-heatsink" aria-pressed="false">Pause</button><button type="button" class="replay" id="replay-heatsink">Replay</button></div></div>
+    <figcaption><b>Watch for:</b> first the deep job (role 2): the bot comes down a tunneler's shaft to the cap, its cooling tentacles reach down to the front, the magma freezes to stone a row at a time, and its crew digs out only the middle, so frozen walls stay either side. A tunneler then goes on down. After that, role 1: a bot settles over a small surface pool and cools all of it. Freezing is sped up.</figcaption>
+  </figure>
+  <section class="summary" data-unit="heatsink">
+    <div>
+      <h3>What it does</h3>
+      <p>It cools magma so the swarm can work through it. Role 1: it settles over a small magma pool near the cutters and freezes all of it. Role 2: under a tunneler's cap, it freezes a passage straight down through a magma layer, wide enough for a tunneler, so tunnelers can carry on down. It makes a passage, not the whole layer.</p>
+    </div>
+    <div>
+      <h3>What I built</h3>
+      <ul>
+        <li>Every 30 seconds it looks for open pools near the flocks. Small ones (up to 1,500 cells, all within its 30 m reach) are pools to cool. Wide ones under open space become deep jobs, 40 m apart, with as many bots as fit.</li>
+        <li>The director builds as many as there is work for, up to a cap, deep jobs first.</li>
+        <li>Freezing: 40 cells a second at the freezing point. A hotter cell costs up to 4 times as much. Heat only sets how long it takes; cooling never fails. No power is beamed up for now.</li>
+        <li>Deep job: it goes down the tunneler's shaft to the cap. Its front freezes a slab across the passage (a tunneler's 12 m plus 3 m of frozen wall each side) a metre at a time. Its crew of 60 cutters digs out only the middle 12 m behind it, so the walls stay. The passage is through when the front has gone 6 m past the cap with no hot liquid and the crew has caught up. Then the tunneler's shaft is extended and tunnelers go down it.</li>
+        <li>End: idle for 10 seconds with no next job, it powers down and is left as scrap for the cutters. Magma reaching it wrecks it.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Problems found and how they were fixed</h3>
+      <ul>
+        <li>Passages counted as "through" after only 4 to 6 m, because the tunneler's cap had already frozen the first metres.<span class="fix"><b>Fixed:</b> clear metres count only past the cap.</span></li>
+        <li>Passages ran 400 m through a 90 m layer: the front kept going through the solid ground under the layer while it waited for the crew.<span class="fix"><b>Fixed:</b> it stops once clear and lets the crew catch up. Passages are now 119 to 135 m.</span></li>
+        <li>5 bots were wrecked by magma: slanting passages left gaps in their walls.<span class="fix"><b>Fixed:</b> the walls are now laid in two rows a metre, half a metre apart. None wrecked since.</span></li>
+        <li>A tunneler capped the same breach 17 times, 3 m deeper each time, because the passage wasn't really through.<span class="fix"><b>Fixed:</b> a cap within 40 m of a known job reopens that job.</span></li>
+        <li>On the testbed the lower mantle was 1,700 K, so any rock disturbed there melted, making an endless magma layer.<span class="fix"><b>Fixed:</b> the testbed's mantle is now 1,000 K.</span></li>
+      </ul>
+    </div>
+    <div>
+      <h3>Where it landed (numbers)</h3>
+      <dl class="nums">
+        <div><dt>Freezing</dt><dd>40 cells/s at freezing point, up to 4× slower when hotter</dd></div>
+        <div><dt>Passage width</dt><dd>12 m middle + 3 m frozen wall each side</dd></div>
+        <div><dt>Crew</dt><dd>60 cutters, 150 kg/s each</dd></div>
+        <div><dt>Passage through a 90 m layer</dt><dd>119–135 m (was 400 m)</dd></div>
+        <div><dt>Bots lost to magma since the wall fix</dt><dd>0 (was 5)</dd></div>
+        <div><dt>Small pool</dt><dd>up to 1,500 cells, all within 30 m</dd></div>
+        <div><dt>Powers down</dt><dd>after 10 s idle</dd></div>
+        <div><dt>Cost (testbed, with tunnelers)</dt><dd>under 1 ms per game second</dd></div>
+      </dl>
+    </div>
+    <div class="q">
+      <h3>Open questions for Benjamin</h3>
+      <ul>
+        <li>On the lava world (a magma ocean under a thin skin), heat sinks still lose about 8 bots in 20 minutes to magma rising over them while they work, down from 15. Is that "magma doing what magma does", or should they back off when the magma rises?</li>
+        <li>A lava world flooding through a tunneler's hole is expensive to simulate on screen: 1 to 43 ms per game second while you watch it closely, and much more if a whole planet were simulated in detail (only tests do that). Worth a look when you zoom in on one.</li>
+        <li>Is 1,500 cells the right limit for a "small" pool it cools completely?</li>
+        <li>Steam is drawn only when it's cheap at that zoom. Is it showy enough?</li>
+      </ul>
+    </div>
+  </section>
+</section>
+
+<!-- ======================= FORESTER ======================= -->
+<section class="unit" id="forester">
+  <div class="unit-head">
+    <h2>Forester</h2>
+    <p class="tag">a crab on three legs · claws shear trees · its laser burns the cover</p>
+  </div>
+  <figure class="demo" data-demo="forester">
+    <div class="stage"><canvas aria-label="Demo: a forester flies folded from the mother swarm, drops, unfolds, shears trees into its bag and burns ground cover; couriers lift its full bag"></canvas><div class="progress"><i></i></div></div>
+    <div class="dock"><p class="phase">Loading…</p><div class="ctl"><button type="button" class="play" id="play-forester" aria-pressed="false">Pause</button><button type="button" class="replay" id="replay-forester">Replay</button></div></div>
+    <figcaption><b>Watch for:</b> the folded flight with its ring of lights, the drop and unfold, the stride (it sags when a leg lifts and jolts when a foot lands), the eye stalks darting, claws feeding the bag slung behind, the laser lighting the cover and fire creeping to its neighbours, and couriers lifting the full bag. The walker is the mockup's, ported as it is.</figcaption>
+  </figure>
+  <section class="summary" data-unit="forester">
+    <div>
+      <h3>What it does</h3>
+      <p>Mostly for fun. It roams the planet ahead of the cutters, clearing plant life that might be hostile or hard to reach. Its claws shear trees into a clippings bag slung behind it, and its laser sets the ground cover alight. Fire spreads to anything that burns nearby. It has no crew: the ash waits for whatever cutters arrive.</p>
+    </div>
+    <div>
+      <h3>What I built</h3>
+      <ul>
+        <li>The look is the mockup's: a crab facing forward on three sprawling legs, curved legs with knees riding high, and the stride with its sag, jolt and surge. The game had drifted to a sideways crab on four legs; that version is gone. (A helper did this part and it was merged.)</li>
+        <li>Flight: it is launched over the thickest stand of plants anywhere on the planet and flies folded, a bit like a UFO, past the swarm's edge if need be. Then it drops, unfolds and starts work.</li>
+        <li>Retiring: when walking to the next plants would take longer than building a new one and flying it there (plus 8 seconds), it powers down. Its bag and its body are left for the couriers to take back up.</li>
+        <li>Fire out of sight: what its laser lights where nobody is looking becomes a fire front burned by arithmetic, spreading to the plants around it. In view it becomes real fire. Burn gases are lost to the sky.</li>
+        <li>A full bag is dropped on the ground for the couriers.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Problems found and how they were fixed</h3>
+      <ul>
+        <li>The game's forester no longer matched the mockup: sideways, four legs, its bag under its middle and its laser firing from the eye stalks.<span class="fix"><b>Fixed:</b> redrawn and re-animated from the mockup: forward-facing, three legs, bag behind, laser from the front, the mockup's gait.</span></li>
+      </ul>
+    </div>
+    <div>
+      <h3>Where it landed (numbers)</h3>
+      <dl class="nums">
+        <div><dt>Body height over the ground</dt><dd>50 m</dd></div>
+        <div><dt>Flight</dt><dd>40 m/s, 120 m over the ground</dd></div>
+        <div><dt>Full bag</dt><dd>80,000 kg</dd></div>
+        <div><dt>Fire out of sight</dt><dd>30 cells/s; about 5,000 plant cells in 15 min (Dev planet)</dd></div>
+        <div><dt>Retirements</dt><dd>2–3 in 15 min on the Dev planet, each replaced</dd></div>
+        <div><dt>Health</dt><dd>2,000</dd></div>
+      </dl>
+    </div>
+    <div class="q">
+      <h3>Open questions for Benjamin</h3>
+      <ul>
+        <li>Does fire spread fast enough to be fun, or too fast?</li>
+        <li>2 to 3 retirements in 15 minutes on the Dev planet: about right?</li>
+        <li>Burn gases are lost to the sky for now. Do you want gas-harvesting bots later?</li>
+      </ul>
+    </div>
+  </section>
+</section>
+
+<!-- ======================= ABDUCTOR ======================= -->
+<section class="unit" id="abductor">
+  <div class="unit-head">
+    <h2>Abductor</h2>
+    <p class="tag">a spider on three legs · palps take animals alive · its laser bursts what spits or runs</p>
+  </div>
+  <figure class="demo" data-demo="abductor">
+    <div class="stage"><canvas aria-label="Demo: an abductor flies in, unfolds, snatches grazing animals into its sac and lasers animals that spit at the cutters or run"></canvas><div class="progress"><i></i></div></div>
+    <div class="dock"><p class="phase">Loading…</p><div class="ctl"><button type="button" class="play" id="play-abductor" aria-pressed="false">Pause</button><button type="button" class="replay" id="replay-abductor">Replay</button></div></div>
+    <figcaption><b>Watch for:</b> animals with a green spine spitting green gobs at the cutters (a hit cutter falls as scrap, and a new one comes down), the palps lashing out to snatch grazers alive, the laser bursting spitters and runners into red, and never a fire. Its sac holds fewer catches in the demo than in the game, so the couriers come sooner.</figcaption>
+  </figure>
+  <section class="summary" data-unit="abductor">
+    <div>
+      <h3>What it does</h3>
+      <p>The forester's twin, for animals. Its palps snatch grazing animals alive into its sac. Its laser bursts animals that spit at the swarm, or that run, into gore and biomass. Its laser never starts fires. It is nearly invulnerable.</p>
+    </div>
+    <div>
+      <h3>What I built</h3>
+      <ul>
+        <li>Same flight, retiring rule and out-of-sight rule as the forester. It goes to the densest animals, counting those within 200 m.</li>
+        <li>Gore: there are no blood or flesh materials yet, and adding them would change every planet's fingerprint. So a lasered animal's mass is credited as biomass at once, and the game draws a red burst (sparks and red dust).</li>
+        <li>Live catches are now credited at their own mass (the old double value is gone). Cutters don't hunt animals.</li>
+        <li>Spitters: animals with a ranged attack (a green spine). They spit every 6 seconds at machines within 60 m. A walker loses 5 health (an abductor has 100,000); otherwise a flock within reach loses a cutter.</li>
+        <li>Herds out of sight: calm animals nobody sees, more than 400 m from any walker, move every 10 seconds instead of every frame.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Problems found and how they were fixed</h3>
+      <ul>
+        <li>It lasered every animal that ran and caught nothing alive, because animals panic the moment it arrives.<span class="fix"><b>Fixed:</b> spitters first (a shot every 2 seconds), then the palps for anything in reach, and runners out of reach only every 3 seconds. Now about 70 to 90 caught alive and 240 to 290 burst in 15 minutes.</span></li>
+      </ul>
+    </div>
+    <div>
+      <h3>Where it landed (numbers)</h3>
+      <dl class="nums">
+        <div><dt>Body height over the ground</dt><dd>62 m</dd></div>
+        <div><dt>Health</dt><dd>100,000 (a spit does 5)</dd></div>
+        <div><dt>Spitters (Dev planet)</dt><dd>15% of animals, a spit every 6 s within 60 m</dd></div>
+        <div><dt>Laser</dt><dd>within 120 m; every 2 s at spitters, every 3 s at runners</dd></div>
+        <div><dt>In 15 minutes</dt><dd>70–90 caught alive, 240–290 burst</dd></div>
+        <div><dt>Full sac</dt><dd>2,000 kg</dd></div>
+      </dl>
+    </div>
+    <div class="q">
+      <h3>Open questions for Benjamin</h3>
+      <ul>
+        <li>It still bursts about 3 animals for every one it catches alive. Is that the balance you want?</li>
+        <li>Should blood and flesh become real materials later (pools for cutters to collect, like the mockup)? It changes every planet's fingerprint once.</li>
+        <li>I assumed cutters never hunt animals. Correct?</li>
+      </ul>
+    </div>
+  </section>
+</section>
+
+<!-- ======================= COURIERS ======================= -->
+<section class="unit" id="couriers">
+  <div class="unit-head">
+    <h2>Couriers</h2>
+    <p class="tag">a picture of the logistics · cost nothing · can't die</p>
+  </div>
+  <figure class="demo" data-demo="couriers">
+    <div class="stage"><canvas aria-label="Demo: couriers come down from the mother swarm, latch onto a full bag, a full sac and a retired walker's body, lift them and fade back into the swarm"></canvas><div class="progress"><i></i></div></div>
+    <div class="dock"><p class="phase">Loading…</p><div class="ctl"><button type="button" class="play" id="play-couriers" aria-pressed="false">Pause</button><button type="button" class="replay" id="replay-couriers">Replay</button></div></div>
+    <figcaption><b>Watch for:</b> couriers dropping from the mother swarm, the lines of light when they latch on, the lift getting faster and faster, and the load fading back into the swarm.</figcaption>
+  </figure>
+  <section class="summary" data-unit="couriers">
+    <div>
+      <h3>What it does</h3>
+      <p>Couriers are only a picture of the logistics arithmetic. Material really moves as flows with distance delays; the couriers show what that arithmetic is doing. They cost nothing, can't die, and fade back into the mother swarm when done. Their only job on the surface for now is taking up full forester bags and abductor sacs (and the body of a walker that has retired).</p>
+    </div>
+    <div>
+      <h3>What I built</h3>
+      <ul>
+        <li>A full bag or sac is dropped on the ground. Couriers reach it after 20 seconds plus its distance from the mother swarm at 60 m a second. The load is credited as they lift it.</li>
+        <li>On screen they come down at 40 m a second from 150 m up, latch on for 0.6 seconds (lines of light down to the load), then lift faster and faster and fade into the swarm.</li>
+        <li>A group is 2 couriers plus one for every 7 items: 5 for a forester's bag, 4 for an abductor's sac.</li>
+        <li>A retired walker's bag and body (as scrap, its parts' mass) go up the same way.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Problems found and how they were fixed</h3>
+      <ul>
+        <li>None logged. This part of the run was a check that couriers match the agreed design, not a rewrite.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Where it landed (numbers)</h3>
+      <dl class="nums">
+        <div><dt>Pickup delay</dt><dd>20 s + distance at 60 m/s</dd></div>
+        <div><dt>Seen coming down</dt><dd>40 m/s from 150 m up</dd></div>
+        <div><dt>Latched</dt><dd>0.6 s</dd></div>
+        <div><dt>Group size</dt><dd>2 + 1 per 7 items (5 per bag, 4 per sac)</dd></div>
+        <div><dt>Cost</dt><dd>nothing; they can't die</dd></div>
+      </dl>
+    </div>
+    <div class="q">
+      <h3>Open questions for Benjamin</h3>
+      <ul>
+        <li>Should couriers carry anything else on the surface later, such as wrecked cutters' scrap?</li>
+        <li>Is the fade back into the swarm the right ending, or should they visibly join it?</li>
+      </ul>
+    </div>
+  </section>
+</section>
+
+<!-- ======================= CLOSING ======================= -->
+<section class="closing" id="performance">
+  <h2>Performance</h2>
+  <p>What each unit costs the game, in milliseconds of real time per game second, measured on the testbeds with 20,000 cutters, on Benjamin's PC.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th scope="col">Unit</th><th scope="col">ms per game second</th><th scope="col">Notes</th></tr></thead>
+      <tbody>
+        <!-- PERF TABLE -->
+        <tr><td>Sapper</td><td class="n">0.3–2</td><td>Hard-rock testbed, 3 out at most. A blast's sweep over every cutter is the dearest part, and blasts come at most every 90 s.</td></tr>
+        <tr><td>Tunneler</td><td class="n">0.2–0.4</td><td>Two out on the magma testbed. Their shafts are real cells; the crew is arithmetic.</td></tr>
+        <tr><td>Heat-sink bot</td><td class="n">0.1–0.5</td><td>With the tunnelers, both under 1 ms. A flooding magma ocean on screen costs the heat simulation 1–43 ms more (lava world, watched closely).</td></tr>
+        <tr><td>Forester</td><td class="n">1.2–3.5</td><td>Two on the Dev planet, everything on screen (the worst case). Fires out of sight cost almost nothing.</td></tr>
+        <tr><td>Abductor</td><td class="n">under 0.1</td><td>Its hunt; the walking is counted with the foresters. Calm herds out of sight now step every 10 s.</td></tr>
+        <tr><td>Couriers</td><td class="n">about 0</td><td>Drawn only; the books move a bag in one step.</td></tr>
+        <tr><td>500k cutters, all units</td><td class="n">277 s</td><td>Real seconds for 20 game minutes on the 35 km living world, every unit out, against 278 s before this work (clean baseline on the same PC). With cutters and haulers only: 273 s against 299 s. One problem found and fixed on the way: the tunneler's look through the fog cost 23 ms a game second on a big world, now under 0.5.</td></tr>
+        <!-- /PERF TABLE -->
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="closing" id="in-game">
+  <h2>How to see it in the game</h2>
+  <p>Double-click any of these in the game folder. The first build is slow.</p>
+  <ul class="bats">
+    <li><code>run-test-sappers.bat</code><span>Hard rock under a thin skin, 20,000 cutters. Within a few minutes the cutters hit granite and the director starts sending sappers. F1 shows sappers, blasts and cutters killed.</span></li>
+    <li><code>run-test-tunnelers.bat</code><span>Ore in a granite crust and a magma layer about 450 m down. Tunnelers bore curving shafts, reach the magma in about 10 minutes and cap it; heat sinks freeze a passage, then a tunneler goes on down.</span></li>
+    <li><code>run-test-walkers.bat</code><span>Foresters and abductors on the Dev planet: the folded flight, trees sheared, fire spreading, animals caught or burst, and retirement when building a new one is quicker.</span></li>
+    <li><code>run-test-all-units.bat</code><span>Every ground unit at once on the Dev planet, with 20,000 cutters.</span></li>
+    <li><code>lab-units.bat</code><span>The units in numbers, no window: each testbed for 15 game minutes, printing every game minute what the units are doing and what they cost. About 5 minutes in all.</span></li>
+  </ul>
+</section>
+
+<footer>Drawn in the swarm foundry mockup's one-metre blocks and lighting. Swarm light colour: green.</footer>
+</div>
+
+<script>
+(() => {
+"use strict";
+const RM = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+const rnd = Math.random;
+
+// ---------- randomness and colour (from the swarm foundry mockup) ----------
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function hash(x, y, s) {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(s | 0, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+const SEED = 1001;
+const LAMP = [46, 214, 110];
+const C = { dark: [31, 33, 32], vent: [9, 10, 10] };
+function armour(x, y, s) { const k = (0.27 + 0.07 * hash(x, y, s)) * 255; return [k, k * 1.06, k * 1.04]; }
+function light(x, y, s) { const k = (0.40 + 0.06 * hash(x, y, s)) * 255; return [k, k * 1.04, k * 1.03]; }
+function strut(x, y, s) { const k = (0.34 + 0.05 * hash(x, y, s)) * 255; return [k, k * 1.05, k * 1.05]; }
+function darkg(x, y, s) { const k = (0.10 + 0.04 * hash(x, y, s)) * 255; return [k, k * 1.05, k * 1.03]; }
+function sinew(x, y, s) { const k = (0.11 + 0.05 * hash(x, y, s)) * 255; return [k * 0.9, k * 0.97, k * 1.14]; }
+function bone(x, y, s) { const k = (0.37 + 0.07 * hash(x, y, s)) * 255; return [k * 0.95, k, k * 1.05]; }
+const css = (c, a = 1) => a >= 1 ? `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})` : `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a.toFixed(3)})`;
+const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+function pulse(t, x) { return 0.62 + 0.38 * Math.sin(Math.PI * 2 * t / 4 - x * 0.012); }
+const ease = (a) => a <= 0 ? 0 : a >= 1 ? 1 : a * a * (3 - 2 * a);
+const bez = (a, b, c, n) => { const out = []; for (let i = 0; i <= n; i++) { const u = i / n, p = (1 - u) * (1 - u), q = 2 * (1 - u) * u, z = u * u; out.push([p * a[0] + q * b[0] + z * c[0], p * a[1] + q * b[1] + z * c[1]]); } return out; };
+const ORES = [[112, 96, 82], [86, 80, 74], [128, 110, 88], [96, 92, 98], [140, 84, 58], [74, 88, 96], [150, 132, 96]];
+const HOLE = [10, 10, 13];
+const COPPER = [176, 108, 62], COLD = [150, 215, 255];
+const BARK = [92, 62, 40], WOOD = [176, 136, 90], MEAT = [150, 40, 48], BLOOD = [118, 10, 18];
+const STEAM_C = [214, 220, 226];
+const lavaC = (x, y, t) => {
+  const f = 0.5 + 0.22 * Math.sin(t * 0.9 + x * 0.21 + y * 0.13) + 0.22 * Math.sin(t * 0.7 - x * 0.17 + y * 0.29) + 0.2 * (hash(x >> 1, (y >> 1) + Math.floor(t * 2), 7) - 0.5) + 0.1 * (hash(x, y, 11) - 0.5);
+  return f > 0.82 ? [255, 210, 110] : f > 0.66 ? [250, 130, 40] : f > 0.45 ? [196, 64, 20] : f > 0.3 ? [140, 38, 14] : [96, 26, 12];
+};
+const stoneC = (x, y, age) => mix([70, 66, 64], [96, 60, 44], Math.max(0, 1 - age / 6)).map(v => v * (0.85 + 0.25 * hash(x, y, 3)));
+function rockC(x, y, depth, seed) {
+  const h = hash(x, y, seed), band = ((Math.floor((depth + 3 * Math.sin(x * 0.05)) / 9) % 4) + 4) % 4;
+  if (h > 0.985) return ORES[Math.floor(hash(y, x, seed) * ORES.length)];
+  return [[96, 86, 76], [82, 77, 72], [104, 92, 80], [76, 72, 70]][band].map(v => v * (0.82 + 0.3 * h));
+}
+const pieceAt = (x, y, sz) => {
+  const i0 = Math.floor(x / sz), j0 = Math.floor(y / sz); let best = 1e9, id = 0;
+  for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const px = (i + hash(i, j, 41)) * sz, py = (j + hash(j, i, 43)) * sz, d = (px - x) ** 2 + (py - y) ** 2; if (d < best) { best = d; id = i * 7919 + j; } }
+  return id;
+};
+
+// ---------- the demo being drawn: its canvas and camera ----------
+// Blocks are drawn in whole device pixels at a whole-number zoom, so the
+// ground image and the units meet exactly.
+let ctx = null, Z = 4, OX = 0, OY = 0, CW = 0, CH = 0, D = null, GA = 1, GD = 1;
+function block(x, y, c, a = 1, s = 1) {
+  const x0 = Math.round(x * Z + OX), x1 = Math.round((x + s) * Z + OX);
+  const y0 = Math.round(OY - (y + s) * Z), y1 = Math.round(OY - y * Z);
+  if (x1 <= 0 || y1 <= 0 || x0 >= CW || y0 >= CH || x1 <= x0 || y1 <= y0) return;
+  a *= GA; if (a <= 0.01) return;
+  ctx.fillStyle = GD === 1 ? css(c, a) : css([c[0] * GD, c[1] * GD, c[2] * GD], a);
+  ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+}
+function drawPath(pts, colour) {
+  let px = Math.round(pts[0][0]), py = Math.round(pts[0][1]);
+  block(px, py, colour(0));
+  for (let i = 1; i < pts.length; i++) {
+    const bx = Math.round(pts[i][0]), by = Math.round(pts[i][1]);
+    for (let s = 0; s < 60 && (px !== bx || py !== by); s++) {
+      if (Math.abs(bx - px) >= Math.abs(by - py)) px += Math.sign(bx - px); else py += Math.sign(by - py);
+      block(px, py, colour(i));
+    }
+  }
+}
+function ring(x, y, r, c, a) {
+  const n = Math.max(8, Math.ceil(r * 7)), seen = new Set();
+  for (let i = 0; i < n; i++) {
+    const t = i / n * Math.PI * 2, gx = Math.floor(x + Math.cos(t) * r), gy = Math.floor(y + Math.sin(t) * r), k = gx * 7919 + gy;
+    if (seen.has(k)) continue; seen.add(k); block(gx, gy, c, a);
+  }
+}
+function blockLine(x0, y0, x1, y1, c, a) {
+  let ax = Math.floor(x0), ay = Math.floor(y0); const bx = Math.floor(x1), by = Math.floor(y1);
+  const dx = Math.abs(bx - ax), dy = -Math.abs(by - ay), sx = ax < bx ? 1 : -1, sy = ay < by ? 1 : -1;
+  let err = dx + dy;
+  for (let i = 0; i < 400; i++) {
+    block(ax, ay, c, a);
+    if (ax === bx && ay === by) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; ax += sx; }
+    if (e2 <= dx) { err += dx; ay += sy; }
+  }
+}
+function limb(pts, w, col) {
+  const n = pts.length;
+  const c = col || ((i) => i % 3 === 0 ? bone(i, 0, SEED) : mix(sinew(i, 1, SEED), bone(i, 2, SEED), 0.3));
+  drawPath(pts, c);
+  if (w > 1) drawPath(pts.slice(0, Math.ceil(n * 0.7)).map(([x, y]) => [x + 1, y]), c);
+}
+
+// ---------- lighting (the mockup's engine) ----------
+// Anything hot or lit says so each frame; the light adds up on the 1 m grid
+// and is laid over the scene in stepped bands: strongly on solid blocks,
+// faintly and dithered in open space.
+function emit(x, y, r, c, i) { if (i > 0.01 && r > 0) D.lights.push(x, y, r, c[0] / 255 * i, c[1] / 255 * i, c[2] / 255 * i); }
+const LIGHT_SOLID = 0.62, LIGHT_AIR = 0.16, LIGHT_BANDS = 6;
+let lightBuf = null;
+function lightPass() {
+  const L = D.lights;
+  if (!L.length) return;
+  const W = D.world;
+  const vx0 = Math.floor(-OX / Z) - 1, vx1 = Math.ceil((CW - OX) / Z) + 1;
+  const vy0 = Math.floor((OY - CH) / Z) - 1, vy1 = Math.ceil(OY / Z) + 1;
+  const g = (vx1 - vx0) * (vy1 - vy0) > 46000 ? 2 : 1;
+  const gx0 = Math.floor(vx0 / g), gy0 = Math.floor(vy0 / g);
+  const gw = Math.ceil(vx1 / g) - gx0 + 1, gh = Math.ceil(vy1 / g) - gy0 + 1;
+  const need = gw * gh * 3;
+  if (!lightBuf || lightBuf.length < need) lightBuf = new Float32Array(need);
+  const buf = lightBuf; buf.fill(0, 0, need);
+  for (let k = 0; k < L.length; k += 6) {
+    const x = L[k], y = L[k + 1], r = L[k + 2], cr = L[k + 3], cg = L[k + 4], cb = L[k + 5];
+    const i0 = Math.max(0, Math.floor((x - r) / g) - gx0), i1 = Math.min(gw - 1, Math.floor((x + r) / g) - gx0);
+    const j0 = Math.max(0, Math.floor((y - r) / g) - gy0), j1 = Math.min(gh - 1, Math.floor((y + r) / g) - gy0);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const dx = (i + gx0 + 0.5) * g - x, dy = (j + gy0 + 0.5) * g - y;
+      const d = Math.sqrt(dx * dx + dy * dy) / r;
+      if (d >= 1) continue;
+      const f = (1 - d) * (1 - d), o = (j * gw + i) * 3;
+      buf[o] += cr * f; buf[o + 1] += cg * f; buf[o + 2] += cb * f;
+    }
+  }
+  ctx.globalCompositeOperation = "lighter";
+  const q = (v) => Math.min(LIGHT_BANDS * 1.5, Math.floor(v * LIGHT_BANDS)) / LIGHT_BANDS;
+  const ga = GA; GA = 1;
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+    const o = (j * gw + i) * 3;
+    const m = Math.max(buf[o], buf[o + 1], buf[o + 2]);
+    if (m < 1 / LIGHT_BANDS) continue;
+    const wx = (i + gx0) * g, wy = (j + gy0) * g;
+    if (W.fog && W.fogAt(wx + (g >> 1), wy + (g >> 1)) === 2) continue;
+    const solid = W.solid(wx + (g >> 1), wy + (g >> 1));
+    if (!solid && m < 3 / LIGHT_BANDS && ((i + j) & 1)) continue;
+    const k = (solid ? LIGHT_SOLID : LIGHT_AIR) * 255;
+    block(wx, wy, [q(buf[o]) * k, q(buf[o + 1]) * k, q(buf[o + 2]) * k], 1, g);
+  }
+  GA = ga;
+  ctx.globalCompositeOperation = "source-over";
+  D.lights = [];
+}
+
+// ---------- particles ----------
+function spark(x, y, n, hot = [255, 190, 90], speed = 14) {
+  const F = D.fx.sparks;
+  for (let i = 0; i < n && F.length < 320; i++) {
+    const a = rnd() * Math.PI * 2, v = speed * (0.3 + rnd());
+    F.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v + 4, life: 0.4 + rnd() * 0.7, age: 0, c: hot });
+  }
+}
+// Smoke, dust and steam: big soft blocks. `o` overrides (speed, size, life).
+function smokeC(x, y, c, o) {
+  const F = D.fx.smoke; if (F.length > 300) return;
+  const p = { x: x + (rnd() - 0.5), y, vx: (rnd() - 0.5) * 3, vy: 2 + rnd() * 3, s: 1, life: 2.5 + rnd() * 2, age: 0, c, a: 0.1, grow: 1.1, max: 3 };
+  if (o) Object.assign(p, o);
+  F.push(p);
+}
+const steam = () => ({ a: 0.12, max: 4, vy: 6 + rnd() * 6, vx: (rnd() - 0.5) * 4, life: 2.5 + rnd() * 2, grow: 0.9 });
+function burst(x, y, size, c) { D.fx.bursts.push({ x, y, t: 0, size, c }); spark(x, y, Math.round(size * 5), c, size * 4); }
+function stepFx(dt) {
+  const F = D.fx;
+  for (const b of F.bursts) b.t += dt;
+  F.bursts = F.bursts.filter(b => b.t < 0.35);
+  for (const p of F.sparks) { p.age += dt; p.vy -= 26 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
+  F.sparks = F.sparks.filter(p => p.age < p.life);
+  for (const p of F.smoke) { p.age += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy *= 1 - 0.15 * dt; p.s += dt * p.grow; }
+  F.smoke = F.smoke.filter(p => p.age < p.life);
+}
+function drawSmoke() {
+  for (const p of D.fx.smoke) {
+    const life = p.age / p.life, sz = Math.min(p.max, 1 + Math.floor(p.s));
+    block(Math.floor(p.x / sz) * sz, Math.floor(p.y / sz) * sz, p.c, p.a * Math.ceil((1 - life) * 4), sz);
+  }
+}
+function drawSparks() {
+  ctx.globalCompositeOperation = "lighter";
+  const S = D.fx.sparks;
+  for (let n = 0; n < S.length; n++) {
+    const p = S[n], a = Math.ceil((1 - p.age / p.life) * 3) / 3;
+    block(Math.floor(p.x), Math.floor(p.y), p.c, a);
+    if (n % 4 === 0) emit(p.x, p.y, 3, p.c, 0.3 * a);
+  }
+  for (const b of D.fx.bursts) {
+    const u = b.t / 0.35;
+    if (u < 0.3) { const c = Math.ceil(b.size); for (let i = -c; i < c; i++) for (let j = -c; j < c; j++) if (Math.abs(i + 0.5) + Math.abs(j + 0.5) <= c) block(Math.floor(b.x) + i, Math.floor(b.y) + j, [255, 250, 230], 0.9); }
+    ring(b.x, b.y, 1 + u * b.size * 2.2, b.c, 0.7 * (1 - u));
+    emit(b.x, b.y, b.size * 6, b.c, 2.2 * (1 - u));
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+// Thrown bits (plumes, spoil): ballistic; landing, each becomes a loose cell
+// on the ground where it falls, unless `keep` says no.
+function flyBits(list, dt, keep, g = 30) {
+  const W = D.world;
+  for (const p of list) {
+    p.vy -= g * dt; p.x += p.vx * dt; p.y += p.vy * dt; if (p.hot) p.hot *= 1 - dt * 0.8;
+    if (p.vy < 0) {
+      const x = Math.round(p.x), y = Math.round(p.y);
+      if (y < W.y0) { p.dead = true; continue; }
+      if (W.solid(x, y)) {
+        p.dead = true;
+        let ly = y + 1; for (let k = 0; k < 8 && W.solid(x, ly); k++) ly++;
+        if (!W.solid(x, ly) && W.i(x, ly) >= 0 && (!keep || keep(x, ly, p))) W.set(x, ly, RUB, p.c, p.f || 0);
+      }
+    }
+  }
+  let k = 0; for (const p of list) if (!p.dead) list[k++] = p; list.length = k;
+}
+function drawBits(list) { for (const p of list) block(Math.round(p.x), Math.round(p.y), p.hot > 0.1 ? mix(p.c, [255, 170, 80], p.hot) : p.c); }
+
+// ---------- the ground: a small round planet seen side on ----------
+// One cell is one metre. The surface is an arc of a 420 m body, so it
+// curves away at the sides. Cells: open sky, a dug hole, rock, loose rubble,
+// magma, glass or frozen stone.
+const SKY = 0, VOID = 1, ROCK = 2, RUB = 3, MAG = 4, GLASS = 5;
+const F_CHUNK = 1, F_ORE = 2, F_SPOIL = 3, F_CAP = 4, F_FROZEN = 5;
+class World {
+  constructor(x0, y0, w, h, R, noise) {
+    Object.assign(this, { x0, y0, w, h, R, noise });
+    this.mat = new Uint8Array(w * h); this.hard = new Uint8Array(w * h); this.flag = new Uint8Array(w * h);
+    this.base = new Uint8ClampedArray(w * h * 3);
+    this.cv = document.createElement("canvas"); this.cv.width = w; this.cv.height = h;
+    this.g = this.cv.getContext("2d"); this.img = this.g.createImageData(w, h); this.px = this.img.data;
+    this.hot = new Map(); this.magma = []; this.dirty = true; this.frame = 0;
+    this.fog = null; this.surfs = new Float32Array(w);
+    for (let ix = 0; ix < w; ix++) this.surfs[ix] = this.calcSurf(ix + x0);
+  }
+  calcSurf(x) { const r = this.R + this.noise(x); return Math.sqrt(Math.max(0, r * r - x * x)) - this.R; }
+  surfY(x) { x = Math.round(x); const ix = x - this.x0; return ix >= 0 && ix < this.w ? this.surfs[ix] : this.calcSurf(x); }
+  surf(x) { return Math.floor(this.surfY(x)); }
+  i(x, y) { x -= this.x0; y -= this.y0; return (x < 0 || y < 0 || x >= this.w || y >= this.h) ? -1 : y * this.w + x; }
+  m(x, y) { const i = this.i(x, y); return i >= 0 ? this.mat[i] : (y <= this.surf(x) ? ROCK : SKY); }
+  solid(x, y) { return this.m(x, y) >= ROCK; }
+  open(x, y) { return this.m(x, y) <= VOID; }
+  build(layer) {
+    for (let iy = 0; iy < this.h; iy++) for (let ix = 0; ix < this.w; ix++) {
+      const x = ix + this.x0, y = iy + this.y0, i = iy * this.w + ix, s = this.surfs[ix];
+      if (y > Math.floor(s)) { this.mat[i] = SKY; this.paint(i, null); continue; }
+      const L = layer(x, y, s - y);
+      this.mat[i] = L.m || ROCK; this.hard[i] = Math.round((L.h || 0) * 100); this.flag[i] = L.f || 0;
+      this.paint(i, L.c);
+      if (this.mat[i] === MAG) this.magma.push(i);
+    }
+  }
+  pix(i, c) { const p = ((this.h - 1 - ((i / this.w) | 0)) * this.w + (i % this.w)) * 4; this.px[p] = c[0]; this.px[p + 1] = c[1]; this.px[p + 2] = c[2]; this.px[p + 3] = 255; }
+  paint(i, c) {
+    const o = i * 3;
+    if (!c) { const p = ((this.h - 1 - ((i / this.w) | 0)) * this.w + (i % this.w)) * 4; this.px[p + 3] = 0; this.base[o] = this.base[o + 1] = this.base[o + 2] = 0; }
+    else { this.base[o] = c[0]; this.base[o + 1] = c[1]; this.base[o + 2] = c[2]; this.pix(i, c); }
+    this.dirty = true;
+  }
+  set(x, y, m, c, f = 0) {
+    const i = this.i(x, y); if (i < 0) return;
+    this.mat[i] = m; this.flag[i] = f; this.hot.delete(i);
+    if (m === MAG) this.magma.push(i);
+    this.paint(i, m === SKY ? null : m === VOID ? HOLE : c);
+  }
+  col(x, y) { const i = this.i(x, y); if (i < 0) return [90, 80, 70]; const o = i * 3; return [this.base[o], this.base[o + 1], this.base[o + 2]]; }
+  heat(x, y, v) { const i = this.i(x, y); if (i >= 0) this.hot.set(i, Math.max(v, this.hot.get(i) || 0)); }
+  top(x) { const ix = x - this.x0; if (ix < 0 || ix >= this.w) return this.surf(x); for (let iy = this.h - 1; iy >= 0; iy--) if (this.mat[iy * this.w + ix] >= ROCK) return iy + this.y0; return this.y0; }
+  // The fog: what the swarm hasn't seen. 2 hidden, 1 the dithered edge, 0 seen.
+  makeFog(hidden) {
+    this.fog = new Uint8Array(this.w * this.h);
+    this.fcv = document.createElement("canvas"); this.fcv.width = this.w; this.fcv.height = this.h;
+    this.fg = this.fcv.getContext("2d"); this.fimg = this.fg.createImageData(this.w, this.h);
+    for (let iy = 0; iy < this.h; iy++) for (let ix = 0; ix < this.w; ix++) { const v = hidden(ix + this.x0, iy + this.y0); this.fog[iy * this.w + ix] = v; this.fogPix(iy * this.w + ix); }
+    this.fogDirty = true;
+  }
+  fogPix(i) {
+    const ix = i % this.w, iy = (i / this.w) | 0, p = ((this.h - 1 - iy) * this.w + ix) * 4, v = this.fog[i];
+    const a = v === 2 ? 255 : v === 1 && ((ix + iy) & 1) ? 255 : 0;
+    this.fimg.data[p] = 6; this.fimg.data[p + 1] = 8; this.fimg.data[p + 2] = 13; this.fimg.data[p + 3] = a;
+  }
+  reveal(x, y, r) {
+    for (let yy = Math.floor(y - r - 4); yy <= y + r + 4; yy++) for (let xx = Math.floor(x - r - 4); xx <= x + r + 4; xx++) {
+      const i = this.i(xx, yy); if (i < 0 || this.fog[i] === 0) continue;
+      const d = Math.hypot(xx - x, yy - y), v = d < r ? 0 : d < r + 4 ? 1 : 2;
+      if (v < this.fog[i]) { this.fog[i] = v; this.fogPix(i); this.fogDirty = true; }
+    }
+  }
+  // Hot cells (fresh melt, frozen magma, rock by a blast) glow and cool.
+  cool(dt) {
+    if (!this.hot.size) return;
+    for (const [i, h] of this.hot) {
+      const nh = h * (1 - dt * 0.4) - dt * 0.03, o = i * 3, b = [this.base[o], this.base[o + 1], this.base[o + 2]];
+      if (nh <= 0) { this.hot.delete(i); this.pix(i, b); }
+      else { this.hot.set(i, nh); this.pix(i, mix(b, nh > 0.72 ? [255, 228, 150] : [255, 140, 50], Math.min(1, nh * 1.1))); }
+    }
+    this.dirty = true;
+  }
+  fogAt(x, y) { if (!this.fog) return 0; const i = this.i(x, y); return i < 0 ? 0 : this.fog[i]; }
+  render(t, dt) {
+    this.frame++;
+    if (this.magma.length && (this.frame & 1)) {
+      let k = 0;
+      for (const i of this.magma) if (this.mat[i] === MAG) { this.magma[k++] = i; this.pix(i, lavaC((i % this.w) + this.x0, ((i / this.w) | 0) + this.y0, t)); }
+      this.magma.length = k; this.dirty = true;
+    }
+    if (this.dirty) { this.g.putImageData(this.img, 0, 0); this.dirty = false; }
+    ctx.imageSmoothingEnabled = false;
+    const sx = this.x0 * Z + OX, sy = OY - (this.y0 + this.h) * Z;
+    ctx.drawImage(this.cv, sx, sy, this.w * Z, this.h * Z);
+    if (this.fog) {
+      if (this.fogDirty) { this.fg.putImageData(this.fimg, 0, 0); this.fogDirty = false; }
+      ctx.drawImage(this.fcv, sx, sy, this.w * Z, this.h * Z);
+    }
+  }
+}
+
+// ---------- the swarm's machines (from the mockup and the game) ----------
+const CUTTER_SHAPES = [
+  [" A ", "ALA", "A A"], ["AAA", "ALA", " C "], ["A A", "ALA", " C "], ["AA ", "ALC", " AA"], [" A ", "ALA", " C "],
+  ["A A", " L ", "ACA"], ["AAA", "L A", "ACA"], [" AA", "ALC", "AA "], ["ALA", " C ", "A A"], ["A A", "ACA", " L "],
+];
+const droneShade = (id) => { const s = (0.38 + 0.16 * hash(id, 8, 77)) * 255, k = Math.floor(hash(id, 9, 77) * 7); const t = k === 0 ? [1.12, 1, 0.9] : k === 1 ? [0.9, 1, 1.12] : [1, 1.04, 1.02]; return [s * t[0], s * t[1], s * t[2]]; };
+function drawCutter(x, y, id, lit, cargo, t) {
+  const shape = CUTTER_SHAPES[Math.floor(hash(id, 7, 77) * CUTTER_SHAPES.length)], hull = droneShade(id);
+  shape.forEach((row, i) => { for (let j = 0; j < 3; j++) {
+    const ch = row[j]; let c = null;
+    if (ch === "A") c = hull; else if (ch === "L") c = lit ? mix([20, 30, 24], LAMP, pulse(t, x)) : LAMP.map(v => v * 0.35); else if (ch === "C") c = cargo || [10, 11, 11];
+    if (c) block(Math.round(x) - 1 + j, Math.round(y) + 1 - i, c);
+  } });
+  if (lit) emit(x + 0.5, y + 0.5, 3, LAMP, 0.3);
+}
+// A wrecked cutter: dark pieces, no light, an ember for a moment.
+function drawScrap(c) {
+  const h = droneShade(c.id).map(v => v * 0.5), x = Math.round(c.x), y = Math.round(c.y), s = c.id % 2 ? 1 : -1;
+  block(x - 1, y, h); block(x, y, h.map(v => v * 0.8)); block(x + s, y + 1, h);
+  if (c.t < 1.5) { block(x, y + 1, [255, 140, 60], 1 - c.t / 1.5); emit(x, y, 3, [255, 140, 60], 0.6 * (1 - c.t / 1.5)); }
+}
+const HAULER_ROWS = ["    AAAA    ", " AAAAAAAAAA ", "AALHHHHHHLAA", "AADHHHHHHDAA", "AADHHHHHHDAA", "AADHHHHHHDAA", "AAAHHHHHHAAA", " AAAAAAAAAA ", "  VV    VV  "];
+function drawHauler(x0, y0, fill, cargo, flying, t, hurt) {
+  const hull = droneShade(31);
+  x0 = Math.round(x0); y0 = Math.round(y0);
+  HAULER_ROWS.forEach((row, i) => { for (let j = 0; j < 12; j++) {
+    const ch = row[j], x = x0 + j, y = y0 + 8 - i; let c = null;
+    switch (ch) {
+      case "A": c = hull.map(v => v * (0.92 + 0.12 * hash(j, i, 5)) * (hurt && hash(j, i, 9) < 0.3 ? 0.45 : 1)); break;
+      case "L": c = hurt ? (Math.sin(t * 14 + j) > 0 ? [255, 70, 50] : [40, 20, 18]) : mix([20, 30, 24], LAMP, pulse(t, x)); break;
+      case "D": c = C.dark; break;
+      case "V": c = flying ? (rnd() < 0.6 ? [255, 200, 120] : [255, 140, 60]) : [40, 34, 30]; break;
+      case "H": { const k = (6 - i) * 6 + (j - 3); c = k < fill ? cargo[k % cargo.length] : [14, 18, 20]; break; }
+    }
+    if (c) block(x, y, c);
+  } });
+  if (flying) emit(x0 + 6, y0 - 1, 6, [255, 160, 70], 0.8);
+  if (hurt && Math.sin(t * 14) > 0) emit(x0 + 6, y0 + 5, 7, [255, 70, 50], 0.6);
+}
+// The sapper (game: SAPPER rows): A hull, n the charge, L its light.
+function drawSapper(x, y, t, st, armT) {
+  const armed = st === "arm", blink = armed ? Math.sin(t * (8 + armT * 14)) > 0 : Math.sin(t * 3) > 0.5;
+  const rows = [" AAA ", "AnnLA", "A A A"], hull = droneShade(77), x0 = Math.round(x) - 2, y0 = Math.round(y);
+  rows.forEach((row, i) => { for (let j = 0; j < 5; j++) { const ch = row[j]; if (ch === " ") continue; block(x0 + j, y0 + 2 - i, ch === "A" ? hull : ch === "L" ? (blink ? LAMP : LAMP.map(v => v * 0.3)) : mix([90, 70, 30], [255, 220, 120], armed ? 0.6 + 0.4 * Math.sin(t * 20) : 0.3)); } });
+  if (st === "fly") { block(x0 + 2, y0 - 1, [255, 220, 150], 0.9); block(x0 + 2, y0 - 2, [255, 140, 60], 0.7); emit(x0 + 2.5, y0 - 1, 5, [255, 170, 80], 0.8); }
+  if (st === "drill") { const spin = Math.floor(t * 20) % 2; block(x0 + 1 + spin, y0 - 1, [226, 224, 214]); block(x0 + 2 - spin, y0 - 1, [150, 150, 156]); block(x0 + 2, y0 - 2, [255, 220, 150], 0.9); emit(x0 + 2.5, y0 - 1.5, 4, [255, 190, 110], 0.6); }
+  if (st === "side") { const spin = Math.floor(t * 20) % 2; block(x0 + 5, y0 + spin, [226, 224, 214]); block(x0 + 5, y0 + 1 - spin, [150, 150, 156]); block(x0 + 6, y0 + 1, [255, 220, 150], 0.9); emit(x0 + 6, y0 + 1, 4, [255, 190, 110], 0.6); }
+  if (blink) emit(x0 + 3.5, y0 + 1.5, armed ? 6 : 3, LAMP, armed ? 1 : 0.4);
+}
+// The tunneler, as the game draws it: 44 long and 14 high, nose first. A
+// armour, p plate edge, j joint, s sinew, b bone, L light, d/D the cone.
+const TUN = (() => {
+  const rows = [];
+  for (let y = 0; y < 14; y++) {
+    let row = "";
+    for (let u = 0; u < 44; u++) {
+      const v = y - 6, av = Math.abs(v); let ch = " ";
+      if (u >= 31) { const half = 6.5 * (44 - u) / 13; if (av <= half) ch = (((u + v) % 3) + 3) % 3 === 0 ? "D" : "d"; }
+      else {
+        const half = u < 4 ? 2 + u : 5;
+        if (av <= half) ch = u % 6 === 5 ? "j" : av === half ? "p" : (u % 6 === 2 && av < 2) ? (u > 26 ? "L" : "b") : "A";
+        else if (v > 0 && av <= half + 2 && u % 3 === 1 && u < 30) ch = av <= half + 1 ? "s" : "b";
+        else if (v < 0 && av === half + 1 && u % 6 === 2 && u < 30) ch = "b";
+      }
+      row += ch;
+    }
+    rows.push(row);
+  }
+  return rows;
+})();
+// Drawn turned to its heading `hd` (radians, the way its nose points), its
+// nose at (hx, hy). The cone turns, grimy, red-hot toward the tip while it
+// bores; tentacles grip the shaft's walls.
+function drawTun(hx, hy, hd, t, o = {}) {
+  const ca = Math.cos(hd), sa = Math.sin(hd), id = o.id || 5, turn = o.boring ? Math.floor(t * 6) : 0;
+  const P = (u, w) => [hx + u * ca - w * sa, hy + u * sa + w * ca];
+  const corners = [P(1, -9), P(1, 10), P(-46, -9), P(-46, 10)];
+  const x0 = Math.floor(Math.min(...corners.map(p => p[0]))), x1 = Math.ceil(Math.max(...corners.map(p => p[0])));
+  const y0 = Math.floor(Math.min(...corners.map(p => p[1]))), y1 = Math.ceil(Math.max(...corners.map(p => p[1])));
+  if (o.grip) for (let j = 0; j < 4; j++) {
+    const side = j % 2 ? -1 : 1, u0 = -30 + j * 7, reach = 2 + Math.round(Math.sin(t * 0.8 + j * 1.7) * 1.5);
+    drawPath(bez(P(u0, side * 6), P(u0 - 1, side * (6 + reach * 0.7)), P(u0 - 3, side * (7 + reach)), 6), (k) => k % 3 === 2 ? bone(k, j, id) : sinew(k, j, id));
+  }
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const dx = x + 0.5 - hx, dy = y + 0.5 - hy, u = dx * ca + dy * sa, w = -dx * sa + dy * ca;
+    const c = Math.round(u) + 44, row = 6 - Math.round(w);
+    if (c < 0 || c > 43 || row < 0 || row > 13) continue;
+    const ch = TUN[row][c]; if (ch === " ") continue;
+    let k;
+    switch (ch) {
+      case "A": k = armour(c, row, id); break;
+      case "p": { const q = (0.2 + 0.05 * hash(c, row, id)) * 255; k = [q, q * 1.05, q * 1.04]; break; }
+      case "j": case "s": k = sinew(c, row, id); break;
+      case "b": k = bone(c, row, id); break;
+      case "L": k = o.arming ? (Math.sin(t * 10) > 0 ? [255, 90, 64] : LAMP.map(v => v * 0.2)) : o.off ? [24, 30, 26] : mix([20, 30, 24], LAMP, pulse(t, c)); break;
+      default: {
+        const band = (((c + row + turn) % 3) + 3) % 3 === 0, grime = hash(c + turn, row, id), hot = o.boring ? clamp((c - 31) / 13, 0, 1) : 0;
+        const base = o.boring && band ? 0.72 + 0.12 * grime : 0.36 + 0.14 * grime;
+        k = [Math.min(1, base + 0.5 * hot * hot) * 255, base * (1 - 0.35 * hot) * 255, base * (1 - 0.7 * hot) * 255];
+      }
+    }
+    block(x, y, k);
+  }
+  if (o.boring) { emit(hx, hy, 10, [255, 150, 70], 0.9); if (rnd() < 0.6) spark(hx, hy, 1, [255, 200, 120], 12); }
+  if (o.arming) { const m = P(-20, 0); emit(m[0], m[1], 16, [255, 90, 60], Math.sin(t * 10) > 0 ? 1.3 : 0.2); }
+  if (o.thrust) { const b = P(-45, 0); for (let k = 1; k <= 3; k++) block(Math.round(b[0] - ca * k), Math.round(b[1] - sa * k), k === 1 ? [255, 220, 150] : [255, 140, 60], 0.9 - k * 0.2); emit(b[0], b[1], 8, [255, 170, 80], 0.8); }
+}
+// The heat-sink bot (game: HEATSINK rows): r radiator fins, A armour, D
+// dark, z lens, L light, p strut. (x, yb): its middle, its bottom row.
+const HS = [" r r r r r r r ", " r r r r r r r ", " AAAAAAAAAAAAA ", "AAAAAAAAAAAAAAA", "AADDDDDDDDDDDAA", "AADzDDDLDDDzDAA", "AADDDDDDDDDDDAA", "AAAAAAAAAAAAAAA", " AAAAAAAAAAAAA ", "  p  p   p  p  ", "  p  p   p  p  "];
+function drawHeatSink(x, yb, t, working, alive, scrap = 0) {
+  const x0 = Math.round(x) - 7, y0 = Math.round(yb);
+  for (let row = 0; row < 11; row++) for (let c = 0; c < 15; c++) {
+    const ch = HS[row][c]; if (ch === " ") continue;
+    if (scrap > 0 && hash(c, row, 91) < scrap) continue;
+    let k;
+    switch (ch) {
+      case "r": { const q = working ? 0.35 + 0.3 * Math.max(0, Math.sin(t * 2 + c)) : alive ? 0.24 : 0.16; k = [q * 1.4 * 255, q * 0.7 * 255, q * 0.4 * 255]; break; }
+      case "A": k = armour(c, row, 55).map(v => v * 1.1); break;
+      case "D": k = [31, 33, 32]; break;
+      case "z": k = alive ? mix([20, 30, 24], LAMP, 0.8 * pulse(t, c)) : [24, 30, 26]; break;
+      case "L": k = alive ? mix([20, 30, 24], LAMP, pulse(t, c)) : [24, 30, 26]; break;
+      default: k = strut(c, row, 55);
+    }
+    block(x0 + c, y0 + 10 - row, k);
+  }
+  if (alive) emit(x0 + 7.5, y0 + 5.5, 5, LAMP, 0.45);
+  if (working) emit(x0 + 7.5, y0 + 10, 11, [255, 120, 40], 0.7);
+}
+// Couriers: small, light, a lamp in the swarm's colour; latched on, a
+// line of light down to what they hold.
+function drawCouriers(x, y, offs, line, t) {
+  for (const o of offs) {
+    const cx = Math.round(x + o), cy = Math.round(y);
+    block(cx - 1, cy, light(1, 1, SEED)); block(cx, cy, light(2, 1, SEED));
+    block(cx, cy - 1, mix([20, 30, 24], LAMP, pulse(t, cx)));
+    emit(cx + 0.5, cy - 0.5, 4, LAMP, 0.4 * GA);
+    if (line !== null) for (let k = cy - 2; k > line; k--) if (k % 2 === 0) block(cx, k, LAMP, 0.5);
+  }
+}
+
+// ---------- the tripods' parts (the mockup's sceneTripod) ----------
+// The forester's shell: a broad carapace, higher at the front, a pointed
+// rostrum, spines along its rim, grooves across its plates, the light
+// showing through in the grooves.
+const SHELL = [13, 16, 17, 17, 17, 16, 14, 11, 7];
+const inShell = (x, y) => y >= 0 && y < SHELL.length && (x >= 0 ? x <= SHELL[y] + (y === 4 ? 3 : y === 3 || y === 5 ? 1 : 0) - (y < 2 ? 1 : 0) : -x <= SHELL[y] - (y > 5 ? 2 : 0) - (y < 2 ? 2 : 0));
+const shellTop = (x) => { for (let y = SHELL.length - 1; y >= 0; y--) if (inShell(x, y)) return y; return 0; };
+function drawShell(x0, y0, t, lit) {
+  for (let y = 0; y < SHELL.length; y++) for (let x = -18; x <= 21; x++) {
+    if (!inShell(x, y)) continue;
+    const edge = !inShell(x - 1, y) || !inShell(x + 1, y) || !inShell(x, y - 1) || !inShell(x, y + 1);
+    const groove = y > 0 && y < 7 && Math.abs(Math.abs(x - 2) - (6 + (y - 4) ** 2 * 0.7)) < 0.6;
+    const c = edge ? strut(x, y, SEED) : groove ? (lit && y >= 2 && y <= 4 ? mix([20, 30, 24], LAMP, 0.45 + 0.4 * Math.sin(t * 1.6 + y)) : darkg(x, y, SEED)) : y === 6 && Math.abs(x) < 5 ? bone(x, y, SEED).map(v => v * 0.9) : mix(light(x, y, SEED), [150, 118, 96], 0.12).map(v => v * (0.9 + 0.08 * Math.sin(x * 0.5)));
+    block(x0 + x, y0 + y, c);
+  }
+  for (let x = -15; x <= 15; x += 3) { const ty = shellTop(x); block(x0 + x, y0 + ty + 1, bone(x, 9, SEED).map(v => v * 1.15)); }
+  for (const x of [19, 20]) block(x0 + x + 1, y0 + 4, bone(x, 4, SEED).map(v => v * 1.2));
+}
+// The abdomen (abductor) or the clippings bag (forester), hanging from `top`.
+function drawStore(forester, x0, top, items, cap, grow, t, swing) {
+  const fill = Math.min(1, items.length / cap);
+  if (!forester) {
+    // A leathery sac in bone hoops, swelling and easing as if breathing.
+    const rx = (7 + fill * 3) * grow + 0.3 * Math.sin(t * 1.1), ry = (6 + fill * 2) * grow;
+    for (let y = -Math.ceil(ry); y <= Math.ceil(ry); y++) for (let x = -Math.ceil(rx); x <= Math.ceil(rx); x++) {
+      const q = (x / (rx + 0.5)) ** 2 + (y / (ry + 0.5)) ** 2; if (q > 1) continue;
+      const hoop = Math.abs(x) % 4 === 1 && q < 0.9, rim = q > 0.78;
+      block(x0 + x, top - Math.round(ry) + y, rim ? mix(armour(x, y, SEED), [40, 26, 28], 0.4) : hoop ? bone(x, y, SEED).map(v => v * 0.75) : mix([46, 32, 34], [68, 44, 46], hash(x, y, 8)));
+    }
+    if (grow > 0.9) items.forEach((p, i) => { const x = x0 - 5 + (i % 4) * 3, y = top - Math.round(ry) - 2 + Math.floor(i / 4) * 2; block(x, y, mix([46, 32, 34], p.c, 0.35)); });
+    emit(x0, top - ry, 6, [160, 60, 60], 0.12 * GA);
+  } else {
+    const bw = Math.round((6 + fill * 3) * grow), bh = Math.round((10 + fill * 6) * grow);
+    for (let y = 0; y < bh; y++) {
+      const half = Math.round(bw * (0.55 + 0.45 * Math.sin(Math.min(1, (y + 1) / bh) * Math.PI * 0.85))), sx = Math.round(swing * y / bh);
+      for (let x = -half; x <= half; x++) {
+        const edge = Math.abs(x) === half || y === bh - 1, mesh = (x + y) % 3 === 0 || (x - y) % 3 === 0, fullHere = y > bh * (1 - fill) - 1;
+        block(x0 + x + sx, top - y, edge ? strut(x, y, SEED) : mesh ? mix([40, 46, 40], strut(x, y, SEED), 0.4) : fullHere ? mix([60, 100, 44], [120, 96, 60], hash(x, y + items.length, 5)) : [16, 20, 18]);
+      }
+    }
+  }
+}
+// The folded package: the unit's own shape, packed tight.
+function drawPackage(forester, x0, y0, t, dim) {
+  if (!forester) {
+    for (let y = 0; y < 9; y++) for (let x = -8; x <= 8; x++) { const q = (x / 8.5) ** 2 + ((y - 4) / 4.8) ** 2; if (q <= 1) block(x0 - 2 + x, y0 + y, q > 0.75 ? mix(armour(x, y, SEED), [40, 26, 28], 0.4) : Math.abs(x) % 4 === 1 ? bone(x, y, SEED).map(v => v * 0.75) : mix([46, 32, 34], [68, 44, 46], hash(x, y, 8))); }
+    for (let y = 0; y < 5; y++) for (let x = 5; x <= 10; x++) if ((x - 7.5) ** 2 / 9 + (y - 2) ** 2 / 6 <= 1) block(x0 + x, y0 + y, y === 4 ? strut(x, y, SEED) : armour(x, y, SEED).map(v => v * 1.1));
+    for (const [ex, ey] of [[9, 3], [10, 2], [8, 2]]) block(x0 + ex, y0 + ey, dim ? [14, 20, 18] : mix([14, 20, 18], LAMP, 0.25 + 0.15 * Math.sin(t * 1.5 + ex)));
+    for (let k = 0; k < 10; k++) { const a = k * 0.9, r = 2.6 - k * 0.2; block(Math.round(x0 + 8 + Math.cos(a) * r), Math.round(y0 - 1 + Math.sin(a) * r * 0.7), k % 3 === 0 ? bone(k, 7, SEED) : mix(sinew(k, 7, SEED), [70, 40, 46], 0.35)); }
+    for (const [a, r] of [[0, 9], [1, 10], [2, 11]]) for (let k = 0; k < 12; k++) { const ang = Math.PI * (0.15 + 0.7 * k / 11), x = Math.round(x0 - 2 + Math.cos(ang) * r * 0.9), y = Math.round(y0 + 3 + Math.sin(ang) * (r - 3)); block(x, y, k % 3 === 0 ? bone(k, a, SEED) : mix(light(k, a, SEED), sinew(k, a, SEED), 0.35)); }
+  } else {
+    for (let x = -14; x <= 14; x++) { block(x0 + x, y0 + 1, x % 3 === 0 ? bone(x, 1, SEED) : mix(light(x, 1, SEED), sinew(x, 1, SEED), 0.35)); if (x % 2 === 0 && Math.abs(x) < 12) block(x0 + x, y0, mix(light(x, 0, SEED), sinew(x, 0, SEED), 0.35)); }
+    for (const sd of [0, 1]) for (let k = 0; k < 6; k++) block(x0 + 14 + k, y0 + 1 + sd, k > 3 ? [226, 224, 214] : armour(k, sd, SEED).map(v => v * 1.15));
+    drawShell(x0 - 2, y0 + 2, t, false);
+    for (const ex of [9, 12]) for (let k = 0; k < 6; k++) block(x0 - 2 + ex - k, y0 + 2 + shellTop(ex) + 1, k === 0 ? [30, 44, 40] : strut(k, ex, SEED));
+  }
+}
+// A load left on the ground for the couriers (a full bag, a full sac, a
+// retired walker's body): they come down from the mother swarm, latch on,
+// lift it faster and faster and fade back into the swarm.
+const LIFT_H = { bag: 16, sac: 17, body: 12 };
+function newLift(kind, x, top, items, rest) {
+  const n = kind === "bag" ? 2 + Math.ceil(16 / 7) : kind === "sac" ? 2 + Math.ceil(14 / 7) : 6;
+  return { kind, x, top, rest, vy: 0, items, ph: top > rest + 0.5 ? "fall" : "wait", y: D.swarm.y + 8, t: 0, offs: Array.from({ length: n }, (_, k) => (k - (n - 1) / 2) * 4), a: 1, done: false };
+}
+function stepLift(L, dt) {
+  L.t += dt;
+  if (L.ph === "fall") { L.vy -= 30 * dt; L.top += L.vy * dt; if (L.top <= L.rest) { L.top = L.rest; L.ph = "wait"; L.t = 0; for (let k = 0; k < 8; k++) smokeC(L.x + (rnd() - 0.5) * 14, L.rest - LIFT_H[L.kind] + 2, [110, 100, 88]); } }
+  else if (L.ph === "wait") { const latch = L.top + 6; L.y = Math.max(latch, L.y - 40 * dt); if (L.y <= latch) { L.ph = "latch"; L.t = 0; } }
+  else if (L.ph === "latch") { if (L.t > 0.6) { L.ph = "up"; L.t = 0; } }
+  else if (L.ph === "up") { const v = 10 + L.t * 18; L.y += v * dt; L.top += v * dt; L.a = clamp((D.swarm.y + 14 - L.y) / 16, 0, 1); if (L.a <= 0) L.done = true; }
+}
+function drawLift(L, t) {
+  GA = L.a;
+  if (L.kind === "body") { GD = 0.55; drawPackage(true, Math.round(L.x), Math.round(L.top) - 11, t, true); GD = 1; }
+  else drawStore(L.kind === "bag", Math.round(L.x), Math.round(L.top), L.items, L.kind === "bag" ? 16 : 14, 1, t, 0);
+  if (L.ph !== "fall") drawCouriers(L.x, L.y, L.offs, L.ph === "wait" ? null : Math.round(L.top), t);
+  GA = 1;
+}
+
+// ---------- the mother swarm overhead, and the stars ----------
+function makeSwarm(d, x0, x1, y, n) {
+  const r = mulberry32(7 + n);
+  d.swarm = { x0, x1, y, s: Array.from({ length: n }, () => ({ x: x0 + r() * (x1 - x0), y: y + 2 + r() * r() * 22, ph: r() * 6.28, sp: 0.05 + r() * 0.2, rad: 2 + r() * 6, lit: r() < 0.1 })) };
+}
+function drawSwarm(t) {
+  const S = D.swarm; if (!S) return;
+  for (const q of S.s) {
+    const a = q.ph + t * q.sp, x = Math.floor(q.x + Math.cos(a) * q.rad), y = Math.floor(q.y + Math.sin(a * 1.3) * q.rad * 0.5);
+    if (q.lit) block(x, y, mix([30, 50, 40], LAMP, pulse(t, x)), 0.7); else block(x, y, [130, 142, 140], 0.32);
+  }
+}
+
+// ---------- cutters and a hauler at work ----------
+// A flock: cutters fly to an open face in their stretch, cut a block (hard
+// rock slowly, loose rubble fast), carry it up to the hauler and go back.
+class Flock {
+  constructor(o) {
+    this.o = Object.assign({ n: 8, id: 100, speed: 24, replace: 0, minable: (m) => m === ROCK || m === RUB, cut: (m, h, f) => m === RUB ? (f === F_CHUNK ? 0.5 : 0.22) : 0.6 + 2.4 * h }, o);
+    this.h = { x: o.hx, y: o.hy, fill: 0, cargo: [], hurt: -1 };
+    this.c = []; this.next = this.o.id; this.taken = new Set();
+    for (let k = 0; k < this.o.n; k++) this.add(o.hx + 6 + (rnd() - 0.5) * 24, o.hy - 4 - rnd() * 10);
+  }
+  add(x, y) { const c = { id: this.next++, x, y, st: "out", tgt: null, t: -rnd() * 0.8, cargo: null }; this.c.push(c); return c; }
+  key(x, y) { return (x + 4096) * 8192 + (y + 4096); }
+  ok(x, y) {
+    const W = D.world, i = W.i(x, y); if (i < 0) return false;
+    if (!this.o.minable(W.mat[i], W.flag[i], x, y)) return false;
+    return W.open(x, y + 1) || W.open(x - 1, y) || W.open(x + 1, y) || W.open(x, y - 1);
+  }
+  face() {
+    const o = this.o, W = D.world;
+    if (o.face) { const f = o.face(this); if (f) this.taken.add(this.key(f.x, f.y)); return f; }
+    for (let a = 0; a < 36; a++) {
+      const x = o.x0 + Math.floor(rnd() * (o.x1 - o.x0 + 1));
+      const y = a < 20 ? W.top(x) : o.y0 + Math.floor(rnd() * (o.y1 - o.y0 + 1));
+      if (y < o.y0 || y > o.y1) continue;
+      const k = this.key(x, y); if (this.taken.has(k) || !this.ok(x, y)) continue;
+      this.taken.add(k); return { x, y };
+    }
+    return null;
+  }
+  die(c) {
+    if (c.dead) return;
+    c.dead = true; c.down = false; c.vx = (rnd() - 0.5) * 18; c.vy = 6 + rnd() * 14; c.t = 0;
+    if (c.tgt) this.taken.delete(this.key(c.tgt.x, c.tgt.y)); c.tgt = null;
+    spark(c.x, c.y, 6, [255, 200, 120], 10);
+  }
+  kill(inside) { let n = 0; for (const c of this.c) if (!c.dead && (inside(c.x, c.y) || (c.tgt && c.st !== "home" && inside(c.tgt.x, c.tgt.y)))) { this.die(c); n++; } return n; }
+  step(dt, t) {
+    const W = D.world, hl = this.h, o = this.o;
+    if (hl.hurt >= 0) { hl.hurt += dt; if (rnd() < dt * 5) smokeC(hl.x + 2 + rnd() * 8, hl.y + 8, [70, 66, 62]); }
+    for (const c of this.c) {
+      c.t += dt;
+      if (c.dead) {
+        if (!c.down) { c.vy -= 30 * dt; c.x += c.vx * dt; c.y += c.vy * dt; if (c.vy < 0 && W.solid(Math.round(c.x), Math.round(c.y) - 1)) { c.down = true; c.y = Math.round(c.y); } if (c.y < W.y0) c.down = true; }
+        if (o.replace && !c.rep && c.t > o.replace) { c.rep = true; this.add(o.x0 + rnd() * (o.x1 - o.x0), D.swarm ? D.swarm.y + 6 : hl.y + 40); }
+        continue;
+      }
+      if (c.st === "out" && !c.tgt) {
+        if (c.t > 0) { c.tgt = this.face(); if (!c.tgt) c.t = -0.4; }
+        if (!c.tgt) { const gx = hl.x + 6 + Math.sin(t * 0.9 + c.id) * 12, gy = hl.y - 4 + Math.cos(t * 1.3 + c.id) * 3, k = Math.min(1, dt * 1.5); c.x += (gx - c.x) * k; c.y += (gy - c.y) * k; continue; }
+      }
+      if (c.st !== "cut") {
+        const gx = c.st === "home" ? hl.x + 6 : c.tgt.x, gy = c.st === "home" ? hl.y + (o.homeDy === undefined ? 10 : o.homeDy) : c.tgt.y + 2;
+        const dx = gx - c.x, dy = gy - c.y, dd = Math.hypot(dx, dy), sp = o.speed * dt;
+        if (dd > sp) { c.x += dx / dd * sp + Math.sin(t * 5 + c.id) * 0.2; c.y += dy / dd * sp; continue; }
+        if (c.st === "out") {
+          const i = W.i(c.tgt.x, c.tgt.y);
+          if (i < 0 || W.mat[i] < ROCK || !o.minable(W.mat[i], W.flag[i], c.tgt.x, c.tgt.y)) { this.taken.delete(this.key(c.tgt.x, c.tgt.y)); c.tgt = null; }
+          else { c.st = "cut"; c.t = 0; }
+        } else { hl.fill++; hl.cargo.push(c.cargo); if (hl.cargo.length > 30) hl.cargo.shift(); c.cargo = null; c.st = "out"; c.tgt = null; c.t = 0; }
+      } else {
+        const i = W.i(c.tgt.x, c.tgt.y);
+        if (i < 0 || W.mat[i] < ROCK) { this.taken.delete(this.key(c.tgt.x, c.tgt.y)); c.tgt = null; c.st = "out"; continue; }
+        if (rnd() < dt * 16) spark(c.tgt.x + 0.5, c.tgt.y + 1, 1, W.col(c.tgt.x, c.tgt.y), 6);
+        if (c.t > o.cut(W.mat[i], W.hard[i] / 100, W.flag[i])) {
+          c.cargo = W.col(c.tgt.x, c.tgt.y);
+          W.set(c.tgt.x, c.tgt.y, c.tgt.y > W.surf(c.tgt.x) ? SKY : VOID);
+          if (o.bite) for (let dx = -o.bite; dx <= o.bite; dx++) { if (!dx) continue; const xx = c.tgt.x + dx, j = W.i(xx, c.tgt.y); if (j >= 0 && W.mat[j] >= ROCK && o.minable(W.mat[j], W.flag[j], xx, c.tgt.y) && !this.taken.has(this.key(xx, c.tgt.y))) W.set(xx, c.tgt.y, VOID); }
+          this.taken.delete(this.key(c.tgt.x, c.tgt.y)); c.st = "home"; c.t = 0;
+        }
+      }
+    }
+    if (this.c.length > 30) this.c = this.c.filter(c => !(c.dead && c.down && c.t > 16));
+  }
+  draw(t) {
+    const hl = this.h, j = hl.hurt >= 0 && hl.hurt < 0.8 ? Math.round((rnd() - 0.5) * 5 * (1 - hl.hurt / 0.8)) : 0;
+    drawHauler(hl.x + j, hl.y, Math.min(30, hl.fill % 31), hl.cargo.length ? hl.cargo : [[90, 80, 70]], false, t, hl.hurt >= 0);
+    for (const c of this.c) if (c.dead) drawScrap(c); else drawCutter(c.x, c.y, c.id, true, c.cargo, t);
+  }
+}
+
+// A label on the picture, for things a few pixels across on a phone.
+function tag(x, y, text, dir = 1) {
+  const k = D.dpr, sx = x * Z + OX, sy = OY - y * Z;
+  if (sx < -10 || sx > CW + 10 || sy < -10 || sy > CH + 10) return;
+  const lx = sx + dir * 12 * k, ly = Math.max(16 * k, sy - 14 * k);
+  ctx.strokeStyle = "rgba(46,214,110,0.8)"; ctx.lineWidth = Math.max(1, Math.round(k));
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(lx, ly); ctx.lineTo(lx + dir * 5 * k, ly); ctx.stroke();
+  ctx.font = `500 ${Math.round(10.5 * k)}px "IBM Plex Mono", ui-monospace, Consolas, monospace`;
+  const w = ctx.measureText(text).width;
+  const tx = clamp(dir > 0 ? lx + 7 * k : lx - 7 * k - w, 4 * k, CW - w - 4 * k);
+  ctx.fillStyle = "rgba(5,7,12,0.78)"; ctx.fillRect(tx - 3 * k, ly - 9 * k, w + 6 * k, 13 * k);
+  ctx.fillStyle = "rgba(214,226,221,0.96)"; ctx.textBaseline = "alphabetic"; ctx.fillText(text, tx, ly + 1.5 * k);
+}
+// The shock wave: a bright ring running out through the rock.
+function drawShock(s) {
+  if (!s) return;
+  const W = D.world, sr = s.t * 90;
+  if (sr >= s.max) return;
+  for (let k = 0; k < 180; k++) {
+    const a = k / 180 * Math.PI * 2, x = Math.round(s.x + Math.cos(a) * sr), y = Math.round(s.y + Math.sin(a) * sr);
+    if (!W.solid(x, y)) continue;
+    block(x, y, mix([255, 240, 210], W.col(x, y), Math.min(1, sr / s.max)), 0.85);
+  }
+}
+// Cracks running out past broken ground, darkened in the rock.
+function cracks(xc, yc, r, n) {
+  const W = D.world;
+  for (let k = 0; k < n; k++) {
+    let a = k / n * Math.PI * 2 + rnd() * 0.3, x = xc + Math.cos(a) * r, y = yc + Math.sin(a) * r;
+    for (let s = 0; s < 20; s++) {
+      const xi = Math.round(x), yi = Math.round(y), i = W.i(xi, yi);
+      if (i < 0 || W.mat[i] !== ROCK) break;
+      const o = i * 3; W.paint(i, [W.base[o] * 0.45, W.base[o + 1] * 0.45, W.base[o + 2] * 0.45]);
+      a += (rnd() - 0.5) * 0.6; x += Math.cos(a); y += Math.sin(a);
+    }
+  }
+}
+// Loose rubble: broken into lumps, lighter and darker, with gaps between.
+const rubbleC = (base, x, y) => hash(x, y, 31) < 0.22 ? base.map(v => v * 0.2) : mix(base, [92, 78, 64], 0.45).map(v => v * (0.42 + 0.42 * hash(x >> 1, y >> 1, 9)) * (0.9 + 0.12 * hash(x, y, 8)));
+const noiseA = (x) => 1.2 * Math.sin(x * 0.05 + 1) + 0.8 * Math.sin(x * 0.13);
+const soilC = (x, y) => mix([74, 58, 44], [92, 72, 52], hash(x, y, 3));
+
+// =====================================================================
+// SAPPER
+// =====================================================================
+function sapperDemo(d) {
+  d.viewW = 205; d.T = 50; d.still = 25.5;
+  d.setup = () => {
+    d.cam = { x: -6, y: -30 };
+    const W = d.world = new World(-170, -150, 340, 175, 420, noiseA);
+    W.build((x, y, dep) => {
+      const k = hash(x, y, 13), dd = dep + 3 * Math.sin(x * 0.045) + 1.5 * Math.sin(x * 0.17);
+      if (dep < 1.5) return { c: soilC(x, y), h: 0.1 };
+      if (dd < 8) return { c: [150, 128, 94].map(v => v * (0.8 + 0.28 * k) * (y % 3 === 0 ? 0.92 : 1)), h: 0.2 };
+      if (dd < 50) { const sp = hash(x, y, 22); return { c: sp > 0.94 ? (hash(y, x, 3) > 0.5 ? [170, 132, 132] : [182, 178, 172]) : [112, 104, 108].map(v => v * (0.84 + 0.28 * k)), h: 0.82 }; }
+      return { c: [62, 60, 68].map(v => v * (0.84 + 0.28 * k)), h: 0.95 };
+    });
+    // The pit the struggling flock has cut, through the soft skin into granite.
+    for (let x = 0; x <= 50; x++) { const s = W.surf(x), dep = Math.round(11 * Math.sqrt(Math.max(0, 1 - ((x - 25) / 25.5) ** 2))); for (let y = s - dep + 1; y <= s; y++) W.set(x, y, VOID); }
+    // A tunneler's shaft nearby, the tunneler deep in it.
+    const tx = -52;
+    for (let x = tx - 6; x <= tx + 6; x++) { const s = W.surf(x); for (let y = s - 98 + Math.round(((x - tx) / 6) ** 2 * 4); y <= s; y++) W.set(x, y, VOID); }
+    d.tun = { x: tx, y: W.surf(tx) - 96, cut: 0 };
+    d.A = new Flock({ n: 10, id: 100, hx: 56, hy: 12, x0: 1, x1: 49, y0: W.surf(25) - 14, y1: W.surf(25) + 1, cut: (m, h, f) => m === RUB ? (f === F_CHUNK ? 0.55 : 0.22) : m === GLASS ? 0.4 : 0.6 + 2.6 * h });
+    d.B = new Flock({ n: 7, id: 200, hx: -100, hy: 12, x0: -104, x1: -78, y0: W.surf(-90) - 8, y1: W.surf(-90) + 1 });
+    d.sap = { st: "wait", x: -16, y: 50, t: 0, depth: 0 };
+    d.blast = null; d.bits = []; d.shock = null;
+    makeSwarm(d, -170, 170, 26, 300);
+  };
+  const blow = () => {
+    const W = d.world, s = d.sap, xc = Math.round(s.x), yc = Math.round(s.y) + 1, r = 24, ys = W.surfY(xc), H = ys - yc, cells = [];
+    for (let y = yc - r - 1; y <= Math.ceil(ys) + 4; y++) for (let x = xc - 42; x <= xc + 42; x++) {
+      const m0 = W.m(x, y);
+      if (m0 === SKY || (m0 === VOID && (y > ys - 13 || Math.abs(x + 52) < 8))) continue;
+      const dx = x - xc, dy = y - yc, dist = Math.hypot(dx, dy);
+      let inside = dist <= r * (0.9 + 0.2 * hash(Math.round(Math.atan2(dy, dx) * 6), 1, 17));
+      if (!inside && dy >= 0) inside = Math.abs(dx) <= r * (1 + 0.6 * Math.min(1, dy / H)) * (0.95 + 0.1 * hash(y, 3, 5));
+      if (inside) cells.push({ x, y, d: dist <= r ? dist : r + (dy - r * 0.5) * 0.8 + Math.abs(dx) * 0.2 });
+    }
+    cells.sort((a, b) => a.d - b.d);
+    d.blast = { x: xc, y: yc, r, top: ys, H, t: 0, cells, k: 0, harmed: false, refill: false };
+    cracks(xc, yc, r + 2, 12);
+    burst(xc, yc, 9, [255, 250, 235]); burst(xc, yc, 5, COLD);
+    for (let k = 0; k < 6; k++) spark(xc, yc, 12, W.col(xc + k, yc), 40);
+    d.flash = 0.9; d.shake = 3.5; d.shock = { x: xc, y: yc, t: 0, max: 90 };
+  };
+  const loosen = (c) => {
+    const W = d.world, b = d.blast, i = W.i(c.x, c.y); if (i < 0 || W.mat[i] === SKY) return;
+    // (Its own shaft fills with what falls in.)
+    if (W.mat[i] === VOID) { W.set(c.x, c.y, RUB, rubbleC([112, 104, 108], c.x, c.y)); return; }
+    const h = W.hard[i] / 100, base = W.col(c.x, c.y), dist = Math.hypot(c.x - b.x, c.y - b.y);
+    // The heart of it melts and cools to glass.
+    if (dist < b.r * 0.3 * (1.15 - 0.4 * h)) { W.set(c.x, c.y, GLASS, [30, 28, 36].map(v => v * (0.85 + 0.3 * hash(c.x, c.y, 4)))); W.heat(c.x, c.y, 1); return; }
+    let col = rubbleC(base, c.x, c.y), f = 0;
+    // Hard rock now and then holds together in big cracked pieces.
+    if (h > 0.6 && dist > b.r * 0.3) {
+      const sz = 5 + 9 * h, id = pieceAt(c.x, c.y, sz);
+      if (hash(id, 3, 61) < (h - 0.5) * 1.3) { const edge = pieceAt(c.x + 1, c.y, sz) !== id || pieceAt(c.x, c.y + 1, sz) !== id; col = edge ? base.map(v => v * 0.2) : base.map(v => v * 0.92); f = edge ? 0 : F_CHUNK; }
+    }
+    W.set(c.x, c.y, RUB, col, f);
+    if (dist < b.r * 0.7) W.heat(c.x, c.y, (1 - dist / (b.r * 0.7)) * 0.9);
+  };
+  d.step = (dt, t) => {
+    const W = d.world, s = d.sap;
+    d.A.step(dt, t); d.B.step(dt, t);
+    flyBits(d.bits, dt, (x) => Math.abs(x + 4) > 1);
+    // The tunneler, deep in its shaft, boring slowly on.
+    const tn = d.tun; tn.cut += dt * 0.35;
+    if (tn.cut >= 1) { tn.cut -= 1; tn.y -= 1; for (let y = tn.y - 2; y <= tn.y + 4; y++) for (let x = tn.x - 6; x <= tn.x + 6; x++) if (Math.hypot(x - tn.x, (y - tn.y) * 1.2) < 6.4 && W.solid(x, y)) W.set(x, y, VOID); }
+    s.t += dt;
+    let goal = -30;
+    if (s.st === "wait") {
+      d.phase("Cutters in a granite pit: each kg takes over 3 times as long as in soft rock. The flock is struggling.");
+      if (t > 6) { s.st = "fly"; s.t = 0; s.y = 46; }
+    } else if (s.st === "fly") {
+      d.phase("The director orders a sapper. It drops from the mother swarm on its thruster.");
+      s.y -= 30 * dt;
+      const g = W.top(Math.round(s.x));
+      if (s.y <= g + 1) { s.y = g + 1; s.st = "crawl"; s.t = 0; for (let k = 0; k < 5; k++) smokeC(s.x + (rnd() - 0.5) * 6, g + 1, [110, 100, 88]); }
+    } else if (s.st === "crawl") {
+      d.phase("It lands and crawls to a low spot to start its hole.");
+      s.x += 9 * dt; s.y = W.top(Math.round(s.x)) + 1;
+      if (s.x >= -4) { s.x = -4; s.st = "drill"; s.t = 0; s.mouth = s.y; }
+    } else if (s.st === "drill") {
+      goal = -44;
+      d.phase("Drilling down to 79 m. Its depth comes from its yield: 46 m × the cube root of 5 kt.");
+      s.y -= 9 * dt;
+      const x = Math.round(s.x), y = Math.round(s.y) - 1;
+      for (let dx = -1; dx <= 1; dx++) if (W.solid(x + dx, y)) {
+        const c = W.col(x + dx, y); W.set(x + dx, y, VOID);
+        if (d.bits.length < 140 && rnd() < 0.5) d.bits.push({ x: x + rnd() * 2 - 1, y: s.mouth + 1, vx: (rnd() - 0.5) * 7, vy: 14 + rnd() * 14, c });
+      }
+      if (rnd() < dt * 20) spark(s.x, s.y - 1, 1, [255, 210, 140], 10);
+      if (rnd() < dt * 5) smokeC(x + (rnd() - 0.5) * 3, s.mouth + 1, [110, 100, 88]);
+      s.depth = W.surfY(s.x) - s.y;
+      if (s.depth >= 79) { s.st = "check"; s.t = 0; }
+    } else if (s.st === "check") {
+      goal = -44;
+      d.phase("A tunneler is within 58 m of where the charge would go. It must never catch one, so it drills sideways first.");
+      if (s.t > 1.4) { s.st = "side"; s.t = 0; }
+    } else if (s.st === "side") {
+      goal = -44;
+      s.x += 9 * dt;
+      const x = Math.round(s.x) + 3;
+      for (let dy = 0; dy <= 2; dy++) if (W.solid(x, Math.round(s.y) + dy)) W.set(x, Math.round(s.y) + dy, VOID);
+      if (rnd() < dt * 20) spark(s.x + 3, s.y + 1, 1, [255, 210, 140], 10);
+      if (s.x >= 22) { s.x = 22; s.st = "arm"; s.t = 0; }
+    } else if (s.st === "arm") {
+      goal = -44;
+      d.phase("Clear of the tunneler. Armed: its light blinks faster and faster (2.5 s).");
+      if (s.t > 2.5) { s.st = "gone"; s.t = 0; blow(); }
+    } else {
+      goal = -22;
+      const b = d.blast;
+      b.t += dt;
+      const reach = b.t * 120;
+      while (b.k < b.cells.length && b.cells[b.k].d <= reach) loosen(b.cells[b.k++]);
+      if (!b.harmed && b.t > 0.3) {
+        b.harmed = true;
+        const inside = (x, y) => { const dy = y - b.y; if (dy < -b.r - 4 || dy > b.H + 4) return false; return Math.abs(x - b.x) <= b.r * (1 + 0.6 * clamp(dy / b.H, 0, 1)) + 4; };
+        d.killed = d.A.kill(inside) + d.B.kill(inside);
+        for (const F of [d.A, d.B]) { const hx = F.h.x + 6, hy = F.h.y + 4, dd = Math.min(Math.hypot(hx - b.x, hy - b.top), Math.hypot(hx - b.x, hy - b.y)); if (dd < 72) { F.h.hurt = 0; spark(hx, hy, 14, [255, 180, 100], 16); } }
+      }
+      // The plume: loose rock blown up out of the column's top, under dust.
+      if (b.t > 0.5 && b.t < 2.6) {
+        for (let k = 0; k < 6 && d.bits.length < 280; k++) {
+          const x = b.x + Math.round((rnd() - 0.5) * 2 * b.r), y = W.top(x), c = W.col(x, y);
+          if (W.m(x, y) === RUB) W.set(x, y, y > W.surf(x) ? SKY : VOID);
+          d.bits.push({ x: b.x + (rnd() - 0.5) * 18, y: b.top + 2, vx: (rnd() - 0.5) * 34, vy: 34 + rnd() * 56, c, hot: 0.3 + 0.6 * rnd() });
+        }
+        if (rnd() < 0.9) smokeC(b.x + (rnd() - 0.5) * 24, b.top + 3, [120, 108, 92], { vy: 10 + rnd() * 16, vx: (rnd() - 0.5) * 8, a: 0.1, max: 5, life: 4 + rnd() * 3, grow: 1.5 });
+      }
+      if (b.t < 0.4) d.phase("It goes off. The ground over it is loosened all the way up: blast-wide at the charge, 1.6 times that at the surface.");
+      else if (b.t < 3) d.phase(`Cutters caught in the column are wrecked (${d.killed || 0} here) and fall as scrap. The nearby hauler is damaged.`);
+      if (b.t > 3 && !b.refill) {
+        b.refill = true;
+        Object.assign(d.A.o, { x0: b.x - 38, x1: b.x + 38, y0: b.y - b.r, y1: Math.ceil(b.top) + 8, minable: (m) => m === RUB || m === GLASS });
+        for (let k = 0; k < 12; k++) d.A.add(b.x + (rnd() - 0.5) * 60, 32 + rnd() * 8);
+      }
+      if (b.t > 3.4) d.phase("Fresh cutters come down and scoop up the loose rubble. Loose rock comes away far faster than whole granite; the big held chunks take a little longer.");
+      if (d.shock) d.shock.t += dt;
+    }
+    d.cam.y += (goal - d.cam.y) * Math.min(1, dt * 1.2);
+  };
+  d.draw = (t) => {
+    const s = d.sap;
+    drawSwarm(t);
+    drawTun(d.tun.x, d.tun.y, -Math.PI / 2, t, { boring: true, grip: true, id: 3 });
+    drawBits(d.bits);
+    d.B.draw(t); d.A.draw(t);
+    if (s.st !== "gone" && s.st !== "wait") drawSapper(s.x, s.y, t, s.st, s.t);
+    drawShock(d.shock);
+  };
+  d.post = () => {
+    const s = d.sap;
+    if (s.st !== "gone" && s.st !== "wait") tag(s.x + 1, s.y + 3, s.st === "drill" || s.st === "side" || s.st === "arm" || s.st === "check" ? `SAPPER · ${Math.min(79, Math.round(s.depth))} m deep` : "SAPPER");
+    tag(d.tun.x - 6, d.tun.y + 30, "TUNNELER", -1);
+  };
+}
+
+// =====================================================================
+// TUNNELER
+// =====================================================================
+function tunnelerDemo(d) {
+  d.viewW = 210; d.T = 56; d.still = 21;
+  const TURN = 0.6 * Math.PI / 180, MAXL = 20 * Math.PI / 180, SIGHT = 34;
+  d.setup = () => {
+    d.cam = { x: -4, y: -40 };
+    const noise = (x) => 1.0 * Math.sin(x * 0.06 + 2) + 0.6 * Math.sin(x * 0.15);
+    const W = d.world = new World(-170, -150, 340, 175, 420, noise);
+    const oy = W.surf(14) - 44;
+    d.ore = { x: 14, y: oy, rx: 10, ry: 7 };
+    W.build((x, y, dep) => {
+      const k = hash(x, y, 17), dd = dep + 2.5 * Math.sin(x * 0.05) + 1.2 * Math.sin(x * 0.19);
+      const mt = 80 + 3 * Math.sin(x * 0.04 + 1), mb = 95 + 2 * Math.sin(x * 0.07);
+      if (dep >= mt && dep < mb) return { m: MAG, c: [140, 38, 14] };
+      if (dep >= mb) return { c: [70, 80, 66].map(v => v * (0.8 + 0.3 * k)), h: 0.9 };
+      if (((x - d.ore.x) / d.ore.rx) ** 2 + ((y - d.ore.y) / d.ore.ry) ** 2 < 1 + 0.4 * (hash(x >> 1, y >> 1, 5) - 0.5)) return { c: k > 0.62 ? [214, 132, 72] : [150, 92, 62].map(v => v * (0.85 + 0.3 * k)), h: 0.6, f: F_ORE };
+      if (dep < 2) return { c: soilC(x, y), h: 0.1 };
+      if (dd < 12) return { c: [128, 110, 88].map(v => v * (0.82 + 0.28 * k) * (Math.floor(dd) % 4 === 0 ? 0.9 : 1)), h: 0.3 };
+      if (dd < 62) { const sp = hash(x, y, 22); return { c: sp > 0.95 ? [170, 140, 138] : [108, 100, 104].map(v => v * (0.84 + 0.28 * k)), h: 0.82 }; }
+      return { c: [70, 68, 76].map(v => v * (0.84 + 0.28 * k)), h: 0.95 };
+    });
+    W.makeFog((x, y) => { const dep = W.surfY(x) - y; return dep > 18 ? 2 : dep > 14 ? 1 : 0; });
+    d.tn = { st: "fly", x: 6, y: 66, a: 0, t: 0, path: [], s: 0, seen: null };
+    d.mouth = null; d.oreDone = false; d.spoil = 0; d.bits = []; d.job = null; d.ping = null; d.shock = null; d.capCells = null; d.blast = null;
+    d.crew = new Flock({ n: 10, id: 300, hx: 30, hy: 12, speed: 26, x0: -30, x1: 42, y0: W.surf(6) - 2, y1: W.surf(6) + 14, minable: (m, f) => m === RUB && f === F_SPOIL, cut: () => 0.2 });
+    d.flock = new Flock({ n: 7, id: 400, hx: -98, hy: 12, x0: -104, x1: -76, y0: W.surf(-90) - 7, y1: W.surf(-90) + 1 });
+    makeSwarm(d, -170, 170, 24, 300);
+  };
+  const head = () => d.tn;
+  const carve = (x, y, r) => {
+    const W = d.world; let n = 0, c = null;
+    for (let yy = Math.floor(y - r); yy <= y + r; yy++) for (let xx = Math.floor(x - r); xx <= x + r; xx++) {
+      if (Math.hypot(xx + 0.5 - x, yy + 0.5 - y) > r) continue;
+      const m = W.m(xx, yy); if (m < ROCK || m === MAG) continue;
+      c = W.col(xx, yy); W.set(xx, yy, VOID); n++;
+      if (rnd() < 0.08) W.heat(xx + Math.round((rnd() - 0.5) * 2 * r), yy, 0.4);
+    }
+    return [n, c];
+  };
+  const pos = (s) => { const P = d.tn.path, i = clamp(Math.floor(s), 0, P.length - 1); return P[i]; };
+  const bigBlast = (x, y) => {
+    const W = d.world, r = 20;
+    for (let yy = Math.floor(y - r); yy <= y + r; yy++) for (let xx = Math.floor(x - r); xx <= x + r; xx++) {
+      const dist = Math.hypot(xx - x, yy - y); if (dist > r * (0.88 + 0.24 * hash(Math.round(Math.atan2(yy - y, xx - x) * 6), 2, 9))) continue;
+      const m = W.m(xx, yy); if (m < ROCK || m === MAG) continue;
+      if (dist < 7) { W.set(xx, yy, GLASS, [30, 28, 36].map(v => v * (0.85 + 0.3 * hash(xx, yy, 4)))); W.heat(xx, yy, 1); continue; }
+      W.set(xx, yy, RUB, rubbleC(W.col(xx, yy), xx, yy));
+      if (dist < 14) W.heat(xx, yy, 0.8 * (1 - dist / 14));
+    }
+    cracks(x, y, r + 1, 12);
+    burst(x, y, 10, [255, 250, 235]); burst(x, y, 6, COLD);
+    d.flash = 1; d.shake = 4; d.shock = { x, y, t: 0, max: 100 };
+    for (let k = 0; k < 30; k++) smokeC(d.mouth.x + (rnd() - 0.5) * 12, d.mouth.y + 2, [120, 108, 92], { vy: 8 + rnd() * 14, a: 0.1, max: 5, life: 4 + rnd() * 3, grow: 1.4 });
+  };
+  d.step = (dt, t) => {
+    const W = d.world, tn = d.tn;
+    d.flock.step(dt, t); d.crew.step(dt, t);
+    flyBits(d.bits, dt, (x) => !d.mouth || Math.abs(x - d.mouth.x) > 7.5);
+    tn.t += dt;
+    if (tn.st === "fly") {
+      d.phase("A tunneler flies down from the mother swarm. Below 18 m the ground is in fog: nothing there has been seen yet.");
+      tn.y -= 24 * dt;
+      const g = W.surf(Math.round(tn.x)) + 1;
+      if (tn.y <= g) { tn.y = g; tn.st = "bore"; tn.t = 0; tn.path = [[tn.x, tn.y, 0]]; d.mouth = { x: Math.round(tn.x), y: g }; for (let k = 0; k < 10; k++) smokeC(tn.x + (rnd() - 0.5) * 14, g, [110, 100, 88]); }
+    } else if (tn.st === "bore") {
+      const tgt = d.oreDone ? { x: 2, y: W.surf(2) - 100 } : d.ore;
+      const want = clamp(Math.atan2(tgt.x - tn.x, tn.y - tgt.y), -MAXL, MAXL);
+      const ds = 4.6 * dt;
+      tn.a = clamp(tn.a + clamp(want - tn.a, -TURN * ds, TURN * ds), -MAXL, MAXL);
+      tn.x += Math.sin(tn.a) * ds; tn.y -= Math.cos(tn.a) * ds;
+      const [n, c] = carve(tn.x, tn.y, 6.3);
+      d.spoil += n;
+      // The spoil goes up out of the mouth in a plume; its crew carries it off.
+      while (d.spoil >= 7 && c) {
+        d.spoil -= 7;
+        if (d.bits.length < 170) d.bits.push({ x: d.mouth.x + (rnd() - 0.5) * 8, y: d.mouth.y + 2, vx: (rnd() - 0.5) * 30, vy: 22 + rnd() * 18, c: c.map(v => v * (0.75 + 0.3 * rnd())), f: F_SPOIL });
+      }
+      if (rnd() < dt * 4) smokeC(d.mouth.x + (rnd() - 0.5) * 8, d.mouth.y + 2, [110, 100, 88], { vy: 6 + rnd() * 6 });
+      const last = tn.path[tn.path.length - 1];
+      if (Math.hypot(tn.x - last[0], tn.y - last[1]) >= 0.5) tn.path.push([tn.x, tn.y, tn.a]);
+      if (!tn.seen || Math.hypot(tn.x - tn.seen[0], tn.y - tn.seen[1]) > 1.5) { W.reveal(tn.x, tn.y, SIGHT); tn.seen = [tn.x, tn.y]; }
+      if (!d.oreDone && tn.y < d.ore.y - 3) d.oreDone = true;
+      d.phase(d.oreDone ? "On toward the magma layer it saw through the fog: the last thing worth opening here. Its spoil shoots out of the mouth; its own crew carries it off." : "It bores toward an ore deposit it saw through the fog, curving at most 0.6° a metre and never past 20° off straight down. The fog lifts round its head.");
+      // Magma within its drill's reach: cap it.
+      let hit = false;
+      for (let k = 2; k <= 6 && !hit; k++) for (let sd = -5; sd <= 5; sd += 2) { const px = tn.x + Math.sin(tn.a) * k + Math.cos(tn.a) * sd, py = tn.y - Math.cos(tn.a) * k + Math.sin(tn.a) * sd; if (W.m(Math.round(px), Math.round(py)) === MAG) { hit = true; break; } }
+      if (hit) {
+        tn.st = "cap"; tn.t = 0;
+        const cx = tn.x + Math.sin(tn.a) * 6, cy = tn.y - Math.cos(tn.a) * 6, cells = [];
+        for (let yy = Math.floor(cy - 10); yy <= cy + 10; yy++) for (let xx = Math.floor(cx - 10); xx <= cx + 10; xx++) if (W.m(xx, yy) === MAG && Math.hypot((xx - cx) * 0.9, (yy - cy) * 1.4) < 9.5) cells.push([xx, yy, Math.hypot(xx - tn.x, yy - tn.y)]);
+        cells.sort((a, b) => a[2] - b[2]);
+        d.capCells = cells; d.capK = 0; d.job = { x: cx, y: cy };
+      }
+    } else if (tn.st === "cap") {
+      d.phase("Magma ahead. It spends a capping charge: the magma at its drill freezes to dark glass, and the spot becomes a job for a heat-sink bot.");
+      const want = Math.floor(clamp(tn.t / 1.4, 0, 1) * d.capCells.length);
+      while (d.capK < want) { const [x, y] = d.capCells[d.capK++]; W.set(x, y, GLASS, [34, 32, 40].map(v => v * (0.85 + 0.3 * hash(x, y, 4))), F_CAP); W.heat(x, y, 0.9); if (rnd() < 0.3) smokeC(x, y + 1, STEAM_C, steam()); }
+      if (tn.t > 3) { tn.st = "back"; tn.t = 0; tn.s = tn.path.length - 1; tn.end = tn.path.length - 1; }
+    } else if (tn.st === "back") {
+      d.phase("It backs up its shaft to look again for its next target.");
+      tn.s = Math.max(tn.end - 100, tn.s - 16 * dt);
+      const p = pos(tn.s); tn.x = p[0]; tn.y = p[1]; tn.a = p[2];
+      if (tn.s <= tn.end - 100) { tn.st = "search"; tn.t = 0; d.ping = { x: tn.x, y: tn.y, t: 0 }; }
+    } else if (tn.st === "search") {
+      d.phase("It searches its whole reach again, seeing through the fog. Nothing is left worth opening.");
+      d.ping.t += dt;
+      if (tn.t > 2.4) { tn.st = "sink"; tn.t = 0; d.ping = null; }
+    } else if (tn.st === "sink") {
+      d.phase("With nothing left anywhere, it sinks back down its shaft, stopping short of the bottom so the cap stays safe.");
+      tn.s = Math.min(tn.end - 36, tn.s + 12 * dt);
+      const p = pos(tn.s); tn.x = p[0]; tn.y = p[1]; tn.a = p[2];
+      if (tn.s >= tn.end - 36) { tn.st = "arm"; tn.t = 0; }
+    } else if (tn.st === "arm") {
+      d.phase("Its end: the uranium in its drill is armed. Its lights blink red.");
+      if (tn.t > 2.5) { tn.st = "gone"; tn.t = 0; const m = [tn.x - Math.sin(tn.a) * 12, tn.y + Math.cos(tn.a) * 12]; bigBlast(m[0], m[1]); }
+    } else {
+      d.phase("A big nuclear blast deep down (50 kt in the game): a final gift of matter, loose rock for the cutters.");
+      if (d.shock) d.shock.t += dt;
+    }
+  };
+  d.draw = (t) => {
+    const tn = d.tn;
+    drawSwarm(t);
+    drawBits(d.bits);
+    d.flock.draw(t); d.crew.draw(t);
+    if (d.job) {
+      const p = 0.5 + 0.5 * Math.sin(t * 4), x = Math.round(d.job.x), y = Math.round(d.job.y);
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { block(x + sx * 11, y + sy * 7, LAMP, 0.5 + 0.5 * p); block(x + sx * 10, y + sy * 7, LAMP, 0.4 + 0.4 * p); block(x + sx * 11, y + sy * 6, LAMP, 0.4 + 0.4 * p); }
+      emit(x, y, 8, LAMP, 0.4 * p);
+    }
+    if (tn.st !== "gone") {
+      const hd = Math.atan2(-Math.cos(tn.a), Math.sin(tn.a));
+      drawTun(tn.x, tn.y, hd, t, { boring: tn.st === "bore", grip: tn.st === "bore" || tn.st === "cap" || tn.st === "arm", arming: tn.st === "arm", thrust: tn.st === "fly", id: 9 });
+    }
+    if (d.ping) { const r = d.ping.t * 26; if (r < SIGHT * 2) ring(d.ping.x, d.ping.y, r, LAMP, 0.55 * (1 - r / (SIGHT * 2))); }
+    drawShock(d.shock);
+  };
+  d.post = () => {
+    const tn = d.tn;
+    if (tn.st !== "gone" && tn.st !== "fly") tag(tn.x + 4, tn.y + 10, "TUNNELER");
+    if (d.job && tn.st !== "cap") tag(d.job.x - 10, d.job.y - 6, "HEAT-SINK JOB", -1);
+    if (!d.oreDone && tn.st === "bore" && d.world.fog[d.world.i(d.ore.x, d.ore.y)] === 0) tag(d.ore.x + 9, d.ore.y, "ORE");
+  };
+}
+
+// =====================================================================
+// HEAT-SINK BOT
+// =====================================================================
+function heatDemo(d) {
+  d.viewW = 200; d.T = 72; d.still = 11;
+  const SWITCH = 44;
+  const noise = (x) => 1.2 * Math.sin(x * 0.05 + 3) + 0.7 * Math.sin(x * 0.14);
+  d.setup = () => deep();
+  const deep = () => {
+    d.sub = "deep"; d.cam = { x: 0, y: -48 };
+    const W = d.world = new World(-170, -160, 340, 185, 420, noise);
+    const mt = (x) => 58 + 1.5 * Math.sin(x * 0.05), mb = (x) => 75 + 2 * Math.sin(x * 0.06 + 2);
+    W.build((x, y, dep) => {
+      const k = hash(x, y, 23), dd = dep + 2 * Math.sin(x * 0.07);
+      if (dep >= mt(x) && dep < mb(x)) return { m: MAG, c: [140, 38, 14] };
+      if (dep >= mb(x)) return { c: [70, 80, 66].map(v => v * (0.8 + 0.3 * k)), h: 0.9 };
+      if (dep < 1.5) return { c: soilC(x, y), h: 0.1 };
+      if (dd < 10) return { c: [128, 110, 88].map(v => v * (0.82 + 0.28 * k)), h: 0.3 };
+      return { c: [104, 98, 104].map(v => v * (0.84 + 0.28 * k)), h: 0.8 };
+    });
+    const s0 = W.surf(0);
+    d.s0 = s0;
+    d.shaftX = (y) => Math.round(3 * Math.sin(clamp((s0 - y) / 57, 0, 1) * Math.PI));
+    for (let y = s0 + 3; y >= s0 - 57; y--) { const cx = d.shaftX(y); for (let x = cx - 6; x <= cx + 6; x++) if (y <= W.surf(x)) W.set(x, y, VOID); }
+    // The tunneler's cap: the magma at its drill, frozen to dark glass.
+    d.capTop = s0 - 58; d.capBot = s0 - 62;
+    for (let y = d.capTop; y >= d.capBot; y--) for (let x = -8; x <= 8; x++) W.set(x, y, GLASS, [34, 32, 40].map(v => v * (0.85 + 0.3 * hash(x, y, 4))), F_CAP);
+    d.magBot = Math.floor(W.surfY(0) - mb(0));
+    d.front = d.capBot - 1; d.rowK = 0; d.rowMag = false; d.clear = 0; d.budget = 0; d.frozenDone = false;
+    d.order = [0]; for (let k = 1; k <= 9; k++) d.order.push(-k, k);
+    d.bot = { x: 0, yb: 44, st: "fly", t: 0, scrap: 0 };
+    d.tun = null;
+    const hy = s0 - 36;
+    d.crew = new Flock({
+      n: 16, id: 500, hx: d.shaftX(hy) - 6, hy, speed: 40, bite: 2, homeDy: 2,
+      face: (F) => {
+        for (let a = 0; a < 10; a++) {
+          const x = -6 + Math.floor(rnd() * 13);
+          for (let y = d.capTop + 1; y > d.front + 1; y--) { const m = D.world.m(x, y); if (m <= VOID) continue; if (F.ok(x, y) && !F.taken.has(F.key(x, y))) return { x, y }; break; }
+        }
+        return null;
+      },
+      minable: (m, f, x, y) => (m === GLASS || m === ROCK) && Math.abs(x) <= 6 && y > d.front + 1 && y <= d.capTop,
+      cut: (m) => m === ROCK ? 0.25 : 0.14,
+    });
+    d.flock = new Flock({ n: 7, id: 520, hx: -96, hy: 12, x0: -102, x1: -74, y0: W.surf(-88) - 7, y1: W.surf(-88) + 1 });
+    makeSwarm(d, -170, 170, 22, 280);
+  };
+  const pool = () => {
+    d.sub = "pool"; d.cam = { x: -4, y: -2 };
+    const W = d.world = new World(-170, -110, 340, 135, 420, noise);
+    W.build((x, y, dep) => {
+      const k = hash(x, y, 29), dd = dep + 2 * Math.sin(x * 0.07);
+      if (dep < 1.5) return { c: soilC(x, y), h: 0.1 };
+      if (dd < 10) return { c: [128, 110, 88].map(v => v * (0.82 + 0.28 * k)), h: 0.3 };
+      return { c: [104, 98, 104].map(v => v * (0.84 + 0.28 * k)), h: 0.8 };
+    });
+    const px = 22, hw = 26, dep = 12, top = W.surf(px) - 2;
+    d.cells = [];
+    for (let x = px - hw; x <= px + hw; x++) {
+      const bot = top - Math.round(dep * Math.sqrt(Math.max(0, 1 - ((x - px) / (hw + 0.5)) ** 2)));
+      for (let y = bot - 2; y <= bot; y++) if (W.solid(x, y)) W.set(x, y, ROCK, W.col(x, y).map((v, i) => v * 0.7 + [44, 14, 6][i]));
+      for (let y = bot + 1; y <= W.surf(x); y++) { if (y <= top) { W.set(x, y, MAG, [140, 38, 14]); d.cells.push([x, y]); } else W.set(x, y, VOID); }
+    }
+    d.pool = { px, hw, dep, top, bot: top - dep };
+    d.bot = { x: -150, yb: 34, st: "fly", t: 0, scrap: 0, vy: 0 };
+    d.tents = []; d.budget = 0;
+    d.flock = new Flock({ n: 9, id: 540, hx: -84, hy: 12, x0: -100, x1: -56, y0: W.surf(-78) - 7, y1: W.surf(-78) + 1 });
+    makeSwarm(d, -170, 170, 40, 280);
+  };
+  const floorAt = () => { const W = d.world; let y = Math.round(d.bot.yb) - 1; while (y > d.front - 3 && !W.solid(0, y)) y--; return y; };
+  const stepDeep = (dt, t) => {
+    const W = d.world, b = d.bot;
+    d.crew.step(dt, t); d.flock.step(dt, t);
+    b.t += dt;
+    if (b.st === "fly") {
+      d.phase("Role 2, deep: a heat-sink bot comes down a tunneler's shaft to the cap, the magma the tunneler froze at its drill.");
+      const goal = d.capTop + 1; b.yb = Math.max(goal, b.yb - 14 * dt); b.x = d.shaftX(Math.round(b.yb));
+      if (b.yb <= goal + 0.01) { b.st = "work"; b.t = 0; }
+    } else if (b.st === "work") {
+      // Its crew's hauler keeps close over it.
+      const hl = d.crew.h, hy = Math.min(d.s0 - 36, Math.round(b.yb) + 16); hl.y += (hy - hl.y) * Math.min(1, dt * 2); hl.x = d.shaftX(Math.round(hl.y)) - 6;
+      // It follows its crew down, its struts on the dug floor.
+      const fl = floorAt() + 1; if (b.yb > fl) b.yb = Math.max(fl, b.yb - 4 * dt);
+      b.x = d.shaftX(Math.round(b.yb));
+      // The front freezes a slab across the passage a metre at a time (its
+      // reach is limited, so it waits for the crew when far ahead).
+      if (!d.frozenDone && b.yb - d.front < 28) {
+        d.budget += 70 * dt; let guard = 0;
+        while (d.budget > 0 && !d.frozenDone && guard++ < 240) {
+          if (d.rowK >= d.order.length) {
+            if (d.rowMag) d.clear = 0; else d.clear++;
+            d.rowK = 0; d.rowMag = false;
+            if (d.clear >= 6) { d.frozenDone = true; break; }
+            d.front--; continue;
+          }
+          const x = d.order[d.rowK], y = d.front;
+          if (W.m(x, y) === MAG) {
+            const cost = 1 + 3 * clamp((d.capBot - y) / 22, 0, 1);
+            if (d.budget < cost) break;
+            d.budget -= cost; W.set(x, y, GLASS, stoneC(x, y, 99), F_FROZEN); W.heat(x, y, 0.75); d.rowMag = true;
+            if (rnd() < 0.12) smokeC(x, y + 1, STEAM_C, steam());
+          }
+          d.rowK++;
+        }
+        if (d.budget > 4) d.budget = 4;
+      }
+      if (rnd() < dt * 7) smokeC(b.x + (rnd() - 0.5) * 12, b.yb + 11, STEAM_C, steam());
+      d.phase(d.frozenDone ? "6 m of solid ground past the magma with no hot liquid: the crew catches up." : "Its cooling tentacles freeze a passage down through the magma: a tunneler's 12 m plus 3 m of frozen wall each side. Its crew digs out only the middle, so the walls hold the magma back.");
+      if (d.frozenDone && floorAt() <= d.front + 1) { b.st = "off"; b.t = 0; }
+    } else if (b.st === "off") {
+      d.phase("Through. With no next job it powers down, left as scrap for its crew to reclaim.");
+      if (b.t > 1.6) { b.st = "scrap"; b.t = 0; }
+    } else if (b.st === "scrap") {
+      b.scrap = Math.min(1, b.t / 3);
+      if (rnd() < dt * 24) spark(b.x + (rnd() - 0.5) * 14, b.yb + rnd() * 10, 1, [210, 210, 214], 6);
+      if (b.scrap >= 1) { b.st = "gone"; d.tun = { y: 58, st: "down" }; }
+    } else if (d.tun) {
+      const tn = d.tun;
+      d.phase("The job's shaft now runs through the passage: a tunneler comes down it and bores on below the magma.");
+      if (tn.st === "down") { tn.y -= 18 * dt; if (tn.y <= d.front + 4) { tn.y = d.front + 4; tn.st = "bore"; } }
+      else { tn.y -= 1.6 * dt; for (let y = Math.floor(tn.y - 7); y <= tn.y + 7; y++) for (let x = -7; x <= 7; x++) if (Math.hypot(x, y - tn.y) < 6.3 && W.solid(x, y) && W.m(x, y) !== MAG) W.set(x, y, VOID); }
+    }
+  };
+  const stepPool = (dt, t) => {
+    const W = d.world, b = d.bot, P = d.pool;
+    d.flock.step(dt, t);
+    b.t += dt;
+    if (b.st === "fly") {
+      d.phase("Role 1, small pools: a bot flies to a small magma pool near the cutters (up to 1,500 cells, all within its 30 m reach).");
+      const gx = P.px, gy = P.top + 9, dx = gx - b.x, dy = gy - b.yb, dd = Math.hypot(dx, dy), sp = 30 * dt;
+      if (dd > sp) { b.x += dx / dd * sp; b.yb += dy / dd * sp; }
+      else {
+        b.x = gx; b.yb = gy; b.st = "work"; b.t = 0;
+        d.tents = [-7, -3, 1, 5, 9].map((dx2, i) => ({ trail: [[b.x + dx2 * 0.8, b.yb - 1]], tip: [b.x + dx2 * 0.8, b.yb - 1], ph: i * 1.7 + rnd(), sp: 3.6 + rnd() * 1.2, drift: dx2 * 0.25 }));
+      }
+    } else if (b.st === "work") {
+      d.phase("It settles over the pool, grips the rim, and its cooling tentacles freeze all of it. Heat only sets how long a cell takes.");
+      for (const tn of d.tents) {
+        if (tn.tip[1] > P.bot + 2) {
+          tn.tip[1] -= tn.sp * dt;
+          tn.tip[0] += (Math.sin(t * 0.8 + tn.ph) * 3 + tn.drift) * dt;
+          const yy = Math.round(tn.tip[1]), half = (P.hw - 2) * Math.sqrt(Math.max(0, 1 - ((P.top - yy) / (P.dep + 1)) ** 2));
+          tn.tip[0] = clamp(tn.tip[0], P.px - half, P.px + half);
+          const last = tn.trail[tn.trail.length - 1];
+          if (Math.hypot(tn.tip[0] - last[0], tn.tip[1] - last[1]) >= 1) tn.trail.push([tn.tip[0], tn.tip[1]]);
+        }
+        for (let yy = Math.round(tn.tip[1]) - 1; yy <= Math.round(tn.tip[1]) + 1; yy++) for (let xx = Math.round(tn.tip[0]) - 1; xx <= Math.round(tn.tip[0]) + 1; xx++) if (W.m(xx, yy) === MAG) { W.set(xx, yy, GLASS, stoneC(xx, yy, 99), F_FROZEN); W.heat(xx, yy, 0.7); }
+      }
+      // The cold spreads from what is frozen, until no magma is left.
+      d.budget += 55 * dt;
+      const cand = [];
+      for (const [x, y] of d.cells) if (W.m(x, y) === MAG && (W.m(x + 1, y) === GLASS || W.m(x - 1, y) === GLASS || W.m(x, y + 1) === GLASS || W.m(x, y - 1) === GLASS)) cand.push([x, y]);
+      while (d.budget >= 1 && cand.length) { const k = Math.floor(rnd() * cand.length), [x, y] = cand[k]; cand[k] = cand[cand.length - 1]; cand.pop(); W.set(x, y, GLASS, stoneC(x, y, 99), F_FROZEN); W.heat(x, y, 0.7); d.budget -= 1; if (rnd() < 0.1) smokeC(x, y + 1, STEAM_C, steam()); }
+      if (d.budget > 3) d.budget = 3;
+      if (rnd() < dt * 8) smokeC(b.x + (rnd() - 0.5) * 12, b.yb + 11, STEAM_C, steam());
+      if (b.t > 2 && !d.cells.some(([x, y]) => W.m(x, y) === MAG)) { b.st = "off"; b.t = 0; }
+    } else if (b.st === "off") {
+      d.phase("All of it is stone. With no next job the bot powers down and drops, scrap for the cutters, who come over to mine the new stone.");
+      if (b.t > 1) { b.vy -= 30 * dt; b.yb = Math.max(P.top + 1, b.yb + b.vy * dt); }
+      if (b.t > 1.4 && !d.mined) { d.mined = true; Object.assign(d.flock.o, { x0: P.px - P.hw, x1: P.px + P.hw, y0: P.bot, y1: P.top + 1, minable: (m) => m === GLASS || m === ROCK, cut: (m) => m === GLASS ? 0.45 : 1.2 }); }
+    }
+  };
+  d.step = (dt, t) => {
+    if (t >= SWITCH && d.sub !== "pool") { pool(); d.mined = false; }
+    if (d.sub === "deep") stepDeep(dt, t); else stepPool(dt, t);
+  };
+  d.draw = (t) => {
+    const b = d.bot;
+    drawSwarm(t);
+    if (d.sub === "deep") {
+      d.flock.draw(t);
+      if (b.st === "work") {
+        [-8, -3, 3, 8].forEach((tx, j) => {
+          const u0 = [-5, -2, 2, 5][j], base = [b.x + u0 + 0.5, b.yb - 1];
+          const tip = [tx + Math.sin(t * 1.3 + j) * 1.2, d.front + 1 + (j % 2)];
+          if (tip[1] >= base[1] - 1) return;
+          const mid = [(base[0] + tip[0]) / 2 + Math.sin(t * 0.9 + j * 1.7) * 3, (base[1] + tip[1]) / 2];
+          const pts = bez(base, mid, tip, Math.max(6, Math.round((base[1] - tip[1]) * 0.8))), n = pts.length;
+          drawPath(pts, (i) => { const f = i / n; if (f > 0.72) { const h = (f - 0.72) / 0.28; return [77 + 178 * h, 31 + 90 * h, 13 + 20 * h]; } return i % 4 === 0 ? COPPER : i % 4 === 2 ? bone(i, j, SEED) : strut(i, j, SEED); });
+          block(Math.round(tip[0]), Math.round(tip[1]), [255, 220, 160]); emit(tip[0], tip[1], 6, [255, 170, 90], 0.8);
+        });
+      }
+      if (b.st !== "gone") drawHeatSink(b.x, b.yb, t, b.st === "work", b.st === "work" || b.st === "fly", b.scrap);
+      d.crew.draw(t);
+      if (d.tun) drawTun(0, d.tun.y, -Math.PI / 2, t, { boring: d.tun.st === "bore", grip: d.tun.st === "bore", id: 12 });
+    } else {
+      const P = d.pool;
+      d.flock.draw(t);
+      if (b.st === "work") {
+        // Grip tentacles to the rim, claws dug in.
+        for (const [sd, dy] of [[-1, 4], [-1, 1], [1, 4], [1, 1]]) {
+          const base = [b.x + sd * 7 + 0.5, b.yb + dy], tip = [P.px + sd * (P.hw + 2), P.top + 3 + dy];
+          const mid = [(base[0] + tip[0]) / 2 + Math.sin(t * 0.7 + dy) * 2, Math.max(base[1], tip[1]) + 5];
+          limb(bez(base, mid, tip, 24), 2, (i) => i % 3 === 0 ? bone(i, 0, SEED) : armour(i, 1, SEED).map(q => q * 1.1));
+          block(Math.round(tip[0]) + sd, Math.round(tip[1]), bone(3, 3, SEED).map(q => q * 1.2));
+        }
+        // Cooling tentacles, swimming down through it.
+        for (const tn of d.tents) {
+          const n = tn.trail.length, pts = tn.trail.filter((_, i) => i % 2 === 0 || i === n - 1).map(([x, y], i, arr) => [x + Math.sin(t * 1.6 + i * 0.5 + tn.ph) * 1.4 * (i / Math.max(1, arr.length)), y]);
+          pts.unshift([tn.trail[0][0], b.yb]);
+          drawPath(pts, (i) => i % 4 === 0 ? COPPER : i % 4 === 2 ? bone(i, 0, SEED) : strut(i, 1, SEED));
+          const tip = pts[pts.length - 1];
+          block(Math.round(tip[0]), Math.round(tip[1]), [255, 240, 200]); emit(tip[0], tip[1], 5, [255, 200, 140], 0.6);
+        }
+        // Repulsors under it, holding it over the pool.
+        for (const rx of [-4, 4]) { for (let k = 1; k <= 3; k++) block(Math.round(b.x) + rx, Math.round(b.yb) - k, COLD, 0.6 - k * 0.15); emit(b.x + rx + 0.5, b.yb - 2, 5, COLD, 0.6 + 0.2 * Math.sin(t * 9 + rx)); }
+      }
+      drawHeatSink(b.x, b.yb, t, b.st === "work", b.st !== "off", 0);
+      if (b.st === "fly") { block(Math.round(b.x) - 4, Math.round(b.yb) - 1, COLD, 0.6); block(Math.round(b.x) + 4, Math.round(b.yb) - 1, COLD, 0.6); }
+      emit(P.px, P.top - 4, 40, [255, 120, 40], d.cells.some(([x, y]) => d.world.m(x, y) === MAG) ? 0.35 : 0);
+    }
+  };
+  d.post = () => {
+    const b = d.bot;
+    if (b.st !== "gone") tag(b.x + 8, b.yb + 10, b.st === "off" || b.st === "scrap" ? "HEAT SINK (powered down)" : "HEAT SINK");
+    if (d.sub === "deep" && d.tun) tag(4, d.tun.y + 12, "TUNNELER");
+    if (d.sub === "deep" && b.st === "work") tag(10, d.front + 2, "FROZEN WALL");
+  };
+}
+
+// =====================================================================
+// FORESTER and ABDUCTOR: the mockup's tripods
+// =====================================================================
+const livingWorld = (seed) => {
+  const W = new World(-170, -100, 340, 118, 420, (x) => 2 * Math.sin(x * 0.04) + 1.5 * Math.sin(x * 0.11 + 2));
+  W.build((x, y, dep) => dep < 1 ? { c: mix([46, 74, 36], [70, 96, 44], hash(x, 1, seed)), h: 0.1 } : dep < 3 ? { c: mix([58, 46, 34], [74, 58, 40], hash(x, y, seed)), h: 0.15 } : { c: rockC(x, y, dep, seed), h: 0.4 });
+  return W;
+};
+function tripodDemo(d, forester) {
+  d.viewW = 210; d.T = 84; d.still = forester ? 38 : 34;
+  d.setup = () => {
+    d.cam = { x: 0, y: forester ? 26 : 33 };
+    d.world = livingWorld(forester ? 17 : 19);
+    makeSwarm(d, -340, -66, 72, 380);
+    d.flock = forester ? null : new Flock({ n: 8, id: 720, hx: 26, hy: 26, x0: 12, x1: 52, y0: d.world.surf(32) - 7, y1: d.world.surf(32) + 1, replace: 4 });
+    d.trip = tripod(d, forester);
+  };
+  d.step = (dt, t) => { if (d.flock) d.flock.step(dt, t); d.trip.step(dt, t); };
+  d.draw = (t) => { drawSwarm(t); d.trip.draw(t); };
+  d.post = () => d.trip.post();
+}
+// The abductor (a spider) and the forester (a crab): tripods for living
+// worlds, roaming the surface on three long legs. Ported from the mockup's
+// sceneTripod; flown in folded instead of dropped from a gantry, full
+// stores dropped for the couriers as the game does, gore drawn as the
+// game draws it (a red burst; no blood pools yet), spitters added.
+//
+// Weight: the body hangs on its legs like a load on springs. It sags when a
+// leg lifts, jolts down as each foot lands, and surges forward while all
+// three are planted. Each leg is two curves, hip to a high knee to the foot.
+function tripod(d, forester) {
+  const W = d.world, cx = 0;
+  const surf = (x) => W.surf(Math.round(x));
+  const sc = { grow: 1, vy: 0, lean: 0 };
+  const H = forester ? 50 : 62, V = 2.3, P = 5.2, G = 30, dx0 = -46;
+  const hips = forester ? [-12, 0, 12] : [-3, 0, 3], spread = forester ? [-32, 3, 34] : [-26, 4, 30];
+  const wrap = (x) => cx - 118 + ((((x - (cx - 118)) % 236) + 236) % 236);
+  const legs = hips.map((hx, i) => ({ hx, foot: [dx0 + spread[i], surf(dx0 + spread[i])], from: null, to: null, swing: -1 }));
+  // Somewhere to grow back or wander in: away from the walker, in view.
+  const away = () => { for (let k = 0; k < 20; k++) { const x = -108 + rnd() * 216; if (Math.abs(x - bx) > 45) return x; } return bx > 0 ? -90 : 90; };
+  const things = [], cover = [], drops = [], spray = [], pen = [], gobs = [];
+  let bx = dx0, lift = null;
+  if (forester) {
+    for (let i = 0; i < 8; i++) things.push({ x: cx - 110 + i * 30 + rnd() * 12, h: 3 + Math.floor(rnd() * 3), alive: true, t: 0 });
+    for (let x = cx - 116; x <= cx + 116; x += 3) if (rnd() < 0.7) cover.push({ x: x + Math.floor(rnd() * 2), h: 1 + Math.floor(rnd() * 3), state: "ok", t: 0 });
+  } else for (let i = 0; i < 12; i++) things.push({ x: cx - 110 + i * 20 + rnd() * 10, ph: rnd() * 9, kind: Math.floor(rnd() * 3), spit: i === 3 || i === 7, state: "free", t: 0, v: 0, next: 3 + rnd() * 4 });
+  const arms = [0, 1].map(k => ({ k, state: "idle", t: 0, target: null, tip: null, load: null }));
+  const laser = { on: false, t: 0, x0: 0, x1: 0, kind: "" };
+  const hauler = forester ? { x: 70, y: 40, fill: 0, cargo: [] } : null;
+  const cutters = forester ? Array.from({ length: 6 }, (_, i) => ({ id: 740 + i, x: hauler.x + 6 + (rnd() - 0.5) * 20, y: hauler.y - 4 - rnd() * 6, state: "wait", tgt: null, cargo: null, t: 0 })) : [];
+  // (The demo's sac holds 6 catches so the couriers come within the loop; the game's holds 2,000 kg.)
+  const CAP = forester ? 16 : 6;
+  let nextVent = 16 + rnd() * 8;
+  const pkg = { x: dx0 - 190, y: surf(dx0) + 46, vy: 0, landed: -1, st: "fly", t: 0 };
+  sc.by = surf(dx0) + 4; sc.deploying = true; sc.unfold = 0; sc.stand = 0;
+  const store = () => forester ? [bx - 17, sc.by + 2] : [bx - 9, sc.by + 2];
+  const splatter = (x, y, n, up) => { for (let k = 0; k < n && spray.length < 140; k++) spray.push({ x: x + (rnd() - 0.5) * 3, y, vx: (rnd() - 0.5) * (up ? 12 : 16), vy: up ? 14 + rnd() * 14 : rnd() * 10, c: mix(BLOOD, [150, 20, 30], rnd()), blood: true }); };
+  const gore = (c) => {
+    const y = surf(Math.round(c.x)) + 2;
+    burst(c.x, y, 1.2, [255, 90, 70]); spark(c.x, y, 12, [200, 30, 40], 12);
+    for (let k = 0; k < 6; k++) smokeC(c.x + (rnd() - 0.5) * 4, y, [150, 30, 36], { a: 0.14, vy: 3 + rnd() * 4 });
+    splatter(c.x, y, 14, false);
+    c.state = "gone"; c.t = 0; c.v = 0;
+  };
+  const step = (dt, u0) => {
+    const t = u0;
+    sc.grow = Math.min(1, sc.grow + dt / 6);
+    for (const q of spray) {
+      q.vy -= G * dt; q.x += q.vx * dt; q.y += q.vy * dt;
+      if (q.y <= surf(q.x) + 1) { q.down = true; if (!q.blood && drops.length < 90 && Math.abs(q.x - cx) < 116) drops.push({ x: Math.round(q.x), c: q.c, claimed: false }); }
+    }
+    for (let i = spray.length - 1; i >= 0; i--) if (spray[i].down) spray.splice(i, 1);
+    // Spit: a green gob arcing at a machine.
+    for (const g of gobs) {
+      g.age += dt; g.vy -= G * dt; g.x += g.vx * dt; g.y += g.vy * dt;
+      if (g.age >= g.T) { g.done = true; spark(g.x, g.y, 6, [140, 220, 60], 8); if (g.tgt && !g.tgt.dead && Math.hypot(g.tgt.x - g.x, g.tgt.y - g.y) < 5) d.flock.die(g.tgt); }
+    }
+    for (let i = gobs.length - 1; i >= 0; i--) if (gobs[i].done) gobs.splice(i, 1);
+    if (forester) for (const c of cutters) {
+      // Cutters: ash and what it vents, off the ground (no crew of its own:
+      // whatever cutters are about).
+      c.t += dt;
+      if (c.state === "wait" && c.t > 0.5) { const q = drops.find(q => !q.claimed); if (q) { q.claimed = true; c.tgt = { x: q.x, d: q }; c.state = "go"; } }
+      const goal = c.state === "go" ? [c.tgt.x, surf(c.tgt.x) + 3] : c.state === "home" ? [hauler.x + 6, hauler.y + 10] : [hauler.x + 6 + Math.sin(t + c.id) * 8, hauler.y - 4 + Math.cos(t * 1.3 + c.id) * 3];
+      const dx = goal[0] - c.x, dy = goal[1] - c.y, dd = Math.hypot(dx, dy), sp = 26 * dt;
+      if (dd > sp) { c.x += dx / dd * sp + Math.sin(t * 5 + c.id) * 0.2; c.y += dy / dd * sp; continue; }
+      if (c.state === "go") { const i = drops.indexOf(c.tgt.d); if (i >= 0) drops.splice(i, 1); c.cargo = c.tgt.d.c; c.state = "home"; c.tgt = null; }
+      else if (c.state === "home") { hauler.fill++; hauler.cargo.push(c.cargo); if (hauler.cargo.length > 30) hauler.cargo.shift(); c.cargo = null; c.state = "wait"; c.t = 0; }
+    }
+    if (lift) { stepLift(lift, dt); if (lift.done) lift = null; }
+    if (!forester) stepAnimals(dt, t);
+    // Deploying: flown in folded, let go, falling, landed, unfolding.
+    if (sc.deploying) {
+      bx = dx0;
+      const g = surf(dx0) + 1;
+      if (pkg.st === "fly") { pkg.x += 40 * dt; if (pkg.x >= dx0) { pkg.x = dx0; pkg.st = "hover"; pkg.t = 0; } }
+      else if (pkg.st === "hover") { pkg.t += dt; if (pkg.t > 0.7) pkg.st = "fall"; }
+      else if (pkg.st === "fall") {
+        pkg.vy -= G * dt; pkg.y += pkg.vy * dt;
+        if (pkg.y <= g) { pkg.y = g; pkg.st = "down"; pkg.landed = u0; burst(dx0 + 0.5, g + 1, 2.2, [200, 190, 170]); for (let k = 0; k < 14; k++) smokeC(dx0 + (rnd() - 0.5) * 20, g + 1, [110, 100, 88]); spark(dx0, g + 1, 12, rockC(1, 1, 3, 19), 14); }
+      }
+      const since = pkg.landed < 0 ? -1 : u0 - pkg.landed;
+      sc.unfold = since < 0 ? 0 : clamp((since - 0.6) / 2.6, 0, 1);
+      sc.stand = since < 0 ? 0 : clamp((since - 3.4) / 2.4, 0, 1);
+      legs.forEach((L, i) => { const to = [dx0 + spread[i], surf(dx0 + spread[i])]; const k = ease(sc.unfold); L.foot = [dx0 + (to[0] - dx0) * k, g + (to[1] - g) * k + 6 * Math.sin(k * Math.PI)]; L.swing = -1; });
+      const s = sc.stand;
+      sc.by = g + 3 + (H - 3) * ease(s) - (s > 0.7 ? Math.sin((s - 0.7) / 0.3 * Math.PI) * 2.5 : 0);
+      sc.vy = 0; sc.lean = 0;
+      if (s >= 1) { sc.deploying = false; sc.goal = undefined; }
+      phaseNow();
+      return;
+    }
+    // Walking: the gait, and the body carried on its legs like a weight.
+    const support = legs.filter(L => L.swing < 0).length;
+    const live = (forester ? things.filter(q => q.alive) : things.filter(q => q.state === "free")).map(q => q.x);
+    const delta = (a, c) => a - c;
+    const near = live.filter(x => Math.abs(delta(x, bx)) < 40);
+    if (sc.goal === undefined || (sc.mode === "work" && !near.length)) {
+      let best = bx + 60, most = -1;
+      for (const x of live) { const n = live.filter(o => Math.abs(delta(o, x)) < 25).length - (Math.abs(delta(x, bx)) < 40 ? 99 : 0); if (n > most) { most = n; best = x; } }
+      sc.goal = clamp(best, -84, 84); sc.mode = "travel";
+    }
+    if (sc.mode === "work" && near.length) sc.goal = clamp(near.reduce((a, x) => Math.abs(delta(x, bx)) < Math.abs(delta(a, bx)) ? x : a), -88, 88);
+    const gd = delta(sc.goal, bx);
+    if (sc.mode === "travel" && Math.abs(gd) < 12) sc.mode = "work";
+    const dir = gd < 0 ? -1 : 1, stride = sc.mode === "travel" ? 1.7 : 1;
+    const v = dir * V * (sc.mode === "travel" ? 3 : Math.abs(gd) > 4 ? 0.6 : 0.15) * (support === 3 ? 1.3 : 0.6);
+    bx = clamp(bx + v * dt, -96, 96);
+    sc.gait = (sc.gait || 0) + Math.abs(v) * dt / (V * P * stride);
+    const cyc = sc.gait % 1;
+    legs.forEach((L, i) => {
+      const s0 = i / 3, u = ((cyc - s0) % 1 + 1) % 1, sw = 0.3;
+      if (u < sw) {
+        if (L.swing < 0) { L.from = L.foot.slice(); const tx = bx + spread[i] + dir * V * P * 0.5 * stride; L.to = [tx, surf(Math.round(tx))]; }
+        L.swing = u / sw;
+        const e = ease(L.swing), jump = Math.abs(L.to[0] - L.from[0]) > 100;
+        L.foot = jump ? L.to.slice() : [L.from[0] + (L.to[0] - L.from[0]) * e, L.from[1] + (L.to[1] - L.from[1]) * e + Math.sin(L.swing * Math.PI) * (stride > 1 ? 9 : 6)];
+      } else if (L.swing >= 0) {
+        L.swing = -1; L.foot = L.to.slice();
+        // The foot comes down under load: a jolt through the body, dust.
+        sc.vy -= 4.5; for (let k = 0; k < 3; k++) smokeC(L.foot[0] + (rnd() - 0.5) * 3, L.foot[1] + 1, [110, 100, 88]);
+      }
+    });
+    const target = surf(Math.round(bx)) + H - (3 - support) * 4;
+    sc.vy += ((target - sc.by) * 7 - sc.vy * 2.6 - G * 0.04 * (3 - support)) * dt;
+    sc.by += sc.vy * dt;
+    sc.lean = legs.reduce((a, L) => a + (L.swing < 0 ? (L.foot[0] - bx) : 0), 0) * 0.03;
+    // Venting: a pressure-release plume now and then.
+    if (t > nextVent && pen.length > 4) {
+      nextVent = t + 16 + rnd() * 12;
+      const [vx0, vy0] = store();
+      burst(vx0, vy0, 1.2, forester ? [200, 190, 120] : [200, 60, 60]);
+      if (forester) for (let k = 0; k < 40; k++) spray.push({ x: vx0 + (rnd() - 0.5) * 3, y: vy0, vx: (rnd() - 0.5) * 14, vy: 14 + rnd() * 16, c: mix(mix([150, 130, 80], [110, 120, 60], rnd()), [90, 70, 40], rnd() * 0.5) });
+      else splatter(vx0, vy0, 30, true);
+    }
+    // A full store is dropped on the ground for the couriers; a new one grows.
+    if (!lift && pen.length >= CAP) {
+      const [sx0, sy0] = store(), items = pen.slice(); pen.length = 0; sc.grow = 0;
+      lift = newLift(forester ? "bag" : "sac", sx0, sy0, items, surf(sx0) + (forester ? 16 : 17));
+    }
+    if (!forester) stepPalps(dt, t); else stepClaws(dt, t);
+    phaseNow();
+  };
+  const stepAnimals = (dt, t) => {
+    for (const c of things) {
+      if (c.state === "gone") { c.t += dt; if (c.t > 6) { c.state = "free"; c.v = 0; c.x = away(); c.next = t + 3; } continue; }
+      if (c.state !== "free") continue;
+      const ahead = c.x - bx;
+      if (!sc.deploying && !c.spit && ahead > -10 && ahead < 45 && c.v === 0 && rnd() < dt * 0.25) { c.v = (rnd() < 0.5 ? 1 : -1) * (5 + rnd() * 3); c.vt = 0; }
+      // A runner calms down after a few seconds and grazes again.
+      if (c.v) { c.vt = (c.vt || 0) + dt; if (c.vt > 3.5) c.v = 0; }
+      c.x = wrap(c.x + (c.v || Math.sin(t * 0.7 + c.ph) * 1.5) * dt);
+      // Spitters spit at machines within 60 m, every 6 s: at a cutter if a
+      // flock is in reach, else at the abductor (5 of its 100,000 health).
+      if (c.spit && t > c.next) {
+        const y0 = surf(Math.round(c.x)) + 3, live = d.flock ? d.flock.c.filter(q => !q.dead && Math.abs(q.x - c.x) < 60) : [];
+        let tx = null, ty = null, tgt = null;
+        if (live.length) { tgt = live[Math.floor(rnd() * live.length)]; tx = tgt.x; ty = tgt.y; }
+        else if (!sc.deploying && Math.abs(c.x - bx) < 60) { const L = legs[Math.floor(rnd() * 3)]; tx = L.foot[0]; ty = L.foot[1] + 14; }
+        if (tx !== null) { const T = 1; gobs.push({ x: c.x, y: y0, vx: (tx - c.x) / T, vy: (ty - y0) / T + 0.5 * G * T, T, age: 0, tgt }); c.next = t + 6; }
+        else c.next = t + 1;
+      }
+    }
+  };
+  const stepPalps = (dt, t) => {
+    // The palps: for live animals that are not running.
+    for (const a of arms) {
+      a.t += dt;
+      const shoulder = [bx + 12 - a.k * 3, sc.by + 1];
+      if (a.state === "idle" && a.t > 0.8) {
+        const c = things.find(q => q.state === "free" && !q.v && Math.abs(q.x - shoulder[0]) < 30 && !arms.some(o => o.target === q));
+        if (c) { a.target = c; a.state = "reach"; a.t = 0; }
+      } else if (a.state === "reach") {
+        const c = a.target, goal = [c.x, surf(Math.round(c.x)) + 2];
+        a.tip = [shoulder[0] + (goal[0] - shoulder[0]) * ease(a.t / 0.6), shoulder[1] + (goal[1] - shoulder[1]) * ease(a.t / 0.6)];
+        if (c.v || c.state !== "free") { a.state = "idle"; a.t = 0; a.target = null; }
+        else if (a.t >= 0.6) { c.state = "held"; a.load = c; a.state = "lift"; a.t = 0; a.from = a.tip.slice(); }
+      } else if (a.state === "lift") {
+        const [px, py] = store();
+        a.tip = [a.from[0] + (px - a.from[0]) * ease(a.t / 0.9), a.from[1] + (py - a.from[1]) * ease(a.t / 0.9)];
+        if (a.t > 0.3 && a.t < 0.32 && rnd() < 0.12) { a.load.state = "free"; a.load.v = 7; a.load.x = a.tip[0]; a.load = null; a.state = "idle"; a.t = 0; a.target = null; }
+        else if (a.t >= 0.9) { if (pen.length < CAP) pen.push({ c: [MEAT, [150, 110, 80], [120, 90, 70]][a.load.kind], ph: rnd() * 9 }); a.load.state = "gone"; a.load.t = 0; a.load = null; a.state = "idle"; a.t = 0; a.target = null; }
+      }
+    }
+    // The laser: spitters first (a shot every 2 s), runners out of the palps'
+    // reach every 3 s. What it hits bursts into red. Never fire.
+    laser.t += dt;
+    if (!laser.on) {
+      const sp = laser.t > 2 && things.find(q => q.state === "free" && q.spit && Math.abs(q.x - bx) < 80);
+      const run = !sp && laser.t > 3 && things.find(q => q.state === "free" && q.v && Math.abs(q.x - bx) < 80);
+      if (sp) { laser.on = true; laser.t = 0; laser.kind = "spit"; laser.x0 = sp.x - 8; laser.x1 = sp.x + 8; }
+      else if (run) { laser.on = true; laser.t = 0; laser.kind = "run"; laser.x0 = run.x - Math.sign(run.v) * 10; laser.x1 = run.x + Math.sign(run.v) * 14; }
+    }
+    if (laser.on) {
+      const gx = laser.x0 + (laser.x1 - laser.x0) * Math.min(1, laser.t / 0.7);
+      laser.gx = gx;
+      for (const c of things) if (c.state === "free" && Math.abs(c.x - gx) < 1.6) gore(c);
+      if (rnd() < dt * 30) spark(gx, surf(Math.round(gx)) + 1, 1, [255, 160, 120], 8);
+      if (laser.t > 0.8) { laser.on = false; laser.t = 0; }
+    }
+  };
+  const stepClaws = (dt, t) => {
+    // The claws shear the nearest tree in sections and lift each in.
+    for (const a of arms) {
+      a.t += dt;
+      const shoulder = [bx + 15 - a.k * 4, sc.by + 2];
+      if (a.state === "idle" && a.t > 0.6) {
+        const tr = things.find(q => q.alive && Math.abs(q.x - shoulder[0]) < 32 && !arms.some(o => o.target === q));
+        if (tr) { a.target = tr; a.state = "reach"; a.t = 0; }
+      } else if (a.state === "reach") {
+        const tr = a.target, top = surf(Math.round(tr.x)) + tr.h * 4, goal = [tr.x, top - 1];
+        a.tip = [shoulder[0] + (goal[0] - shoulder[0]) * ease(a.t / 0.5), shoulder[1] + (goal[1] - shoulder[1]) * ease(a.t / 0.5)];
+        if (!tr.alive) { a.state = "idle"; a.t = 0; a.target = null; }
+        else if (a.t >= 0.5) { a.state = "cut"; a.t = 0; }
+      } else if (a.state === "cut") {
+        if (rnd() < dt * 30) spark(a.tip[0], a.tip[1], 1, rnd() < 0.5 ? WOOD : [140, 190, 90], 7);
+        if (a.t > 0.5) { const tr = a.target; tr.h--; a.load = WOOD; if (tr.h <= 0) { tr.alive = false; tr.t = 0; } a.state = "lift"; a.t = 0; a.from = a.tip.slice(); }
+      } else if (a.state === "lift") {
+        const [px, py] = store();
+        a.tip = [a.from[0] + (px - a.from[0]) * ease(a.t / 0.8), a.from[1] + (py + 4 - a.from[1]) * ease(a.t / 0.8)];
+        if (a.t >= 0.8) { if (pen.length < CAP) pen.push({ c: mix(WOOD, BARK, rnd()), ph: 0 }); a.load = null; a.state = "idle"; a.t = 0; a.target = null; }
+      }
+    }
+    for (const tr of things) if (!tr.alive) { tr.t += dt; if (tr.t > 7) { tr.alive = true; tr.h = 3 + Math.floor(rnd() * 3); tr.x = away(); } }
+    laser.t += dt;
+    if (!laser.on && laser.t > 1.5 + rnd()) { laser.on = true; laser.t = 0; const dd = rnd() < 0.5 ? -1 : 1; laser.x0 = bx + dd * (10 + rnd() * 20); laser.x1 = laser.x0 + dd * (15 + rnd() * 25); }
+    if (laser.on) {
+      const gx = laser.x0 + (laser.x1 - laser.x0) * Math.min(1, laser.t / 0.8);
+      laser.gx = gx;
+      for (const g of cover) if (g.state === "ok" && Math.abs(wrap(g.x) - gx) < 1.5) { g.state = "fire"; g.t = 0; }
+      if (laser.t > 0.9) { laser.on = false; laser.t = 0; }
+    }
+    // Fire creeps to the cover beside it; each patch burns down to ash,
+    // which the cutters collect; the cover grows back in time.
+    for (const g of cover) {
+      if (g.state !== "ok") g.t += dt;
+      if (g.state === "fire") {
+        if (rnd() < dt * 3) smokeC(g.x, surf(g.x) + 3, [70, 66, 62]);
+        if (rnd() < dt * 0.7) { const n = cover.find(o => o.state === "ok" && Math.abs(o.x - g.x) <= 3 && o !== g); if (n) { n.state = "fire"; n.t = 0; } }
+        if (g.t > 4) { g.state = "ash"; g.t = 0; if (drops.length < 90) drops.push({ x: g.x, c: mix([44, 40, 38], [70, 64, 60], rnd()), claimed: false }); }
+      }
+      if (g.state === "ash" && g.t > 16) { g.state = "ok"; g.t = 0; }
+    }
+    // The eye stalks: searching, darting; snapping onto the laser's mark or
+    // a claw at work; now and then a glance back at the bag.
+    if (!sc.stalks) sc.stalks = [9, 12].map((ex, i) => ({ ex, a: i ? 0.3 : -0.3, va: 0, mode: "search", t: 0, goal: 0, hold: 0.5, ph: i * 2.3 }));
+    const busy = arms.find(a => (a.state === "reach" || a.state === "cut") && a.tip);
+    const poi = laser.on ? [laser.gx, surf(Math.round(laser.gx)) + 1] : busy ? busy.tip : null;
+    sc.stalks.forEach((e, i) => {
+      e.t += dt;
+      const base = [bx + 2 + e.ex, sc.by + 8], lim = (a) => clamp(a, -0.95, 0.95);
+      if (e.mode === "search") {
+        if (e.t > e.hold) { e.goal = lim((rnd() * 2 - 1) * 0.9); e.hold = 0.5 + rnd() * 1.6; e.t = 0; }
+        if (poi && rnd() < dt * 2) { e.mode = "focus"; e.t = 0; }
+        else if (rnd() < dt * 0.08) { e.mode = "glance"; e.t = 0; e.goal = i ? -0.9 : 0.9; }
+      } else if (e.mode === "focus") {
+        if (poi) e.goal = lim(Math.atan2(poi[0] - base[0], poi[1] - base[1]) * 0.6);
+        if (!poi && e.t > 0.5) { e.mode = "search"; e.t = 0; e.hold = 0.3; }
+      } else if (e.t > 0.7) { e.mode = "search"; e.t = 0; e.hold = 0.4; }
+      e.va += ((e.goal - e.a) * 160 - e.va * 24) * dt; e.a = lim(e.a + e.va * dt);
+    });
+  };
+  const phaseNow = () => {
+    const name = forester ? "forester" : "abductor";
+    let p;
+    if (sc.deploying) p = pkg.st === "fly" || pkg.st === "hover" ? `A${forester ? "" : "n"} ${name} flies folded from the mother swarm, past its edge, a bit like a UFO: a wobble and a ring of lights.` : sc.unfold > 0 ? "It drops, unfolds and stands on its three legs." : "It drops.";
+    else if (lift && lift.ph !== "up") p = forester ? "Bag full: it drops the bag behind it. Couriers come down from the swarm and latch on. A new bag grows." : "Sac full: it drops the sac. Couriers come down from the swarm and latch on. A new sac grows.";
+    else if (lift) p = "The couriers lift it, faster and faster, and fade back into the mother swarm.";
+    else if (sc.mode === "travel") p = forester ? "It strides off to the thickest plants: a long, fast stride." : "It strides off to where the animals are thickest.";
+    else if (forester) p = laser.on ? "Its laser lights the ground cover. Fire spreads to the plants beside it and burns down to ash for the cutters." : "It creeps from tree to tree. Its claws shear each tree in sections into the clippings bag slung behind.";
+    else p = laser.on ? (laser.kind === "spit" ? "Its laser bursts an animal that spits (green spine) before it hurts more cutters." : "Its laser bursts an animal that runs, into a red burst. It never starts fires.") : "Its palps snatch grazing animals alive and stuff them into its sac.";
+    d.phase(p);
+  };
+  // A leg: hip to a high knee to the foot, two curves, ringed.
+  const drawLeg = (hip, foot, i, t, kneeUp, out, w) => {
+    const knee = [(hip[0] + foot[0]) / 2 + out * 6 + Math.sin(t * 0.8 + i) * 1.5, Math.max(hip[1], foot[1]) + kneeUp + Math.sin(t * 1.1 + i * 2) * 1.2];
+    const a = bez(hip, [hip[0] + out * 2, knee[1] + 1], knee, 14), b = bez(knee, [knee[0] + out * 3, (knee[1] + foot[1]) / 2], foot, 28);
+    const col = (k) => k % 3 === 0 ? bone(k, i, SEED).map(v => v * 1.1) : mix(light(k, i, SEED), sinew(k, i, SEED), 0.35);
+    drawPath(a, col); drawPath(b, col);
+    if (w > 1) { drawPath(a.map(([x, y]) => [x + 1, y]), col); drawPath(b.slice(0, 10).map(([x, y]) => [x + 1, y]), col); }
+    block(Math.round(knee[0]), Math.round(knee[1]), bone(4, i, SEED).map(v => v * 1.2));
+    const fx = Math.round(foot[0]), fy = Math.round(foot[1]);
+    block(fx - 1, fy, bone(1, i, SEED)); block(fx + 1, fy, bone(2, i, SEED));
+  };
+  const drawCrew = (t) => {
+    for (const q of drops) block(q.x, surf(q.x) + 1, q.c);
+    if (hauler) { drawHauler(hauler.x, hauler.y, Math.min(30, hauler.fill % 31), hauler.cargo.length ? hauler.cargo : [[90, 80, 70]], false, t); for (const c of cutters) drawCutter(c.x, c.y, c.id, true, c.cargo, t); }
+    if (d.flock) d.flock.draw(t);
+    for (const g of gobs) { const x = Math.round(g.x), y = Math.round(g.y); block(x, y, [140, 220, 60]); block(x - Math.sign(g.vx), y + (g.vy > 0 ? -1 : 1), [90, 160, 40], 0.7); emit(x, y, 3, [140, 220, 60], 0.5); }
+  };
+  const draw = (t) => {
+    const by = sc.by, b = Math.round(bx), lean = sc.lean || 0;
+    if (forester) {
+      for (const g of cover) {
+        const y = surf(g.x) + 1;
+        if (g.state === "ok") for (let k = 0; k < g.h; k++) block(g.x, y + k, mix([50, 90, 40], [90, 130, 56], hash(g.x, k, 4)));
+        else if (g.state === "fire") { for (let k = 0; k < 2 + Math.floor(rnd() * 3); k++) block(g.x + (k ? Math.round(rnd() * 2 - 1) : 0), y + k, k === 0 ? [255, 230, 140] : rnd() < 0.5 ? [255, 140, 40] : [220, 70, 20]); emit(g.x, y + 1, 5, [255, 140, 50], 0.8); }
+        else if (g.state === "ash") block(g.x, y, [30, 26, 24]);
+      }
+      for (const tr of things) {
+        if (!tr.alive) continue;
+        const x = Math.round(tr.x), y = surf(x) + 1, hgt = tr.h * 4;
+        for (let k = 0; k < hgt; k++) { block(x, y + k, BARK); if (k % 4 === 3) block(x + 1, y + k, BARK.map(v => v * 0.7)); }
+        for (let dy = 0; dy < 6; dy++) for (let dx = -3; dx <= 3; dx++) if (Math.abs(dx) + Math.abs(dy - 2.5) < 4.5) block(x + dx, y + hgt - 1 + dy, mix([40, 80, 36], [70, 110, 50], hash(x + dx, dy, 3)));
+      }
+    } else for (const c of things) {
+      if (c.state !== "free") continue;
+      const x = Math.round(c.x), y = surf(x) + 1, stepK = Math.sin(t * (c.v ? 16 : 6) + c.ph) > 0, col = [MEAT, [150, 110, 80], [120, 90, 70]][c.kind];
+      block(x - 1, y + 1, col); block(x, y + 1, col); block(x + 1, y + 1, col); block(x + (c.v < 0 ? -2 : 2), y + 2, col);
+      block(x - 1, y, stepK ? col : C.dark); block(x + 1, y, stepK ? C.dark : col);
+      // Spitters: a sickly green spine along the back.
+      if (c.spit) { block(x - 1, y + 2, [115, 190, 51]); block(x + 1 - (c.v < 0 ? 2 : 0), y + 2, [115, 190, 51]); emit(x, y + 2, 3, [140, 220, 60], 0.25); }
+    }
+    if (lift) drawLift(lift, t);
+    if (sc.deploying && sc.unfold < 0.05) {
+      const flying = pkg.st === "fly" || pkg.st === "hover", bob = flying ? Math.round(Math.sin(t * 2.3) * 1.5) : 0;
+      const px = Math.round(pkg.x), py = Math.round(pkg.y) + bob;
+      drawPackage(forester, px, py, t, false);
+      if (flying) { [-6, -2, 2, 6].forEach((u, k) => { const on = (Math.floor(t * 6) + k) % 4 === 0; block(px + u, py - 2, on ? LAMP : LAMP.map(v => v * 0.35)); }); emit(px, py - 6, 12, LAMP, 0.7); }
+      drawCrew(t);
+      return;
+    }
+    legs.forEach((L, i) => {
+      const hip = [b + L.hx + lean + (forester ? 2 : 9), by + 3], out = Math.sign(L.foot[0] - hip[0]) || 1;
+      drawLeg(hip, L.foot, i, t, forester ? 7 : 13, out, forester ? 2 : 1);
+    });
+    for (const a of arms) {
+      const sh = forester ? [b + 15 - a.k * 4 + lean, by + 2] : [b + 12 - a.k * 3 + lean, by + 1];
+      const tip = a.state === "idle" || !a.tip ? [sh[0] + 4 + Math.sin(t * 1.3 + a.k) * 1.5, sh[1] - 5 - a.k * 2] : a.tip;
+      const dx = tip[0] - sh[0], dy = tip[1] - sh[1];
+      if (!forester) {
+        // A whip: thick at the root, lagging behind its own motion so it
+        // lashes out and curls back; idle, it hangs and twitches.
+        const len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+        const lash = a.state === "reach" ? Math.sin(Math.min(1, a.t / 0.6) * Math.PI) * 7 : a.state === "lift" ? -4 * Math.sin(Math.min(1, a.t / 0.9) * Math.PI) : 3 * Math.sin(t * 1.7 + a.k * 2);
+        const pts = [];
+        for (let k = 0; k <= 30; k++) { const u = k / 30, w = Math.sin(u * Math.PI) * lash + Math.sin(t * 6 + u * 9 + a.k) * 0.6 * u; pts.push([sh[0] + dx * u + nx * w, sh[1] + dy * u + ny * w]); }
+        const col = (k) => k % 4 === 0 ? bone(k, a.k, SEED).map(v => v * 0.9) : mix(sinew(k, a.k, SEED), [70, 40, 46], 0.35);
+        drawPath(pts, col); drawPath(pts.slice(0, 10).map(([x, y]) => [x + 1, y]), col);
+        const tx = Math.round(tip[0]), ty = Math.round(tip[1]), shut = a.state === "lift";
+        block(tx, ty, bone(3, a.k, SEED).map(v => v * 1.2)); block(tx + (shut ? 0 : 1), ty - 1, [226, 224, 214]); block(tx - 1, ty + (shut ? 0 : 1), [226, 224, 214]);
+        if (a.state === "reach" && a.t > 0.5) emit(tx, ty, 3, LAMP, 0.4);
+        if (a.load) { const c = [MEAT, [150, 110, 80], [120, 90, 70]][a.load.kind]; block(tx, ty - 1, c); block(tx - 1, ty - 1, c); block(tx, ty - 2, c); }
+        continue;
+      }
+      [[0, 0.45, 2], [0.4, 0.78, 2], [0.74, 1, 1]].forEach(([q0, q1, w], j) => {
+        const p0 = [sh[0] + dx * q0, sh[1] + dy * q0], p1 = [sh[0] + dx * q1, sh[1] + dy * q1];
+        const col = () => j === 0 ? armour(j, 0, SEED).map(v => v * 1.2) : j === 1 ? armour(j, 1, SEED).map(v => v * 1.1) : light(j, 2, SEED);
+        drawPath([p0, p1], col); if (w > 1) drawPath([[p0[0] + 1, p0[1]], [p1[0] + 1, p1[1]]], col);
+        block(Math.round(p0[0]), Math.round(p0[1]), C.dark);
+      });
+      const tx = Math.round(tip[0]), ty = Math.round(tip[1]);
+      // A crab's claw: a fixed jaw with a saw edge and a moving one.
+      const o = a.state === "cut" ? (a.t < 0.15 ? 2 : a.t < 0.3 ? 0 : 1) : a.state === "reach" ? 2 : 0;
+      for (let k = -1; k <= 3; k++) { block(tx + k, ty + 1, armour(k, 0, SEED).map(v => v * 1.15)); if (k % 2) block(tx + k, ty, [226, 224, 214]); }
+      for (let k = 0; k <= 3; k++) block(tx + k, ty - 1 - o, light(k, 1, SEED));
+      if (a.load) { block(tx, ty - 1, a.load); block(tx - 1, ty - 1, a.load); block(tx, ty - 2, a.load); }
+    }
+    const ox = b + Math.round(lean), oy = Math.round(by);
+    if (!forester) {
+      // The spider: the abdomen (its sac) behind, a narrow waist, the head
+      // in front: armoured, ridged, a cluster of eyes, two fangs.
+      for (let dx = -1; dx <= 1; dx++) block(ox + 1 + dx, oy + 4, sinew(dx, 4, SEED));
+      if (sc.grow > 0.05) drawStore(false, ox - 9, oy + 10, pen, CAP, sc.grow, t, 0);
+      for (let y = 0; y < 8; y++) for (let x = 3; x <= 15; x++) {
+        const q = ((x - 9) / 6.5) ** 2 + ((y - 3.5) / 4.2) ** 2; if (q > 1) continue;
+        block(ox + x, oy + y, q > 0.72 ? strut(x, y, SEED) : y === 5 && x % 2 ? bone(x, y, SEED) : y === 2 ? mix([20, 30, 24], LAMP, 0.5 + 0.5 * Math.sin(t * 1.5 - x * 0.4)) : armour(x, y, SEED).map(v => v * 1.08));
+      }
+      const hunting = laser.on || arms.some(a => a.state === "reach");
+      const eyes = [[13, 5], [14, 4], [12, 6], [14, 6], [13, 7], [12, 4]], lead = Math.floor(t * (hunting ? 12 : 1.5)) % eyes.length;
+      eyes.forEach(([ex, ey], i) => { const p = hunting ? 0.55 + 0.45 * Math.sin(t * 14 + i * 1.3) : 0.35 + 0.25 * Math.sin(t * 1.2 + i * 0.9); block(ox + ex, oy + ey, i === lead ? mix(LAMP, [255, 255, 255], hunting ? 0.5 : 0.2) : mix([14, 20, 18], LAMP, p)); });
+      emit(ox + 13, oy + 5, hunting ? 9 : 5, LAMP, hunting ? 1.1 + 0.4 * Math.sin(t * 14) : 0.35);
+      const open = Math.sin(t * 2) > 0.5 ? 1 : 0;
+      for (const sd of [0, 1]) for (let k = 0; k < 4; k++) block(ox + 13 + sd * 2 + (k === 3 ? (sd ? -1 : 1) * open : 0), oy - k, k === 3 ? [226, 224, 214] : bone(k, sd, SEED));
+    } else {
+      // The crab: a wide, flat shell, a rotor of blades in its intake, eyes
+      // on stalks; the clippings bag slung behind.
+      for (let k = -3; k <= 3; k++) block(ox - 17 + k, oy + 3, bone(k, 0, SEED));
+      if (sc.grow > 0.05) drawStore(true, ox - 17, oy + 2, pen, CAP, sc.grow, t, Math.round(Math.sin(t * 1.3) * 1.5 - lean * 2));
+      drawShell(ox + 2, oy, t, true);
+      for (let k = 0; k < 4; k++) block(ox + 16 + k, oy - 1 - (k % 2) - (arms.some(a => a.state === "lift") && Math.sin(t * 8 + k) > 0 ? 1 : 0), bone(k, 3, SEED));
+      const feeding = arms.some(a => a.state === "lift");
+      sc.rotor = (sc.rotor || 0) + (feeding ? 0.25 : 0);
+      for (let y = 0; y < 3; y++) { const k = Math.floor(sc.rotor + y * 2) % 3; block(ox + 20, oy + 1 + y, k === 0 ? [226, 224, 214] : C.dark); }
+      for (const e of sc.stalks || []) {
+        const base = [ox + 2 + e.ex, oy + shellTop(e.ex) + 1], dir = [Math.sin(e.a), Math.cos(e.a)];
+        const tip = [base[0] + dir[0] * 7, base[1] + dir[1] * 7], ctrl = [base[0] + dir[0] * 1.5, base[1] + 4];
+        drawPath(bez(base, ctrl, tip, 10), (k) => k % 3 === 2 ? bone(k, e.ex, SEED) : strut(k, e.ex, SEED));
+        const tx = Math.round(tip[0]), ty = Math.round(tip[1]), lx = Math.round(tip[0] + dir[0]), ly = Math.round(tip[1] + dir[1]);
+        const focus = e.mode === "focus", p = focus ? 0.8 + 0.2 * Math.sin(t * 9) : 0.35 + 0.3 * Math.sin(t * 1.4 + e.ph);
+        block(tx, ty, mix([14, 20, 18], LAMP, p * 0.7));
+        block(lx, ly, focus ? mix(LAMP, [255, 255, 255], 0.45) : mix([14, 20, 18], LAMP, p));
+        emit(lx + 0.5, ly + 0.5, focus ? 6 : 3, LAMP, focus ? 0.9 : 0.35);
+      }
+    }
+    if (laser.on && laser.gx !== undefined) {
+      const lx = laser.gx, ly = surf(Math.round(lx)) + 1, em = forester ? [ox + 16, oy] : [ox + 11, oy];
+      blockLine(em[0] + 0.5, em[1] + 0.5, lx + 0.5, ly + 0.5, forester ? (rnd() < 0.6 ? [255, 220, 150] : [255, 150, 60]) : (rnd() < 0.6 ? [255, 120, 100] : [255, 230, 220]), 0.85);
+      emit(lx, ly, 10, forester ? [255, 160, 60] : [255, 80, 60], 1.5);
+      block(Math.round(lx), ly, [255, 250, 240]);
+    }
+    for (const q of spray) block(Math.round(q.x), Math.round(q.y), q.c);
+    drawCrew(t);
+  };
+  const post = () => {
+    if (sc.deploying && sc.unfold < 0.05) { if (pkg.x > -110) tag(pkg.x + 4, pkg.y + 10, forester ? "FORESTER (folded)" : "ABDUCTOR (folded)"); }
+    if (lift && lift.ph !== "up") tag(lift.x + 4, lift.top + 2, forester ? "FULL BAG" : "FULL SAC", -1);
+    if (!forester) { const s = things.find(q => q.spit && q.state === "free" && Math.abs(q.x) < 100); if (s && D.t % 12 < 5) tag(s.x, surf(s.x) + 4, "SPITTER"); }
+  };
+  return { step, draw, post, state: () => ({ items: pen.length, lift: lift ? lift.ph : null, x: Math.round(bx) }) };
+}
+
+// =====================================================================
+// COURIERS
+// =====================================================================
+function courierDemo(d) {
+  d.viewW = 190; d.T = 17; d.still = 9;
+  d.setup = () => {
+    d.cam = { x: 0, y: 28 };
+    const W = d.world = livingWorld(23);
+    makeSwarm(d, -170, 170, 66, 420);
+    d.flock = new Flock({ n: 7, id: 800, hx: 70, hy: 22, x0: 62, x1: 96, y0: W.surf(80) - 6, y1: W.surf(80) + 1 });
+    const bag = Array.from({ length: 16 }, () => ({ c: mix(WOOD, BARK, rnd()) })), sac = Array.from({ length: 14 }, () => ({ c: [MEAT, [150, 110, 80], [120, 90, 70]][Math.floor(rnd() * 3)] }));
+    d.items = [
+      { at: 0.8, L: newLift("bag", -62, W.surf(-62) + 16, bag, W.surf(-62) + 16) },
+      { at: 4.5, L: newLift("sac", -8, W.surf(-8) + 17, sac, W.surf(-8) + 17) },
+      { at: 8.2, L: newLift("body", 44, W.surf(44) + 12, [], W.surf(44) + 12) },
+    ];
+    for (const it of d.items) it.L.ph = "rest";
+  };
+  d.step = (dt, t) => {
+    d.flock.step(dt, t);
+    let msg = d.items.every(it => it.L.done) ? "All three are up in the mother swarm. The loop starts again." : "On the ground: a forester's full bag, an abductor's full sac, and the body of a forester that retired.";
+    for (const it of d.items) {
+      const L = it.L;
+      if (L.ph === "rest") { if (t >= it.at) { L.ph = "wait"; L.t = 0; } continue; }
+      if (L.done) continue;
+      stepLift(L, dt);
+      const what = L.kind === "bag" ? "the bag" : L.kind === "sac" ? "the sac" : "the retired forester's body (as scrap)";
+      msg = L.ph === "wait" ? `Couriers drop from the mother swarm toward ${what}.` : L.ph === "latch" ? `They latch on (0.6 s): lines of light down to ${what}.` : `They lift ${what}, faster and faster, and fade back into the swarm.`;
+    }
+    d.phase(msg);
+  };
+  d.draw = (t) => {
+    drawSwarm(t);
+    d.flock.draw(t);
+    for (const it of d.items) if (!it.L.done) { if (it.L.ph === "rest") { const ph = it.L.ph; it.L.ph = "fall"; drawLift(it.L, t); it.L.ph = ph; } else drawLift(it.L, t); }
+  };
+  d.post = () => {
+    for (const it of d.items) { const L = it.L; if (L.ph === "rest" || L.ph === "wait") tag(L.x + 4, L.top + 1, L.kind === "bag" ? "BAG" : L.kind === "sac" ? "SAC" : "RETIRED BODY", L.x > 20 ? -1 : 1); }
+  };
+}
+
+// =====================================================================
+// The page: each demo plays only while on screen
+// =====================================================================
+const MAKERS = { sapper: sapperDemo, tunneler: tunnelerDemo, heatsink: heatDemo, forester: (d) => tripodDemo(d, true), abductor: (d) => tripodDemo(d, false), couriers: courierDemo };
+const demos = [];
+function use(d) {
+  D = d; ctx = d.ctx; Z = d.z; CW = d.canvas.width; CH = d.canvas.height;
+  OX = Math.round(CW / 2 - d.cam.x * Z); OY = Math.round(CH / 2 + d.cam.y * Z);
+}
+function reset(d) {
+  d.t = 0; d.fx = { sparks: [], smoke: [], bursts: [] }; d.lights = []; d.flash = 0; d.shake = 0; d.pt = ""; d.ptAt = -9;
+  D = d; d.setup(); use(d);
+}
+function advance(d, dt) {
+  use(d);
+  d.t += dt;
+  if (d.t >= d.T) { reset(d); }
+  stepFx(dt);
+  d.step(dt, d.t);
+  d.world.cool(dt);
+  d.flash = Math.max(0, d.flash - dt * 2.2); d.shake = Math.max(0, d.shake - dt * 3);
+}
+function render(d, dt) {
+  use(d);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  ctx.fillStyle = "#05070c"; ctx.fillRect(0, 0, CW, CH);
+  const sz = Math.max(1, Math.round(d.dpr));
+  for (const s of d.stars) { ctx.fillStyle = `rgba(200,215,230,${s.b * 0.55})`; ctx.fillRect(Math.floor(s.x * CW), Math.floor(s.y * CH), sz, sz); }
+  if (d.shake > 0) { OX += Math.round((rnd() - 0.5) * d.shake * Z * 0.7); OY += Math.round((rnd() - 0.5) * d.shake * Z * 0.5); }
+  d.world.render(d.t, dt);
+  d.draw(d.t);
+  drawSmoke(); drawSparks();
+  lightPass();
+  if (d.post) d.post();
+  if (d.flash > 0) { ctx.fillStyle = `rgba(255,248,230,${(d.flash * 0.5).toFixed(3)})`; ctx.fillRect(0, 0, CW, CH); }
+  d.bar.style.transform = `scaleX(${(d.t / d.T).toFixed(4)})`;
+}
+function size(d) {
+  const w = d.canvas.clientWidth || d.canvas.parentNode.clientWidth || 360;
+  d.dpr = Math.min(3, window.devicePixelRatio || 1);
+  d.canvas.width = Math.round(w * d.dpr); d.canvas.height = Math.round(w * 0.625 * d.dpr);
+  let z = Math.max(1, Math.round(d.canvas.width / d.viewW));
+  while (z > 1 && d.canvas.width / z < d.viewW * 0.8) z--;
+  while (d.canvas.width / z > d.viewW * 1.3) z++;
+  d.z = z;
+}
+let raf = 0, last = 0;
+function tick(now) {
+  raf = 0;
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
+  let any = false;
+  for (const d of demos) {
+    if (!d.visible) continue;
+    if (d.playing) { any = true; advance(d, dt); render(d, dt); }
+    else if (d.dirty) { d.dirty = false; render(d, 0); }
+  }
+  if (any) raf = requestAnimationFrame(tick);
+}
+function kick() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(tick); } }
+function setPlaying(d, on) {
+  d.playing = on;
+  d.btn.textContent = on ? "Pause" : "Play";
+  d.btn.setAttribute("aria-pressed", String(!on));
+  d.dirty = true; kick();
+}
+document.querySelectorAll("figure.demo").forEach((fig) => {
+  const kind = fig.dataset.demo, canvas = fig.querySelector("canvas");
+  const d = { kind, fig, canvas, ctx: canvas.getContext("2d"), phaseEl: fig.querySelector(".phase"), bar: fig.querySelector(".progress i"), btn: fig.querySelector(".play"), visible: false, playing: !RM, dirty: true, cam: { x: 0, y: 0 } };
+  d.stars = Array.from({ length: 70 }, () => ({ x: rnd(), y: rnd() * 0.7, b: 0.25 + rnd() * 0.75 }));
+  d.phase = (text) => { if (text === d.pt) return; if (d.t - d.ptAt < 1.6 && d.t >= d.ptAt) return; d.pt = text; d.ptAt = d.t; d.phaseEl.textContent = text; };
+  MAKERS[kind](d);
+  size(d); reset(d);
+  // With reduced motion, a still from the most telling moment, and Play.
+  if (RM) { for (let k = 0; k < d.still / 0.05; k++) advance(d, 0.05); }
+  setPlaying(d, !RM);
+  d.btn.addEventListener("click", () => setPlaying(d, !d.playing));
+  fig.querySelector(".replay").addEventListener("click", () => { reset(d); setPlaying(d, true); });
+  demos.push(d);
+});
+if ("IntersectionObserver" in window) {
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) { const d = demos.find(q => q.fig === e.target); if (!d) continue; d.visible = e.isIntersecting; if (d.visible) { d.dirty = true; kick(); } }
+  }, { threshold: 0.12 });
+  demos.forEach(d => io.observe(d.fig));
+} else demos.forEach(d => { d.visible = true; kick(); });
+let rT = 0;
+const onResize = () => { clearTimeout(rT); rT = setTimeout(() => { for (const d of demos) { size(d); d.dirty = true; } kick(); }, 120); };
+if ("ResizeObserver" in window) { const ro = new ResizeObserver(onResize); demos.forEach(d => ro.observe(d.canvas)); } else window.addEventListener("resize", onResize);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) kick(); });
+})();
+</script>

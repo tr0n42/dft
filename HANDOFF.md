@@ -2,7 +2,7 @@
 
 Read this first, then ROADMAP.md (what's built, where we are, what's next,
 and a map of every document) and README.md (how the code is laid out). Last
-updated 13 November 2026, on BKONEN-R16-W11.
+updated 26 November 2026, on DESKTOP-59HSAU6.
 
 ## Working with Benjamin
 
@@ -254,10 +254,10 @@ Most recent work (12 Nov), built and passing the tests, waiting on a PC look:
   leg. Feet planted on the ground as drawn (the screen's copy), stepping
   when the body leaves them too far behind, in gait groups that take turns;
   each leg solved by FABRIK with a pole so knees bow up and out; the body on
-  springs. The forester is now a sideways crab (`draw_crab`): four legs in
-  diagonal pairs, a big claw each side, the bag under the middle, eye stalks
-  in the middle firing the laser. The abductor keeps the mockup's spider
-  look on three curved four-bone legs. Rigs are defined in `rig_of`.
+  springs. (Superseded 25 Nov: Benjamin wants the mockup's look, so both
+  tripods are drawn and walked the mockup's way again, the forester a
+  forward-facing three-legged crab; FABRIK was removed from rig.rs. See
+  "Ground units v2".)
 - **Forester behaviour:** claws and laser work while it walks too
   (`walker_hands`); a claw shears a ~4 m section off the nearest plant
   within 32 m; the laser sweeps 15-40 m of ground every 1.5-2.5 s; it leaps
@@ -887,6 +887,57 @@ shot in logs.
   Idle haulers past the calls + 32 are now recycled whenever anything is
   far, but the picture wasn't re-checked (the last screenshots failed).
 
+## Ground units v2 (25-26 Nov)
+
+Benjamin and Claude went through every ground unit before building
+(`docs/design/ground-units.md`, which wins over older docs), then Claude
+built and tested them overnight. Each problem found and how it was fixed is
+in `docs/ground-units-notes.md`; read it before changing a unit. The restore
+point from before is the git tag `pre-ground-units`.
+
+- **Sapper** (`src/units/sapper.rs`): made to order where flocks struggle
+  (cutting 3x slower per kg than in hardness-3 rock), at most one every 90 s
+  and 3 out; depth from yield (46 m x cube root of kt: 79 m at 5 kt); a
+  loosened column of rubble from the charge to the surface (hard rock held
+  in big pieces); blasts wreck cutters working in the column and damage
+  haulers within 3 radii; sideways drilling to keep clear of tunnelers; far
+  sectors done as math (`far_stalled`, `far_sapper_blast`, `far.loose_kg`);
+  plumes drawn at a size set by the yield, skipped under 20 pixels.
+- **Tunneler** = the opener (`src/units/opener.rs`; the old Tunneler stays in
+  tunneler.rs): value per cell (space-bound worth against what the swarm
+  needs now) over dig depth, seen through the fog (and the game lifts the fog
+  round its head at twice a landing point's reach); curved shafts within 20
+  degrees; caps magma (frozen, mass kept) and leaves a heat job; backs up to
+  its mouth and searches again; with nothing anywhere, sinks and goes off
+  (50 kt); its crew of 200 clears its spoil (mass whole), plume at the mouth.
+- **Heat-sink bot** (`src/units/heatsink.rs`): small pools cooled
+  completely; deep jobs (caps, wide pools) frozen into a passage a tunneler
+  wide with 3 m walls, its crew of 60 digging the middle; through after 6
+  clear metres; tunnelers then go on down it. Dies idle (scrap). Frozen cells
+  chilled to 300 K and left at rest (the heat simulation's cost).
+- **Forester, abductor** (`src/units/forester.rs`, `abductor.rs`,
+  `src/fauna.rs`): the mockup's look and gait (game/src/units.rs, rig.rs);
+  fly folded past the swarm's edge (`fly_over`: up, round the body, down);
+  retire when walking to the next work is slower than building and flying a
+  new one (couriers reclaim them); fires out of sight burned as math
+  (`Fire`); spitting herds (`ranged_share`), abductors laser spitters and
+  runners (gore drawn, biomass credited; no blood material exists), palps
+  catch the rest alive (worth their mass); calm herds out of sight stepped
+  every 10 s.
+- **Couriers**: unchanged (visual only), now also lift retired walkers.
+- **The game**: `--units all|sapper,tunneler,...` deploys specialists for a
+  run (economy.toml `game_deploys` stays empty for the normal game); crews
+  drawn (`draw_crew`); gore bursts; spitters' green spines; UFO flight.
+- **Testbeds**: `data/bodies/test-sappers.toml` (granite under 8 m),
+  `test-tunnelers.toml` (magma layer about 450 m down, mantle cooled to
+  1,000 K so it doesn't melt), the Dev planet (spitting herds). Launchers:
+  `run-test-sappers.bat`, `run-test-tunnelers.bat`, `run-test-walkers.bat`,
+  `run-test-all-units.bat`; numbers: `lab-units.bat` (`src/bin/unitlab.rs`;
+  `SEEN=none|follow`, `FAR=n`, `ECON=1`, `BODY`, `KM`). Tests:
+  `tests/ground_units.rs`.
+- **Saves**: version 16 (`write_units_16`); flocks' dig averages are saved
+  now (sappers are ordered by them).
+
 ## What's next
 
 See ROADMAP.md "Where we are (13 Nov)" for the reassessment and the proposed
@@ -932,10 +983,60 @@ life). The production plan below still stands for step 3 of that order.
   radioactivity (technetium, polonium, astatine and francium are on no body
   until then).
 
-## Last session's report (15 November 2026)
+## Last session's report (25 to 26 November 2026)
 
 When Benjamin asks for a "handoff digestion", repeat this section to him
 as it stands.
+
+**The ask:** define every ground unit class with Benjamin, one at a time,
+then build and test them all overnight (he was away for Thanksgiving),
+mixing them in testbeds with performance runs, and make a "v2" page that
+demos each unit on a small test planet with what was built, its problems
+and fixes, for his feedback.
+
+**Agreed design:** `docs/design/ground-units.md`. **What happened, problem
+by problem:** `docs/ground-units-notes.md`. **The v2 page:**
+https://claude.ai/artifact/USiKVvYxSPM5Hyu2NwwCUD (a copy in
+`mockups/ground-units-v2.html`). **Restore point:** git tag
+`pre-ground-units` (on GitHub).
+
+**Built (summary; details in "Ground units v2" above):**
+- Sappers: made to order where cutters struggle, depth from yield (79 m at
+  5 kt), a loosened column to the surface, blasts kill cutters (140-190 a
+  blast on the testbed) and hurt haulers, far sectors as math.
+- Tunnelers: the opener. Value targets seen through the fog, curved
+  shafts, magma capped about 455 m down in 10 minutes on the testbed, a
+  crew for its spoil, going off at its end.
+- Heat sinks: small pools cooled; passages frozen through magma (119-135 m
+  through a 90 m layer); tunnelers go on down them, past 1,300 m.
+- Foresters and abductors: the mockup's look, UFO flight, retiring when a
+  new one is quicker, fires out of sight, spitting animals, laser gore.
+
+**Performance (500k cutters, living world, 20 game min, same PC, clean
+baseline from the tag):** stage 1 273 s real (baseline 299; the same work
+done); sappers not ordered there (no flock struggles); after one fix the
+tunnelers cost under 0.5 ms a game second (they were 23 ms: their look
+through the fog built deep ground on a 35 km body); heat sinks 1.4 ms
+(2.7), foresters 0.65 (1.25). With every unit at work (stage 5): 277 s real against 278 before; stages 3 and 4: 278 (278) and 282 (274).
+
+**Watch out for:** a magma ocean flooding on screen (the lava world) is
+expensive for the heat simulation: 1-43 ms per game second watched
+closely; heat sinks still lose about 8 bots in 20 minutes there to magma
+rising over them.
+
+**To try:** `run-test-sappers.bat`, `run-test-tunnelers.bat`,
+`run-test-walkers.bat`, `run-test-all-units.bat`, `lab-units.bat`.
+
+**Tests:** the full suite passes, with 5 new tests in
+`tests/ground_units.rs` (the last changes rechecked with the ground-unit
+and specialist tests); the two new testbeds locked in the reference
+fingerprints; three old specialist tests adjusted (they test charges, so
+they keep sappers at a fixed count). Commits 7763a6c onward, local: the
+push to GitHub needs Benjamin's go-ahead.
+
+**Open questions for Benjamin:** on the v2 page, under each unit.
+
+## Previous session's report (15 November 2026)
 
 **The ask:** not fixed drone counts but a planet covered in working drones
 at 15x (the game will be capped at 10x; the rest is room for what's still
@@ -995,7 +1096,7 @@ keeps a bit per charted cell instead of a map entry.
 **Tests:** full suite 112 passed, 0 failed, 3 ignored (as before), with 3
 new far-field tests. Commits ea57dd1 onward, pushed to GitHub on 16 Nov.
 
-## Previous session's report (14 to 15 November 2026)
+## Earlier session's report (14 to 15 November 2026)
 
 **What we did (14 Nov, with Benjamin):** the fleet commander for haulers
 (drop-off points, calls, relief), cutters following moved points and

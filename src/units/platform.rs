@@ -544,7 +544,10 @@ impl Sim {
             return;
         }
         if self.tick % self.ticks(SCAN_EVERY_S) == 0 {
-            if self.prod.bays_of(Unit::Tunneler) > 0 {
+            // (Only while more tunnelers could be wanted: the look through
+            // the fog is the dearest thing a tunneler does, on a big body.)
+            let room = self.units.openers.len() < self.eco.units.tunneler.keep as usize;
+            if self.prod.bays_of(Unit::Tunneler) > 0 && room {
                 let q = clock();
                 self.opener_scan();
                 self.unit_prof[U_TUNNELER] += clock() - q;
