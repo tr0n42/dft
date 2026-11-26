@@ -1,5 +1,5 @@
-//! The specialists on screen: sappers, tunnelers, heat-sink bots and
-//! foresters (abductors use the forester's frame until animals exist), drawn
+//! The specialists on screen: sappers, tunnelers, heat-sink bots, foresters
+//! (a crab) and abductors (a spider), drawn
 //! the way the swarm mockup designed them, in one-metre blocks, upright to
 //! the body (a tunneler along its shaft), every block joined edge to edge
 //! with the rest. Lights are the swarm's colour.
@@ -179,41 +179,16 @@ fn bez(a: (f32, f32), b: (f32, f32), c: (f32, f32), n: usize) -> Vec<(f32, f32)>
         .collect()
 }
 
-/// A walker's legs (see rig.rs): the crab's four, two a side, stepping in
-/// diagonal pairs; the spider's three long curved legs, one at a time, as
-/// the mockup's tripod stands, facing its way. Both scale with the body's
-/// height (50 m over the tallest plant).
-fn rig_of(un: &UnitView, face: f32) -> crate::rig::RigSpec {
-    use crate::rig::{LegSpec, RigSpec};
+/// A tripod's legs (see rig.rs), as the mockup stands them, in its frame
+/// (x toward where it faces): the crab's hips spread along its wide shell,
+/// the spider's close under its head. The body rides at the simulation's
+/// lift (50 m over the tallest plant), or the mockup's height if that is
+/// higher; taller, the legs are simply longer.
+fn gait_of(un: &UnitView) -> crate::rig::GaitSpec {
     if un.kind == Unit::Forester {
-        let h = un.lift.max(50.0);
-        let k = h / 50.0;
-        let hips = [-15.0f32, -6.0, 6.0, 15.0];
-        let rest = [-34.0f32, -13.0, 13.0, 34.0];
-        let groups = [0u8, 1, 0, 1];
-        RigSpec {
-            legs: (0..4).map(|i| LegSpec { hip: (hips[i], 3.0), rest: rest[i] * k, bones: vec![0.48, 0.52], group: groups[i], bend: 0.8 }).collect(),
-            height: h,
-            step_s: 0.35 * k.sqrt(),
-            lift_m: 6.0 * k.sqrt(),
-            trigger_m: 7.0 * k,
-            reach: 1.15,
-            sag_m: 3.0,
-        }
+        crate::rig::GaitSpec { hips: [-10.0, 2.0, 14.0], spread: [-32.0, 3.0, 34.0], height: un.lift.max(50.0) }
     } else {
-        let h = un.lift.max(62.0);
-        let k = h / 62.0;
-        let hips = [6.0f32, 9.0, 12.0];
-        let rest = [-26.0f32, 4.0, 30.0];
-        RigSpec {
-            legs: (0..3).map(|i| LegSpec { hip: (hips[i] * face, 3.0), rest: rest[i] * k * face, bones: vec![0.3, 0.3, 0.24, 0.16], group: i as u8, bend: 0.7 }).collect(),
-            height: h,
-            step_s: 0.4 * k.sqrt(),
-            lift_m: 7.0 * k.sqrt(),
-            trigger_m: 8.0 * k,
-            reach: 1.35,
-            sag_m: 4.0,
-        }
+        crate::rig::GaitSpec { hips: [6.0, 9.0, 12.0], spread: [-26.0, 4.0, 30.0], height: un.lift.max(62.0) }
     }
 }
 
@@ -408,10 +383,6 @@ fn mhash(x: i32, y: i32, s: i32) -> f32 {
 }
 
 const SEED: i32 = 1001;
-/// The crab: its claws' shoulders either side (m from the middle), and its
-/// eye stalks either side of the middle.
-const CRAB_SHOULDER: f32 = 18.0;
-const CRAB_STALKS: [f32; 2] = [-3.0, 3.0];
 /// Seconds a tripod takes to turn about.
 const TURN_S: f32 = 0.5;
 
@@ -503,6 +474,8 @@ struct Tripod {
     pending: Option<(f64, f64)>,
     /// How far round it has turned (see `turn` in draw_tripod).
     turn: f32,
+    /// When it next vents its store (real time).
+    next_vent: f64,
     rng: u64,
     last_t: f64,
 }
@@ -516,6 +489,59 @@ impl Tripod {
     }
 }
 
+/// A path of blocks joined edge to edge (the mockup's drawPath), in the
+/// mockup's frame mirrored by `face` (1: the unit's own frame as is);
+/// `colour` by point.
+fn tri_path(pen: &mut Pen, face: f32, pts: &[(f32, f32)], colour: &dyn Fn(usize) -> Rgb) {
+    let put = |pen: &mut Pen, px: i32, py: i32, c: Rgb| {
+        let u = (face * (px as f32 + 0.5) - 0.5).round();
+        pen.block(u, py as f32, rgb(c));
+    };
+    let (mut px, mut py) = (pts[0].0.round() as i32, pts[0].1.round() as i32);
+    put(pen, px, py, colour(0));
+    for (i, p) in pts.iter().enumerate().skip(1) {
+        let (bx, by) = (p.0.round() as i32, p.1.round() as i32);
+        for _ in 0..60 {
+            if px == bx && py == by {
+                break;
+            }
+            if (bx - px).abs() >= (by - py).abs() {
+                px += (bx - px).signum();
+            } else {
+                py += (by - py).signum();
+            }
+            put(pen, px, py, colour(i));
+        }
+    }
+}
+
+/// A leg (the mockup's drawLeg), in the unit's own frame (u along, w up):
+/// hip to a high knee to the foot, two curves, ringed in bone; the knee
+/// swaying a little of its own; `thick` blocks thick (the second strand
+/// toward `fwd`); a bone knuckle at the knee, a two-toed foot.
+#[allow(clippy::too_many_arguments)]
+fn draw_leg(pen: &mut Pen, hip: (f32, f32), foot: (f32, f32), i: usize, t: f32, knee_up: f32, thick: u8, fwd: f32) {
+    let out = if foot.0 < hip.0 { -1.0 } else { 1.0 };
+    let fi = i as f32;
+    let ii = i as i32;
+    let knee = ((hip.0 + foot.0) / 2.0 + out * 6.0 + (t * 0.8 + fi).sin() * 1.5, hip.1.max(foot.1) + knee_up + (t * 1.1 + fi * 2.0).sin() * 1.2);
+    let a = bez(hip, (hip.0 + out * 2.0, knee.1 + 1.0), knee, 14);
+    let b = bez(knee, (knee.0 + out * 3.0, (knee.1 + foot.1) / 2.0), foot, 28);
+    let col = |k: usize| if k % 3 == 0 { sc(m_bone(k as i32, ii), 1.1) } else { mx(m_light(k as i32, ii), m_sinew(k as i32, ii), 0.35) };
+    tri_path(pen, 1.0, &a, &col);
+    tri_path(pen, 1.0, &b, &col);
+    if thick > 1 {
+        let a2: Vec<(f32, f32)> = a.iter().map(|p| (p.0 + fwd, p.1)).collect();
+        let b2: Vec<(f32, f32)> = b.iter().take(10).map(|p| (p.0 + fwd, p.1)).collect();
+        tri_path(pen, 1.0, &a2, &col);
+        tri_path(pen, 1.0, &b2, &col);
+    }
+    pen.block(knee.0.round(), knee.1.round(), rgb(sc(m_bone(4, ii), 1.2)));
+    let (fx, fy) = (foot.0.round(), foot.1.round());
+    pen.block(fx - 1.0, fy, rgb(m_bone(1, ii)));
+    pen.block(fx + 1.0, fy, rgb(m_bone(2, ii)));
+}
+
 /// Draw a forester or an abductor, the mockup's way. `x, y` is where it
 /// stands on the ground; `local` turns a world point into its frame.
 #[allow(clippy::too_many_arguments)]
@@ -523,21 +549,19 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
     let forester = un.kind == Unit::Forester;
     let t = real_t as f32;
     let lamp: Rgb = [lc[0] * 255.0, lc[1] * 255.0, lc[2] * 255.0];
-    let face_ = if forester { 1.0f64 } else if un.a >= 0.0 { -1.0 } else { 1.0 };
+    // Which way it faces: its own frame's +u is clockwise round the body;
+    // facing +1 (the simulation's) is counter-clockwise.
+    let face = if un.a >= 0.0 { -1.0f32 } else { 1.0 };
+    let (sa, ca) = (y.atan2(x) - std::f64::consts::FRAC_PI_2).sin_cos();
+    // A point of its own frame (u along, w up) in the world.
+    let wpt_u = move |u: f64, w: f64| -> (f64, f64) { (x + u * ca - w * sa, y + u * sa + w * ca) };
     // A point of the mockup's frame (the middle of block bx, by) in the
     // world, for lights and effects.
-    let (sa, ca) = (y.atan2(x) - std::f64::consts::FRAC_PI_2).sin_cos();
-    let wpt = move |bx: f32, by: f32| -> (f64, f64) {
-        let (u, w) = (face_ * (bx as f64 + 0.5), by as f64 + 0.5);
-        (x + u * ca - w * sa, y + u * sa + w * ca)
-    };
+    let wpt = move |bx: f32, by: f32| -> (f64, f64) { wpt_u(face as f64 * (bx as f64 + 0.5), by as f64 + 0.5) };
     let emit = |bx: f32, by: f32, r: f64, c: Rgb, i: f32| {
         let (ex, ey) = wpt(bx, by);
         crate::fx::emit(ex, ey, r, c, i);
     };
-    // Its own frame's +u is clockwise round the body; facing +1 is
-    // counter-clockwise. The crab is the same both ways round.
-    let face = if forester { 1.0f32 } else if un.a >= 0.0 { -1.0 } else { 1.0 };
     // How far round it has turned: +1 facing +u, -1 facing -u, between
     // while it turns about (the frame squeezes through edge-on).
     let turn = std::cell::Cell::new(face);
@@ -551,29 +575,6 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
         let (u, w) = local(q);
         (u * face, w)
     };
-    // A path of blocks joined edge to edge (drawPath): `colour` by point.
-    fn path(pen: &mut Pen, face: f32, pts: &[(f32, f32)], colour: &dyn Fn(usize) -> Rgb) {
-        let put = |pen: &mut Pen, px: i32, py: i32, c: Rgb| {
-            let u = (face * (px as f32 + 0.5) - 0.5).round();
-            pen.block(u, py as f32, rgb(c));
-        };
-        let (mut px, mut py) = (pts[0].0.round() as i32, pts[0].1.round() as i32);
-        put(pen, px, py, colour(0));
-        for (i, p) in pts.iter().enumerate().skip(1) {
-            let (bx, by) = (p.0.round() as i32, p.1.round() as i32);
-            for _ in 0..60 {
-                if px == bx && py == by {
-                    break;
-                }
-                if (bx - px).abs() >= (by - py).abs() {
-                    px += (bx - px).signum();
-                } else {
-                    py += (by - py).signum();
-                }
-                put(pen, px, py, colour(i));
-            }
-        }
-    }
 
     // ---- Dropped bag on the ground, and the couriers that come for it ----
     if un.state == 9 {
@@ -626,12 +627,13 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
         return;
     }
 
-    // Its legs, by the procedural rig (rig.rs), on the ground as drawn.
+    // ---- Its legs and gait (rig.rs), its feet on the ground as drawn ----
     let r0 = (x * x + y * y).sqrt().max(1.0);
-    let ground = |s: f64| -> Option<f32> {
-        // Down the radius at `s` m round the body: the top of the first
-        // solid cell, as height over where it stands.
-        let a = s / r0;
+    let a0 = y.atan2(x);
+    let ground = |u: f32| -> Option<f32> {
+        // Down the radius `u` m along: the top of the first solid cell, as
+        // height over where it stands.
+        let a = a0 - u as f64 / r0;
         let (ux, uy) = (a.cos(), a.sin());
         let mut w = 40.0;
         while w > -90.0 {
@@ -643,19 +645,25 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
         }
         None
     };
-    let spec = rig_of(un, face);
-    let pose = crate::rig::step(un.id as u64 | ((un.kind.index() as u64) << 40), &spec, x, y, real_t, un.state == 4, &ground);
+    let spec = gait_of(un);
+    // How fast the simulation has it going (m/s of game time): striding or
+    // creeping at its work.
+    let speed = if un.t1 > un.t0 { ((un.to.0 - un.from.0).hypot(un.to.1 - un.from.1) / (un.t1 - un.t0)) as f32 } else { 0.0 };
+    let pose = crate::rig::step(un.id as u64 | ((un.kind.index() as u64) << 40), &spec, x, y, face, now, real_t, un.state, speed, &ground);
+    // Landed and not yet unfolding: the package on the ground.
+    if pose.unfold < 0.05 {
+        draw_package(pen, &mut blk, forester, 0.0, 0.0, t, lamp);
+        return;
+    }
     let by = pose.body;
-    let legs = pose.legs;
-    let lean_u = pose.lean;
-    let landed = pose.landed;
-    // (The spider's frame faces its way.)
-    let lean = lean_u * face;
+    // The body's lean and surge, in the mockup's frame.
+    let b = pose.shift * face;
+    let lean = pose.lean * face;
     // A foot coming down under load: dust.
-    for (i, &l) in landed.iter().enumerate() {
+    for (i, &l) in pose.landed.iter().enumerate() {
         if l {
-            let foot = *legs[i].last().unwrap();
-            let (fx, fy) = wpt(foot.0 * face, foot.1 + 0.5);
+            let f = pose.feet[i];
+            let (fx, fy) = wpt_u(f.0 as f64, f.1 as f64 + 1.0);
             for _ in 0..3 {
                 crate::fx::smoke(fx, fy, [110.0, 100.0, 88.0]);
             }
@@ -674,6 +682,7 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
         last_cut: un.cut_at,
         pending: None,
         turn: face,
+        next_vent: real_t + 14.0 + 8.0 * mhash(un.id as i32, 1, 9) as f64,
         rng: un.id as u64 * 0x9E37 + 1,
         last_t: real_t,
     });
@@ -682,14 +691,13 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
     // Turning about takes half a second.
     st.turn = if face > st.turn { (st.turn + dt / TURN_S * 2.0).min(face) } else { (st.turn - dt / TURN_S * 2.0).max(face) };
     turn.set(st.turn);
-    let b = lean;
-    // The store hangs here (the mockup's store()).
-    // (The crab's bag hangs under the middle of it.)
-    let store = if forester { (b, by - 2.0) } else { (b - 9.0, by + 2.0) };
+    // The store hangs here (the mockup's store()): the crab's bag slung
+    // behind it, the spider's abdomen.
+    let store = if forester { (b - 17.0, by + 2.0) } else { (b - 9.0, by + 2.0) };
+    let fill = un.b.clamp(0.0, 1.0);
 
     // ---- The arms: each cut the simulation reports, a claw (palp) reaches,
     // works and lifts it into the store ----
-    // Each section the simulation's claws shear: a claw goes for it.
     if un.cut_at > st.last_cut {
         st.pending = Some(un.claw);
         st.last_cut = un.cut_at;
@@ -698,15 +706,13 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
     for k in 0..2 {
         let mut a = st.arms[k];
         a.t += dt;
-        let side = if k == 0 { 1.0f32 } else { -1.0 };
-        let sh = if forester { (b + side * CRAB_SHOULDER, by + 3.0) } else { (b + 12.0 - k as f32 * 3.0, by + 1.0) };
+        let kf = k as f32;
+        let sh = if forester { (b + 15.0 - kf * 4.0, by + 2.0) } else { (b + 12.0 - kf * 3.0, by + 1.0) };
         match a.state {
             0 => {
                 if a.t > 0.6 {
-                    // The crab's claw on the side the plant is.
-                    let mine = st.pending.is_some_and(|m| !forester || (frame(m).0 - b) * side >= 0.0);
-                    if mine {
-                        a.target = st.pending.take().unwrap();
+                    if let Some(m) = st.pending.take() {
+                        a.target = m;
                         a.state = 1;
                         a.t = 0.0;
                     }
@@ -757,13 +763,17 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
     let laser_world = (un.sweep_from.0 + (un.mark.0 - un.sweep_from.0) * sweep, un.sweep_from.1 + (un.mark.1 - un.sweep_from.1) * sweep);
     let laser_mark = frame(laser_world);
 
-    // ---- The eye stalks (forester): searching, darting, focusing ----
+    // ---- The eye stalks (forester): searching, swinging slowly from side
+    // to side; when there is something to watch (the laser's mark, a claw
+    // at work) they snap round and hold on it; now and then one glances back
+    // at the bag or across at the other. Each turns on a spring: quick to
+    // focus, lazy in the search ----
     if forester {
         let busy = st.arms.iter().find(|a| a.state == 1 || a.state == 2).map(|a| a.tip);
         let poi = if firing { Some(laser_mark) } else { busy };
         for i in 0..2 {
-            let ex = [CRAB_STALKS[0], CRAB_STALKS[1]][i];
-            let base = (b + ex, by + 9.0);
+            let ex = [9.0f32, 12.0][i];
+            let base = (b + 2.0 + ex, by + 8.0);
             let lim = |a: f32| a.clamp(-0.95, 0.95);
             let mut e = st.stalks[i];
             e.t += dt;
@@ -771,6 +781,8 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
             let r2 = st.rand();
             match e.mode {
                 0 => {
+                    // Darting: hold still on one far point, then flick to
+                    // the next.
                     if e.t > e.hold {
                         e.goal = lim((r1 * 2.0 - 1.0) * 0.9);
                         e.hold = 0.5 + r2 * 1.6;
@@ -803,47 +815,41 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
                     }
                 }
             }
+            // A stiff, well-damped spring: quick flicks that stop dead.
             e.va += ((e.goal - e.a) * 160.0 - e.va * 24.0) * dt;
             e.a = lim(e.a + e.va * dt);
             st.stalks[i] = e;
         }
     }
 
-    if forester {
-        draw_crab(pen, un, st, by, &legs, b, t, real_t, lamp, firing, laser_mark, laser_world, &wpt);
-        return;
+    // ---- Venting: now and then a pressure-release plume from the store
+    // (dry plant matter, or blood) for the ground and the cutters ----
+    if real_t > st.next_vent {
+        st.next_vent = real_t + 16.0 + 12.0 * st.rand() as f64;
+        if fill > 0.3 {
+            let (vx, vy) = wpt(store.0, store.1);
+            let c0: Rgb = if forester { [200.0, 190.0, 120.0] } else { [200.0, 60.0, 60.0] };
+            crate::fx::emit(vx, vy, 12.0, c0, 1.5);
+            crate::fx::spark(vx, vy, 6, c0, 4.8);
+            for _ in 0..8 {
+                let (q1, q2) = (st.rand(), st.rand());
+                let c = if forester { mx(mx([150.0, 130.0, 80.0], [110.0, 120.0, 60.0], q1), [90.0, 70.0, 40.0], q2 * 0.5) } else { mx([118.0, 10.0, 18.0], [150.0, 20.0, 30.0], q1) };
+                crate::fx::spark(vx, vy, 5, c, 14.0);
+            }
+            if forester {
+                for _ in 0..4 {
+                    crate::fx::dust(vx, vy, [150.0, 136.0, 96.0], 10.0, 8.0, 2.5);
+                }
+            }
+        }
     }
 
     // ---- Drawing, in the mockup's order ----
-    // Legs: each a chain of bones from the rig, drawn as a curve through
-    // its joints (each bone bowed up a little), ringed in bone.
-    for (i, joints) in legs.iter().enumerate() {
-        // Into the mockup's frame (x toward where it faces).
-        let pts: Vec<(f32, f32)> = joints.iter().map(|p| (p.0 * face, p.1)).collect();
-        let col = |k: usize| if k % 3 == 0 { sc(m_bone(k as i32, i as i32), 1.1) } else { mx(m_light(k as i32, i as i32), m_sinew(k as i32, i as i32), 0.35) };
-        let mut curve: Vec<(f32, f32)> = Vec::new();
-        for w in pts.windows(2) {
-            let (p0, p1) = (w[0], w[1]);
-            let (dx, dy) = (p1.0 - p0.0, p1.1 - p0.1);
-            let l = (dx * dx + dy * dy).sqrt().max(1e-3);
-            // Bowed away from the ground: the side of the bone facing up.
-            let (nx, ny) = (-dy / l, dx / l);
-            let (nx, ny) = if ny < 0.0 { (-nx, -ny) } else { (nx, ny) };
-            let mid = ((p0.0 + p1.0) / 2.0 + nx * l * 0.12, (p0.1 + p1.1) / 2.0 + ny * l * 0.12);
-            let seg = bez(p0, mid, p1, (l as usize).max(4));
-            if curve.is_empty() {
-                curve.extend(seg);
-            } else {
-                curve.extend(seg.into_iter().skip(1));
-            }
-        }
-        path(pen, turn.get(), &curve, &col);
-        for (k, j) in pts.iter().enumerate().skip(1).take(pts.len().saturating_sub(2)) {
-            blk(pen, j.0.round(), j.1.round(), sc(m_bone(4 + k as i32, i as i32), 1.2));
-        }
-        let f = *pts.last().unwrap();
-        blk(pen, f.0.round() - 1.0, f.1.round(), m_bone(1, i as i32));
-        blk(pen, f.0.round() + 1.0, f.1.round(), m_bone(2, i as i32));
+    // Legs: hip to a high knee to the foot.
+    for i in 0..3 {
+        // (Mirrored as its blocks are.)
+        let hip = (turn.get() * (b + spec.hips[i] + 0.5) - 0.5, by + 3.0);
+        draw_leg(pen, hip, pose.feet[i], i, t, if forester { 7.0 } else { 13.0 }, if forester { 2 } else { 1 }, face);
     }
     // Palps or claws.
     for k in 0..2 {
@@ -859,13 +865,8 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
             let len = (dx * dx + dy * dy).sqrt().max(1.0);
             let (nx, ny) = (-dy / len, dx / len);
             let lash = match a.state {
-                1 => (a.t / 0.6).min(1.0) * std::f32::consts::PI,
-                3 => (a.t / 0.9).min(1.0) * std::f32::consts::PI,
-                _ => 0.0,
-            };
-            let lash = match a.state {
-                1 => lash.sin() * 7.0,
-                3 => -4.0 * lash.sin(),
+                1 => ((a.t / 0.6).min(1.0) * std::f32::consts::PI).sin() * 7.0,
+                3 => -4.0 * ((a.t / 0.9).min(1.0) * std::f32::consts::PI).sin(),
                 _ => 3.0 * (t * 1.7 + kf * 2.0).sin(),
             };
             let pts: Vec<(f32, f32)> = (0..=30)
@@ -876,17 +877,18 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
                 })
                 .collect();
             let col = |q: usize| if q % 4 == 0 { sc(m_bone(q as i32, k as i32), 0.9) } else { mx(m_sinew(q as i32, k as i32), [70.0, 40.0, 46.0], 0.35) };
-            path(pen, turn.get(), &pts, &col);
+            tri_path(pen, turn.get(), &pts, &col);
             let thick: Vec<(f32, f32)> = pts.iter().take(10).map(|p| (p.0 + 1.0, p.1)).collect();
-            path(pen, turn.get(), &thick, &col);
+            tri_path(pen, turn.get(), &thick, &col);
+            // The end: a barbed hook that closes round what it catches.
             let (tx, ty) = (tip.0.round(), tip.1.round());
             let shut = a.state == 3;
             blk(pen, tx, ty, sc(m_bone(3, k as i32), 1.2));
+            blk(pen, tx + if shut { 0.0 } else { 1.0 }, ty - 1.0, WHITE);
+            blk(pen, tx - 1.0, ty + if shut { 0.0 } else { 1.0 }, WHITE);
             if a.state == 1 && a.t > 0.5 {
                 emit(tx, ty, 3.0, lamp, 0.4);
             }
-            blk(pen, tx + if shut { 0.0 } else { 1.0 }, ty - 1.0, WHITE);
-            blk(pen, tx - 1.0, ty + if shut { 0.0 } else { 1.0 }, WHITE);
             if a.load {
                 blk(pen, tx, ty - 1.0, MEAT);
                 blk(pen, tx - 1.0, ty - 1.0, MEAT);
@@ -894,6 +896,7 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
             }
             continue;
         }
+        // The claw's arm: three segments out from the shoulder, jointed.
         for (j, (u0, u1, w)) in [(0.0f32, 0.45f32, 2u8), (0.4, 0.78, 2), (0.74, 1.0, 1)].into_iter().enumerate() {
             let p0 = (sh.0 + dx * u0, sh.1 + dy * u0);
             let p1 = (sh.0 + dx * u1, sh.1 + dy * u1);
@@ -902,9 +905,9 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
                 1 => sc(m_armour(j as i32, 1), 1.1),
                 _ => m_light(j as i32, 2),
             };
-            path(pen, turn.get(), &[p0, p1], &|_| c);
+            tri_path(pen, turn.get(), &[p0, p1], &|_| c);
             if w > 1 {
-                path(pen, turn.get(), &[(p0.0 + 1.0, p0.1), (p1.0 + 1.0, p1.1)], &|_| c);
+                tri_path(pen, turn.get(), &[(p0.0 + 1.0, p0.1), (p1.0 + 1.0, p1.1)], &|_| c);
             }
             blk(pen, p0.0.round(), p0.1.round(), DARK);
         }
@@ -940,7 +943,6 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
         }
     }
     let (ox, oy) = (b.round(), by.round());
-    let fill = un.b.clamp(0.0, 1.0);
     if !forester {
         // The spider: the abdomen (its store) behind, a narrow waist, and the
         // head in front: armoured, ridged, a cluster of eyes, two fangs.
@@ -968,7 +970,8 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
             }
         }
         // Its eyes: a slow, uneasy glow while it roams; flaring and pulsing
-        // fast when it has something in its sights.
+        // fast when it has something in its sights, the brightest one
+        // flicking from eye to eye.
         let hunting = firing || st.arms.iter().any(|a| a.state == 1);
         let eyes = [(13, 5), (14, 4), (12, 6), (14, 6), (13, 7), (12, 4)];
         let lead = ((t * if hunting { 12.0 } else { 1.5 }).floor() as usize) % eyes.len();
@@ -994,13 +997,15 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
         let swing = ((t * 1.3).sin() * 1.5 - lean * 2.0).round();
         draw_store(pen, &mut blk, true, ox - 17.0, oy + 2.0, fill, t, swing);
         draw_shell(pen, &mut blk, ox + 2.0, oy, t, true, lamp);
+        // Mouthparts under the rostrum, still unless it is feeding.
         let feeding = st.arms.iter().any(|a| a.state == 3);
         for q in 0..4 {
             let bob = if feeding && (t * 8.0 + q as f32).sin() > 0.0 { 1.0 } else { 0.0 };
             blk(pen, ox + 16.0 + q as f32, oy - 1.0 - (q % 2) as f32 - bob, m_bone(q, 3));
         }
+        // (The mockup's quarter turn a frame, at 60 frames a second.)
         if feeding {
-            st.rotor += 0.25;
+            st.rotor = (st.rotor + dt * 15.0).rem_euclid(3000.0);
         }
         for yy in 0..3 {
             let q = ((st.rotor + yy as f32 * 2.0).floor() as i32).rem_euclid(3);
@@ -1014,7 +1019,7 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
             let dir = (e.a.sin(), e.a.cos());
             let tip = (base.0 + dir.0 * 7.0, base.1 + dir.1 * 7.0);
             let ctrl = (base.0 + dir.0 * 1.5, base.1 + 4.0);
-            path(pen, turn.get(), &bez(base, ctrl, tip, 10), &|q| if q % 3 == 2 { m_bone(q as i32, ex) } else { m_strut(q as i32, ex) });
+            tri_path(pen, turn.get(), &bez(base, ctrl, tip, 10), &|q| if q % 3 == 2 { m_bone(q as i32, ex) } else { m_strut(q as i32, ex) });
             let (tx, ty) = (tip.0.round(), tip.1.round());
             let (lx, ly) = ((tip.0 + dir.0).round(), (tip.1 + dir.1).round());
             let focus = e.mode == 1;
@@ -1024,7 +1029,8 @@ fn draw_tripod(pen: &mut Pen, un: &UnitView, x: f64, y: f64, now: f64, real_t: f
             emit(lx, ly, if focus { 6.0 } else { 3.0 }, lamp, if focus { 0.9 } else { 0.35 });
         }
     }
-    // The laser.
+    // The laser: from under the rostrum (the spider's head), along the
+    // ground through what it hits.
     if firing {
         let em = if forester { (ox + 16.0, oy) } else { (ox + 11.0, oy) };
         let flick = mhash((t * 30.0) as i32, un.id as i32, 7) < 0.6;
@@ -1215,217 +1221,6 @@ fn draw_package(pen: &mut Pen, blk: &mut dyn FnMut(&mut Pen, f32, f32, Rgb), for
             for k in 0..6 {
                 blk(pen, x0 - 2.0 + (ex - k) as f32, y0 + 2.0 + shell_top(ex) as f32 + 1.0, if k == 0 { [30.0, 44.0, 40.0] } else { m_strut(k, ex) });
             }
-        }
-    }
-}
-
-
-/// The forester: a crab that walks sideways, the same both ways round, in
-/// the swarm mockup's colours and parts. A wide, flat, plated shell, the
-/// light showing in its grooves; four legs, two a side; a big saw-edged
-/// claw each side, each taking what grows on its side; the woven clippings
-/// bag slung under the middle; two eye stalks in the middle of the shell,
-/// whose eyes fire the laser; a rotor of blades in the intake under it.
-#[allow(clippy::too_many_arguments)]
-fn draw_crab(pen: &mut Pen, un: &UnitView, st: &mut Tripod, by: f32, legs: &[Vec<(f32, f32)>], b: f32, t: f32, real_t: f64, lamp: Rgb, firing: bool, laser_mark: (f32, f32), laser_world: (f64, f64), wpt: &dyn Fn(f32, f32) -> (f64, f64)) {
-    let blk = |pen: &mut Pen, u: f32, w: f32, c: Rgb| pen.block(u.round(), w.round(), rgb(c));
-    fn path(pen: &mut Pen, pts: &[(f32, f32)], colour: &dyn Fn(usize) -> Rgb) {
-        let (mut px, mut py) = (pts[0].0.round() as i32, pts[0].1.round() as i32);
-        pen.block(px as f32, py as f32, rgb(colour(0)));
-        for (i, p) in pts.iter().enumerate().skip(1) {
-            let (bx, by) = (p.0.round() as i32, p.1.round() as i32);
-            for _ in 0..80 {
-                if px == bx && py == by {
-                    break;
-                }
-                if (bx - px).abs() >= (by - py).abs() {
-                    px += (bx - px).signum();
-                } else {
-                    py += (by - py).signum();
-                }
-                pen.block(px as f32, py as f32, rgb(colour(i)));
-            }
-        }
-    }
-    let (ox, oy) = (b.round(), by.round());
-    let fill = un.b.clamp(0.0, 1.0);
-    // Legs from the rig: thigh and shin, two blocks thick, bone at every
-    // third block, a bone knuckle at the knee, a two-toed foot.
-    for (i, joints) in legs.iter().enumerate() {
-        let col = |k: usize| if k % 3 == 0 { sc(m_bone(k as i32, i as i32), 1.1) } else { mx(m_light(k as i32, i as i32), m_sinew(k as i32, i as i32), 0.35) };
-        let out = if joints.last().unwrap().0 >= joints[0].0 { 1.0 } else { -1.0 };
-        for w in joints.windows(2) {
-            let n = ((w[1].0 - w[0].0).abs() + (w[1].1 - w[0].1).abs()) as usize;
-            let seg: Vec<(f32, f32)> = (0..=n.max(1)).map(|q| {
-                let t = q as f32 / n.max(1) as f32;
-                (w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t)
-            }).collect();
-            path(pen, &seg, &col);
-            let thick: Vec<(f32, f32)> = seg.iter().map(|p| (p.0 + out, p.1)).collect();
-            path(pen, &thick, &col);
-        }
-        for j in joints.iter().skip(1).take(joints.len().saturating_sub(2)) {
-            blk(pen, j.0, j.1, sc(m_bone(4, i as i32), 1.2));
-        }
-        let f = *joints.last().unwrap();
-        blk(pen, f.0.round() - 1.0, f.1.round(), m_bone(1, i as i32));
-        blk(pen, f.0.round() + 1.0, f.1.round(), m_bone(2, i as i32));
-    }
-    // The bag, slung under the middle on a bone strap, swaying.
-    for q in -4..=4 {
-        blk(pen, ox + q as f32, oy + 1.0, m_bone(q, 0));
-    }
-    let swing = ((t * 1.3).sin() * 1.5).round();
-    {
-        let mut put = |pen: &mut Pen, bx: f32, bw: f32, c: Rgb| pen.block(bx.round(), bw.round(), rgb(c));
-        draw_store(pen, &mut put, true, ox, oy, fill, t, swing);
-    }
-    // The shell: wide and flat, the same both ways, plated; grooves across
-    // it lit from within; spines along the rim.
-    let in_shell = |x: i32, y: i32| (0..SHELL.len() as i32).contains(&y) && x.abs() <= SHELL[y as usize] - if y > 5 { 2 } else { 0 } - if y < 2 { 2 } else { 0 };
-    for y in 0..SHELL.len() as i32 {
-        for x in -18..=18 {
-            if !in_shell(x, y) {
-                continue;
-            }
-            let edge = !in_shell(x - 1, y) || !in_shell(x + 1, y) || !in_shell(x, y - 1) || !in_shell(x, y + 1);
-            let groove = y > 0 && y < 7 && ((x.abs() as f32) - (6.0 + ((y - 4) * (y - 4)) as f32 * 0.7)).abs() < 0.6;
-            let c = if edge {
-                m_strut(x, y)
-            } else if groove {
-                if (2..=4).contains(&y) { mx([20.0, 30.0, 24.0], lamp, 0.45 + 0.4 * (t * 1.6 + y as f32).sin()) } else { m_darkg(x, y) }
-            } else if y == 6 && x.abs() < 5 {
-                sc(m_bone(x, y), 0.9)
-            } else {
-                sc(mx(m_light(x, y), [150.0, 118.0, 96.0], 0.12), 0.9 + 0.08 * (x as f32 * 0.5).sin())
-            };
-            blk(pen, ox + x as f32, oy + y as f32, c);
-        }
-    }
-    let top = |x: i32| (0..SHELL.len() as i32).rev().find(|&y| in_shell(x, y)).unwrap_or(0);
-    let mut x = -15;
-    while x <= 15 {
-        blk(pen, ox + x as f32, oy + top(x) as f32 + 1.0, sc(m_bone(x, 9), 1.15));
-        x += 3;
-    }
-    // The intake under the middle: a rotor of blades turning while it feeds,
-    // mouthparts working either side.
-    let feeding = st.arms.iter().any(|a| a.state == 3);
-    if feeding {
-        st.rotor += 0.25;
-    }
-    for q in -1..=1 {
-        let k = ((st.rotor + q as f32 * 2.0).floor() as i32).rem_euclid(3);
-        blk(pen, ox + q as f32, oy - 1.0, if k == 0 { WHITE } else { DARK });
-    }
-    for sd in [-1.0f32, 1.0] {
-        for q in 0..2 {
-            let bob = if feeding && (t * 8.0 + q as f32 + sd).sin() > 0.0 { 1.0 } else { 0.0 };
-            blk(pen, ox + sd * (2.0 + q as f32), oy - 1.0 - bob, m_bone(q, 3));
-        }
-    }
-    // The claws, one a side: three segments out from the shoulder, and a big
-    // claw, a fixed jaw with a saw edge and a moving one, open as it reaches,
-    // shut on what it lifts; one clean shear per cut.
-    for k in 0..2 {
-        let a = st.arms[k];
-        let side = if k == 0 { 1.0f32 } else { -1.0 };
-        let sh = (b + side * CRAB_SHOULDER, by + 3.0);
-        let tip = if a.state == 0 { (sh.0 + side * (6.0 + (t * 1.3 + k as f32).sin() * 1.5), sh.1 - 6.0) } else { a.tip };
-        let (dx, dy) = (tip.0 - sh.0, tip.1 - sh.1);
-        for (j, (u0, u1, w)) in [(0.0f32, 0.45f32, 3u8), (0.4, 0.78, 2), (0.74, 1.0, 2)].into_iter().enumerate() {
-            let p0 = (sh.0 + dx * u0, sh.1 + dy * u0);
-            let p1 = (sh.0 + dx * u1, sh.1 + dy * u1);
-            let c = match j {
-                0 => sc(m_armour(j as i32, 0), 1.2),
-                1 => sc(m_armour(j as i32, 1), 1.1),
-                _ => m_light(j as i32, 2),
-            };
-            for o in 0..w {
-                path(pen, &[(p0.0, p0.1 + o as f32), (p1.0, p1.1 + o as f32)], &|_| c);
-            }
-            blk(pen, p0.0, p0.1, DARK);
-        }
-        let (tx, ty) = (tip.0.round(), tip.1.round());
-        let o = match a.state {
-            2 => {
-                if a.t < 0.15 {
-                    3.0
-                } else if a.t < 0.3 {
-                    0.0
-                } else {
-                    1.0
-                }
-            }
-            1 => 3.0,
-            _ => 0.0,
-        };
-        // The fixed jaw, two blocks deep, its saw edge on top.
-        for q in -1..=6 {
-            blk(pen, tx + side * q as f32, ty + 1.0, sc(m_armour(q, 0), 1.15));
-            blk(pen, tx + side * q as f32, ty + 2.0, sc(m_armour(q, 1), 1.05));
-            if q % 2 != 0 {
-                blk(pen, tx + side * q as f32, ty, WHITE);
-            }
-        }
-        // The moving jaw, hinged at the root.
-        for q in 0..=5 {
-            blk(pen, tx + side * q as f32, ty - 1.0 - o * (q as f32 / 5.0), m_light(q, 1));
-        }
-        if a.load {
-            for (du, dw) in [(0.0, -1.0), (side, -1.0), (0.0, -2.0), (side * 2.0, -1.0)] {
-                blk(pen, tx + du, ty + dw, WOOD);
-            }
-        }
-    }
-    // Eye stalks in the middle of the shell: flexible, segmented, each
-    // swinging on its own, its tip an eye in the swarm's light colour.
-    let mut eyes = [(0.0f32, 0.0f32); 2];
-    for (i, e) in st.stalks.iter().enumerate() {
-        let ex = CRAB_STALKS[i];
-        let base = (ox + ex, oy + top(ex as i32) as f32 + 1.0);
-        let dir = (e.a.sin(), e.a.cos());
-        let tip = (base.0 + dir.0 * 8.0, base.1 + dir.1 * 8.0);
-        let ctrl = (base.0 + dir.0 * 1.5, base.1 + 4.0);
-        path(pen, &bez(base, ctrl, tip, 10), &|q| if q % 3 == 2 { m_bone(q as i32, i as i32) } else { m_strut(q as i32, i as i32) });
-        let (lx, ly) = ((tip.0 + dir.0).round(), (tip.1 + dir.1).round());
-        eyes[i] = (lx, ly);
-        let focus = e.mode == 1;
-        let p = if focus { 0.8 + 0.2 * (t * 9.0).sin() } else { 0.35 + 0.3 * (t * 1.4 + e.ph).sin() };
-        blk(pen, tip.0, tip.1, mx([14.0, 20.0, 18.0], lamp, p * 0.7));
-        blk(pen, lx, ly, if focus { mx(lamp, [255.0; 3], 0.45) } else { mx([14.0, 20.0, 18.0], lamp, p) });
-        let (wx, wy) = wpt(lx, ly);
-        crate::fx::emit(wx, wy, if focus { 6.0 } else { 3.0 }, lamp, if focus { 0.9 } else { 0.35 });
-    }
-    // The laser, from the eye on the side it fires to, sweeping the ground.
-    if firing {
-        let em = if laser_mark.0 >= b { if eyes[1].0 > eyes[0].0 { eyes[1] } else { eyes[0] } } else if eyes[1].0 < eyes[0].0 { eyes[1] } else { eyes[0] };
-        let flick = mhash((t * 30.0) as i32, un.id as i32, 7) < 0.6;
-        let c = if flick { [255.0, 220.0, 150.0] } else { [255.0, 150.0, 60.0] };
-        let (x0, y0, x1, y1) = (em.0 as i32, em.1 as i32, laser_mark.0.floor() as i32, laser_mark.1.floor() as i32);
-        let (mut ax, mut ay) = (x0, y0);
-        let (ddx, ddy) = ((x1 - ax).abs(), -(y1 - ay).abs());
-        let (sx, sy) = (if ax < x1 { 1 } else { -1 }, if ay < y1 { 1 } else { -1 });
-        let mut err = ddx + ddy;
-        for _ in 0..600 {
-            blk(pen, ax as f32, ay as f32, c);
-            if ax == x1 && ay == y1 {
-                break;
-            }
-            let e2 = 2 * err;
-            if e2 >= ddy {
-                err += ddy;
-                ax += sx;
-            }
-            if e2 <= ddx {
-                err += ddx;
-                ay += sy;
-            }
-        }
-        blk(pen, laser_mark.0, laser_mark.1, [255.0, 250.0, 240.0]);
-        crate::fx::emit(laser_world.0, laser_world.1, 10.0, [255.0, 160.0, 60.0], 1.5);
-        if mhash((real_t * 20.0) as i32, un.id as i32, 5) < 0.3 {
-            crate::fx::smoke(laser_world.0, laser_world.1, [70.0, 66.0, 62.0]);
         }
     }
 }
