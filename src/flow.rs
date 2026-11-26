@@ -32,7 +32,15 @@ pub struct FlowField {
     pub n: i64,
     /// Distance from the hub to each square's middle, in units (FAR: unreached).
     dist: Vec<u16>,
+    /// Each reached square's way down toward the hub: which of `STEPS` its
+    /// next square is (NO_STEP at the hub), worked out once so a drone's
+    /// way is walked a lookup a square.
+    down: Vec<u8>,
 }
+
+/// The eight neighbours, in the order `down` names them.
+const STEPS: [(i64, i64); 8] = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)];
+const NO_STEP: u8 = u8::MAX;
 
 impl FlowField {
     /// Sweep outward from `hub` over squares `open(sx, sy)` says can be flown
@@ -112,7 +120,9 @@ impl FlowField {
             }
             d += 1;
         }
-        FlowField { hub, ox, oy, n, dist }
+        let mut f = FlowField { hub, ox, oy, n, dist, down: Vec::new() };
+        f.down = (0..size).map(|i| if f.dist[i] == FAR { NO_STEP } else { f.find_downhill(i) }).collect();
+        f
     }
 
     fn square(&self, x: f64, y: f64) -> Option<usize> {
@@ -167,7 +177,7 @@ impl FlowField {
     /// backwards, downhill from `to`'s square toward the hub). None if `to`
     /// wasn't reached.
     pub fn along(&self, to: (f64, f64), s: f64) -> Option<(f64, f64)> {
-        let mut i = self.near_square(to)?;
+        let mut i = self.entry_square(to)?;
         let total = self.dist[i] as f64 * M_PER_UNIT;
         if s >= total {
             return Some(to);
@@ -193,6 +203,83 @@ impl FlowField {
         Some(self.hub)
     }
 
+    /// The reached square for `p`: its own or one touching it, else the
+    /// nearest to the hub of the eight round its own (a cell cut from a
+    /// jagged face, see `reach_m`).
+    fn entry_square(&self, p: (f64, f64)) -> Option<usize> {
+        if let Some(i) = self.near_square(p) {
+            return Some(i);
+        }
+        let sx = (p.0.floor() as i64 - self.ox).div_euclid(CELL);
+        let sy = (p.1.floor() as i64 - self.oy).div_euclid(CELL);
+        let mut best: Option<usize> = None;
+        for dy in -1i64..=1 {
+            for dx in -1i64..=1 {
+                let (x, y) = (sx + dx, sy + dy);
+                if x < 0 || y < 0 || x >= self.n || y >= self.n {
+                    continue;
+                }
+                let i = (y * self.n + x) as usize;
+                if self.dist[i] != FAR && best.is_none_or(|b| self.dist[i] < self.dist[b]) {
+                    best = Some(i);
+                }
+            }
+        }
+        best
+    }
+
+    /// Flying distance (m) from the hub to `p` the way `along` goes (its
+    /// square, or the best one touching it).
+    pub fn way_m(&self, p: (f64, f64)) -> Option<f64> {
+        self.entry_square(p).map(|i| self.dist[i] as f64 * M_PER_UNIT)
+    }
+
+    /// Distance from the hub (m) to where the ways down from `a` and `b`
+    /// meet: the way between them through open space runs down from one
+    /// to there and back up to the other. None if either wasn't reached.
+    pub fn meet_m(&self, a: (f64, f64), b: (f64, f64)) -> Option<f64> {
+        let (mut i, mut j) = (self.entry_square(a)?, self.entry_square(b)?);
+        let mut guard = 0;
+        // (Each square's way down is one way, so once the two meet they
+        // run together: step the one further from the hub until they do.)
+        while i != j {
+            guard += 1;
+            if guard > 100_000 {
+                return None;
+            }
+            let (di, dj) = (self.dist[i], self.dist[j]);
+            if di >= dj {
+                i = self.downhill(i)?;
+            }
+            if dj >= di {
+                j = self.downhill(j)?;
+            }
+        }
+        Some(self.dist[i] as f64 * M_PER_UNIT)
+    }
+
+    /// Where a drone at `p` comes into the field: `p` itself if it was
+    /// reached, else the first reached square straight below it (toward
+    /// the body's centre) within `max_m` (a drop-off point hangs in the
+    /// clear air over the field's top).
+    pub fn way_in(&self, p: (f64, f64), max_m: f64) -> Option<(f64, f64)> {
+        if self.entry_square(p).is_some() {
+            return Some(p);
+        }
+        let r = (p.0 * p.0 + p.1 * p.1).sqrt().max(1e-9);
+        let (ux, uy) = (p.0 / r, p.1 / r);
+        let step = CELL as f64;
+        let mut d = step;
+        while d <= max_m {
+            let q = (p.0 - ux * d, p.1 - uy * d);
+            if self.square(q.0, q.1).is_some_and(|i| self.dist[i] != FAR) {
+                return Some(q);
+            }
+            d += step;
+        }
+        None
+    }
+
     /// The reached square for `p`: its own, or one touching it.
     fn near_square(&self, p: (f64, f64)) -> Option<usize> {
         let mut best: Option<usize> = None;
@@ -208,19 +295,34 @@ impl FlowField {
 
     /// The neighbouring square nearest the hub.
     fn downhill(&self, i: usize) -> Option<usize> {
+        let k = *self.down.get(i)?;
+        if k == NO_STEP {
+            return None;
+        }
+        let (dx, dy) = STEPS[k as usize];
+        Some((i as i64 + dy * self.n + dx) as usize)
+    }
+
+    /// The neighbour nearest the hub, nearer than square i (which of STEPS).
+    fn find_downhill(&self, i: usize) -> u8 {
         let (x, y) = ((i as i64) % self.n, (i as i64) / self.n);
-        let mut best: Option<usize> = None;
-        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+        let mut best: Option<(usize, u8)> = None;
+        for (k, (dx, dy)) in STEPS.into_iter().enumerate() {
             let (nx, ny) = (x + dx, y + dy);
             if nx < 0 || ny < 0 || nx >= self.n || ny >= self.n {
                 continue;
             }
             let j = (ny * self.n + nx) as usize;
-            if self.dist[j] < self.dist[i] && best.is_none_or(|b| self.dist[j] < self.dist[b]) {
-                best = Some(j);
+            if self.dist[j] < self.dist[i] && best.is_none_or(|(b, _)| self.dist[j] < self.dist[b]) {
+                best = Some((j, k as u8));
             }
         }
-        best
+        best.map_or(NO_STEP, |b| b.1)
+    }
+
+    /// Whether `p` is inside the field's square of ground.
+    pub fn covers(&self, p: (f64, f64)) -> bool {
+        self.square(p.0, p.1).is_some()
     }
 }
 

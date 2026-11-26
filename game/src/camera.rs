@@ -132,7 +132,36 @@ pub struct Camera {
     pub status: String,
     /// What drew the director to the current shot.
     why: &'static str,
+    /// A unit the camera is following (the Watch panel), over the director
+    /// and the player alike until the player drags or pans.
+    pub follow: Option<Follow>,
 }
+
+/// The camera on one unit: it glides there and zooms in, then stays on it.
+#[derive(Clone, Copy, Debug)]
+pub struct Follow {
+    pub id: u32,
+    pub kind: dft_sim::production::Unit,
+    /// When it began (real seconds), and the view then.
+    pub began: f64,
+    pub from: (f64, f64, f64),
+    /// Where the unit was last seen, and since when it hasn't been.
+    pub last: (f64, f64),
+    pub lost_at: Option<f64>,
+}
+
+impl Follow {
+    pub fn new(id: u32, kind: dft_sim::production::Unit, now: f64, view: &View) -> Follow {
+        Follow { id, kind, began: now, from: (view.x, view.y, view.mpp), last: (view.x, view.y), lost_at: None }
+    }
+}
+
+/// Following a unit: the glide there (s), how close it ends (m per pixel),
+/// and how long the view waits where a unit vanished (blew up, retired)
+/// before letting go (s).
+const FOLLOW_GLIDE_S: f64 = 1.5;
+const FOLLOW_MPP: f64 = 0.25;
+const FOLLOW_LOST_S: f64 = 3.0;
 
 impl Camera {
     /// The player moved the camera.
@@ -163,6 +192,7 @@ fn setup(mut commands: Commands, o: Res<crate::Options>) {
         happened: Vec::new(),
         status: String::new(),
         why: "",
+        follow: None,
     });
 }
 
@@ -223,6 +253,10 @@ fn direct(
     }
     cam.happened.retain(|h| now - h.3 < HAPPENED_S);
     let _ = cam.hubs_seen;
+    if cam.follow.is_some() {
+        follow(&mut cam, &mut view, &fleet, &run, now);
+        return;
+    }
     if !cam.director {
         cam.status = "fixed".into();
         return;
@@ -390,4 +424,49 @@ fn direct(
         view.mpp = (view.mpp.ln() + (s.mpp.ln() - view.mpp.ln()) * k).exp();
     }
     cam.status = if s.whole { "director: the whole body".into() } else { format!("director: {} · shot {:.0} s, score {:.0}", cam.why, now - s.began, s.score) };
+}
+
+/// Keep the view on the unit being followed: a glide there (zooming in,
+/// in log space), then locked on it, drawn where the screen draws it (at
+/// the drones' clock). A walker's body rides high on its legs: the view
+/// centres between body and feet. The wheel still zooms (about the unit).
+fn follow(cam: &mut Camera, view: &mut View, fleet: &crate::drones::Fleet, run: &crate::Run, now: f64) {
+    let Some(mut f) = cam.follow else { return };
+    let seen = {
+        let out = run.0.out.lock();
+        out.units.iter().find(|u| u.id == f.id && u.kind == f.kind).map(|u| {
+            let (x, y) = u.at(fleet.clock);
+            let r = (x * x + y * y).sqrt().max(1.0);
+            // (`lift` is a walker's height; a tunneler's or heat sink's crew.)
+            let walker = matches!(u.kind, dft_sim::production::Unit::Forester | dft_sim::production::Unit::Abductor);
+            let up = if walker { u.lift as f64 * 0.5 } else { 0.0 };
+            (x + x / r * up, y + y / r * up)
+        })
+    };
+    match seen {
+        Some(p) => {
+            f.last = p;
+            f.lost_at = None;
+        }
+        None => {
+            let t = *f.lost_at.get_or_insert(now);
+            if now - t > FOLLOW_LOST_S {
+                cam.follow = None;
+                cam.manual(now);
+                cam.status = format!("the {} is gone", f.kind.name());
+                return;
+            }
+        }
+    }
+    let e = smooth((now - f.began) / FOLLOW_GLIDE_S);
+    let (x, y) = f.last;
+    view.x = f.from.0 + (x - f.from.0) * e;
+    view.y = f.from.1 + (y - f.from.1) * e;
+    if e < 1.0 {
+        let to = f.from.2.min(FOLLOW_MPP);
+        view.mpp = (f.from.2.ln() + (to.ln() - f.from.2.ln()) * e).exp();
+    }
+    cam.follow = Some(f);
+    cam.moving = None;
+    cam.status = if f.lost_at.is_some() { format!("the {} is gone", f.kind.name()) } else { format!("following the {} (drag or pan to let go)", f.kind.name()) };
 }

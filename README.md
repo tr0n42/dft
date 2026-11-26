@@ -12,6 +12,8 @@ Builds any body from a data file and a seed. Nothing about a body is stored:
 - `cargo run --release --bin tutorials`: compares ways of pacing the second tutorial asteroid
 - `run-refsheet.bat`: rebuilds the reference sheets in `reference\` (pictures and a spec sheet per body); add `--glamour 0.5` in the file to see the glamour pass instead
 - `run-stress.bat`: pushes bodies and swarms past their usual sizes and reports the cost (see `src\bin\stress.rs` for the settings)
+- In the game, the Watch panel (bottom left) makes any specialist free at once and follows it
+- `cargo run --release --bin legcheck` (`src/bin/legcheck.rs`): metres of rock crossed by drones' drawn flights
 - `lab-units.bat` (`src/bin/unitlab.rs`): each ground unit on its testbed, minute by minute, with its cost; `run-test-sappers.bat`, `run-test-tunnelers.bat`, `run-test-walkers.bat`, `run-test-all-units.bat` show them in the game (`--units`)
 - `bench-units.bat`: "500k cutters with X", each unit's cost per stage, kept in `perf\history.csv`; `cargo run --release --bin samecheck` proves a refactor changed nothing
 - `run-dev-planet.bat`: the Dev planet, a 5 km test world where every drone has work (and placeholder animals)

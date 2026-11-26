@@ -24,14 +24,21 @@ pub struct DronesPlugin;
 
 impl Plugin for DronesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Fleet>().add_systems(Startup, setup).add_systems(Update, draw);
+        app.init_resource::<Fleet>().add_systems(Startup, setup).add_systems(PreUpdate, advance_clock.before(crate::view::Controls)).add_systems(Update, draw);
     }
 }
 
-/// Every drone slot's current leg, as last sent by the simulation.
+/// Every drone slot's current leg, as last sent by the simulation; the
+/// flocks' flow fields their flights are drawn along; and the game time
+/// drawn this frame (drones, haulers and units are all drawn at it).
 #[derive(Resource, Default)]
 pub struct Fleet {
     pub legs: Vec<Leg>,
+    pub paths: PathIndex,
+    pub clock: f64,
+    /// The moment drawn last frame (None at first).
+    prev_clock: Option<f64>,
+    started: bool,
 }
 
 impl Fleet {
@@ -39,6 +46,50 @@ impl Fleet {
     pub fn clear(&mut self) {
         self.legs.clear();
     }
+}
+
+/// The moment drawn this frame, worked out before anything uses it (the
+/// camera following a unit needs it before the drones are drawn, or it
+/// trails the unit it follows by a frame).
+fn advance_clock(mut fleet: ResMut<Fleet>, run: Option<Res<crate::Run>>, time: Res<Time<Real>>) {
+    let Some(run) = run else { return };
+    let out = run.0.out.lock();
+    let control = *run.0.control.lock();
+    // Move the drones on from when the simulation published to now, at the
+    // speed the game is actually running (the speed asked for, or slower if
+    // the simulation can't keep up; as fast as it is going at the top
+    // speed), so a slow simulation step doesn't freeze them. Never past a
+    // quarter second, and never back in time.
+    let speed = crate::sim::SPEEDS[control.speed.min(crate::sim::SPEEDS.len() - 1)];
+    let actual = out.stats.speed.max(0.0);
+    let rate = if actual > 0.0 { speed.min(actual * 1.05) } else if speed.is_finite() { speed } else { 0.0 };
+    let ahead = match out.at {
+        Some(at) if !control.paused && out.stats.launched_at.is_none() => at.elapsed().as_secs_f64().min(0.25) * rate,
+        _ => 0.0,
+    };
+    let target = out.stats.time + ahead;
+    // The moment drawn runs on a steady clock: every frame it moves on by
+    // the frame's time at the game's speed, and eases toward the
+    // simulation's own time rather than jumping to it or waiting for it, so
+    // drones and ships move smoothly at the screen's frame rate. (Back to
+    // the simulation's time at once after a jump: a new body or a load.)
+    let dt = time.delta_secs_f64().min(0.1);
+    let paused = control.paused || out.stats.launched_at.is_some();
+    let t = if fleet.started {
+        let mut c = fleet.clock + if paused { 0.0 } else { dt * rate };
+        let err = target - c;
+        if err.abs() > 2.0 * rate.max(1.0) + 1.0 {
+            c = target;
+        } else {
+            c += err * (dt * 3.0).min(1.0);
+        }
+        c
+    } else {
+        target
+    };
+    fleet.prev_clock = fleet.started.then_some(fleet.clock);
+    fleet.clock = t;
+    fleet.started = true;
 }
 
 /// The meshes: one per kind of drone, and one for the hubs.
@@ -61,7 +112,6 @@ struct Meshes {
 #[derive(Default)]
 struct DrawMem {
     flora: Vec<bool>,
-    clock: Option<f64>,
     /// Shoving in flight (see `formation`).
     shoves: Shoves,
     /// Drones flying back onto their path after it changed (see `Catch`).
@@ -312,66 +362,37 @@ pub(crate) fn rot_square(out: &mut Vec<[f32; 3]>, cx: f32, cy: f32, h: f32, angl
     out.extend_from_slice(&[a, b, c, a, c, d]);
 }
 
-/// The flocks' flow fields, found by where their haulers were, so a drone
-/// flying out from or home to its hauler on screen can be drawn following
-/// the way round through open space instead of straight through rock.
+/// The flocks' flow fields (by flock), so a drone flying out from or
+/// home to its flock on screen is drawn following the way round through
+/// open space instead of straight through rock (see `Leg::drawn_at`), and
+/// the highest ground (drops from the mother swarm fly over it).
 #[derive(Default)]
 pub struct PathIndex {
     version: u64,
-    fields: Vec<std::sync::Arc<dft_sim::flow::FlowField>>,
-    /// Fields by 16 m square of their hub.
-    grid: std::collections::HashMap<(i64, i64), Vec<usize>>,
+    fields: Vec<Option<std::sync::Arc<dft_sim::flow::FlowField>>>,
+    sky: f64,
 }
 
 impl PathIndex {
-    fn set(&mut self, version: u64, fields: Vec<std::sync::Arc<dft_sim::flow::FlowField>>) {
+    fn set(&mut self, version: u64, fields: Vec<Option<std::sync::Arc<dft_sim::flow::FlowField>>>, sky: f64) {
         self.version = version;
-        self.grid.clear();
-        for (i, f) in fields.iter().enumerate() {
-            let k = ((f.hub.0 / 16.0).floor() as i64, (f.hub.1 / 16.0).floor() as i64);
-            self.grid.entry(k).or_default().push(i);
-        }
         self.fields = fields;
+        self.sky = sky;
     }
 
-    /// The field swept from within 8 m of `p`, if any.
-    fn near(&self, p: (f64, f64)) -> Option<&dft_sim::flow::FlowField> {
-        let (kx, ky) = ((p.0 / 16.0).floor() as i64, (p.1 / 16.0).floor() as i64);
-        let mut best: Option<(f64, usize)> = None;
-        for dy in -1..=1 {
-            for dx in -1..=1 {
-                for &i in self.grid.get(&(kx + dx, ky + dy)).into_iter().flatten() {
-                    let h = self.fields[i].hub;
-                    let d = (h.0 - p.0).powi(2) + (h.1 - p.1).powi(2);
-                    if d <= 64.0 && best.is_none_or(|(bd, _)| d < bd) {
-                        best = Some((d, i));
-                    }
-                }
-            }
-        }
-        best.map(|(_, i)| &*self.fields[i])
+    /// Where a drone is at game time t, its whole way.
+    pub fn at(&self, leg: &Leg, t: f64) -> (f64, f64) {
+        leg.drawn_at(t, &self.fields, self.sky)
     }
 
-    /// Where a drone is at game time t: along its flock's field when it is
-    /// flying out from its hauler or home to it, else straight.
-    fn at(&self, leg: &Leg, t: f64) -> (f64, f64) {
-        if leg.state == 1 || leg.state == 2 {
-            let (hub_end, other) = if leg.state == 1 { (leg.from, leg.to) } else { (leg.to, leg.from) };
-            if let Some(f) = self.near(hub_end) {
-                let total = f.dist_m(other.0, other.1).or_else(|| f.reach_m((other.0.floor() as i64, other.1.floor() as i64)));
-                if let Some(total) = total {
-                    let s = (t - leg.t0).max(0.0) * leg.speed;
-                    if s >= total {
-                        return leg.to;
-                    }
-                    let from_hub = if leg.state == 1 { s } else { total - s };
-                    if let Some(p) = f.along(other, from_hub) {
-                        return p;
-                    }
-                }
-            }
-        }
-        leg.at(t)
+    /// The same, zoomed out (short flights straight; see `Leg::drawn_at_coarse`).
+    pub fn coarse(&self, leg: &Leg, t: f64) -> (f64, f64) {
+        leg.drawn_at_coarse(t, &self.fields, self.sky)
+    }
+
+    /// Where it charts the fog far from the screen (see `Leg::charted_at`).
+    pub fn charted(&self, leg: &Leg, t: f64) -> (f64, f64) {
+        leg.charted_at(t, self.sky)
     }
 }
 
@@ -416,7 +437,6 @@ fn draw(
     swarm: Res<crate::swarmview::SwarmNow>,
     lights: Res<crate::lights::Lights>,
     mut air: Local<AirLook>,
-    mut paths: Local<PathIndex>,
     mut mem: Local<DrawMem>,
 ) {
     let mem = &mut *mem;
@@ -437,18 +457,18 @@ fn draw(
         for (i, leg) in changes {
             let i = i as usize;
             if i >= fleet.legs.len() {
-                fleet.legs.resize(i + 1, Leg { from: (0.0, 0.0), to: (0.0, 0.0), t0: 0.0, speed: 0.0, state: Leg::GONE, cloud: 0 });
+                fleet.legs.resize(i + 1, Leg { from: (0.0, 0.0), to: (0.0, 0.0), t0: 0.0, speed: 0.0, state: Leg::GONE, cloud: 0, flock: Leg::NO_FLOCK });
             }
             // Where it was last drawn, against where its new path has it:
             // it flies the difference rather than jumping.
             let old = fleet.legs[i];
             let id = i as u32;
-            match mem.clock {
+            match fleet.prev_clock {
                 // (Zoomed out to flock marks, no drone is drawn: none flies back.)
                 Some(tc) if !icons && old.state <= 2 && leg.state <= 2 => {
-                    let was = paths.at(&old, tc);
+                    let was = fleet.paths.at(&old, tc);
                     let off = mem.catch.get(&id).map_or((0.0, 0.0), |c| c.at(tc));
-                    let now = paths.at(&leg, tc);
+                    let now = fleet.paths.at(&leg, tc);
                     let d = (was.0 + off.0 - now.0, was.1 + off.1 - now.1);
                     let c = Catch { off: d, t0: tc, speed: leg.speed.max(10.0) };
                     if c.left() > 1.0 && c.left() < Catch::MAX_M {
@@ -463,43 +483,9 @@ fn draw(
             }
             fleet.legs[i] = leg;
         }
-        let control = *run.0.control.lock();
-        // Move the drones on from when the simulation published to now, at
-        // the speed the game is actually running (the speed asked for, or
-        // slower if the simulation can't keep up; as fast as it is going at
-        // the top speed), so a slow simulation step doesn't freeze them.
-        // Never past a quarter second, and never back in time.
-        let speed = crate::sim::SPEEDS[control.speed.min(crate::sim::SPEEDS.len() - 1)];
-        let actual = out.stats.speed.max(0.0);
-        let rate = if actual > 0.0 { speed.min(actual * 1.05) } else if speed.is_finite() { speed } else { 0.0 };
-        let ahead = match out.at {
-            Some(at) if !control.paused && out.stats.launched_at.is_none() => at.elapsed().as_secs_f64().min(0.25) * rate,
-            _ => 0.0,
-        };
-        let target = out.stats.time + ahead;
-        // The moment drawn runs on a steady clock: every frame it moves on by
-        // the frame's time at the game's speed, and eases toward the
-        // simulation's own time rather than jumping to it or waiting for it,
-        // so drones and ships move smoothly at the screen's frame rate. (Back
-        // to the simulation's time at once after a jump: a new body or a load.)
-        let dt = time.delta_secs_f64().min(0.1);
-        let paused = control.paused || out.stats.launched_at.is_some();
-        let t = match mem.clock {
-            Some(c) => {
-                let mut c = c + if paused { 0.0 } else { dt * rate };
-                let err = target - c;
-                if err.abs() > 2.0 * rate.max(1.0) + 1.0 {
-                    c = target;
-                } else {
-                    c += err * (dt * 3.0).min(1.0);
-                }
-                c
-            }
-            None => target,
-        };
-        mem.clock = Some(t);
-        if out.fields_version != paths.version {
-            paths.set(out.fields_version, out.fields.clone());
+        let t = fleet.clock;
+        if out.fields_version != fleet.paths.version || fleet.paths.sky == 0.0 {
+            fleet.paths.set(out.fields_version, out.fields.clone(), body.0.max_radius);
         }
         (t, out.haulers.clone(), (out.units.clone(), out.animals.clone()), out.chunks.clone(), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()), if icons { out.hubs.clone() } else { Vec::new() })
     };
@@ -559,12 +545,13 @@ fn draw(
             }
         }
         let cells = &grid.cells;
+        let paths = &fleet.paths;
         fleet.legs.par_chunk_map(pool, chunk, |ci, legs| {
             for (j, leg) in legs.iter().enumerate() {
                 if leg.state > 2 {
                     continue;
                 }
-                let (x, y) = caught(ci * chunk + j, leg.at(now));
+                let (x, y) = caught(ci * chunk + j, paths.coarse(leg, now));
                 if x < l || x > r || y < b || y > t {
                     continue;
                 }
@@ -603,7 +590,7 @@ fn draw(
         // Close enough to see each drone: draw each where it is, moving as
         // part of a swirling cloud (see `swirl`).
         let real_t = time.elapsed_secs_f64();
-        let paths = &*paths;
+        let paths = &fleet.paths;
         // Big enough on screen to show each one's shape (cells 2 px or more)?
         let detailed = real_half * 2.0 >= 6.0;
         let recent = &recent;

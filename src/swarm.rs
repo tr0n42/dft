@@ -3874,7 +3874,7 @@ impl Sim {
 
     fn leg_of(&self, d: &Drone, speed: f64) -> Leg {
         if !d.alive {
-            return Leg { from: (0.0, 0.0), to: (0.0, 0.0), t0: 0.0, speed: 0.0, state: Leg::GONE, cloud: 0 };
+            return Leg { from: (0.0, 0.0), to: (0.0, 0.0), t0: 0.0, speed: 0.0, state: Leg::GONE, cloud: 0, flock: Leg::NO_FLOCK };
         }
         let t0 = d.leg_start as f64 * self.eco.tick_s;
         let centre = |c: (i64, i64)| (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
@@ -3883,13 +3883,13 @@ impl Sim {
             // mother swarm, not drawn as one of a cloud round its hauler.
             Phase::Idle if d.fails >= 1 => {
                 let h = &self.hubs[d.home.min(self.hubs.len() - 1)];
-                Leg { from: (h.x, h.y), to: (h.x, h.y), t0, speed, state: Leg::RESTING, cloud: 0 }
+                Leg { from: (h.x, h.y), to: (h.x, h.y), t0, speed, state: Leg::RESTING, cloud: 0, flock: Leg::NO_FLOCK }
             }
             Phase::Idle | Phase::Waiting => {
                 let p = self.dock_pos(d.home.min(self.hubs.len() - 1), d.dock as usize);
-                Leg { from: p, to: p, t0, speed, state: 0, cloud: 0 }
+                Leg { from: p, to: p, t0, speed, state: 0, cloud: 0, flock: Leg::NO_FLOCK }
             }
-            Phase::Outbound { cell, from, .. } => Leg { from, to: centre(cell), t0, speed, state: 1, cloud: d.off_dock as u8 },
+            Phase::Outbound { cell, from, .. } => Leg { from, to: centre(cell), t0, speed, state: 1, cloud: d.off_dock as u8, flock: d.home as u32 },
             Phase::Inbound { hub, from } => {
                 let to = self.dock_pos(hub, d.dock as usize);
                 // Dropping from the mother swarm: as fast as it takes.
@@ -3902,7 +3902,7 @@ impl Sim {
                     let fly_s = d.due.saturating_sub(d.leg_start) as f64 * self.eco.tick_s;
                     if fly_s > 0.0 { (way / fly_s).clamp(0.35 * speed, speed) } else { speed }
                 };
-                Leg { from, to, t0, speed, state: 2, cloud: 2 | d.off_dock as u8 }
+                Leg { from, to, t0, speed, state: 2, cloud: 2 | d.off_dock as u8, flock: hub as u32 }
             }
         }
     }
@@ -4082,6 +4082,9 @@ pub struct Leg {
     /// Drawn joining the cloud waiting at a drop-off point: 1, it sets off
     /// from its place in one; 2, it ends in one.
     pub cloud: u8,
+    /// The flock whose flow field it flies along (its hub's index, the
+    /// index into `Sim::fields`), or NO_FLOCK: straight.
+    pub flock: u32,
 }
 
 /// Drones whose flight leg changed (see `Sim::take_leg_changes`).
@@ -4103,6 +4106,8 @@ pub enum LegChanges {
 }
 
 impl Leg {
+    /// No flock's field to fly along.
+    pub const NO_FLOCK: u32 = u32::MAX;
     /// The state of a slot whose drone is gone.
     pub const GONE: u8 = 255;
     /// Out of work, resting in the mother swarm (not drawn).
@@ -4118,7 +4123,169 @@ impl Leg {
         let k = ((t - self.t0).max(0.0) * self.speed / dist).min(1.0);
         (self.from.0 + dx * k, self.from.1 + dy * k)
     }
+
+    /// Where the drone is at game time `t` as it is drawn (and charts the
+    /// fog): never straight through rock where there is a better way
+    /// (Benjamin, 26 Nov: cutters were seen flying through the planet).
+    /// - Flying out from its flock's drop-off point, home to one, or from
+    ///   one cut to the next: through its flock's flow field (`fields`, by
+    ///   flock; see `leg_way`).
+    /// - Dropping from the mother swarm (it starts above `sky_r`, the
+    ///   highest ground): up and round at the mother swarm's height, then
+    ///   straight down onto the drop-off point, as a hauler flies, in the
+    ///   time the straight drop would take.
+    /// - Anything else (no field, or no way through it): straight.
+    /// It arrives when the straight flight would (the simulation times
+    /// each flight), faster along a longer way.
+    pub fn drawn_at(&self, t: f64, fields: &[Option<std::sync::Arc<FlowField>>], sky_r: f64) -> (f64, f64) {
+        if self.state != 1 && self.state != 2 {
+            return self.at(t);
+        }
+        let (dx, dy) = (self.to.0 - self.from.0, self.to.1 - self.from.1);
+        let straight = (dx * dx + dy * dy).sqrt();
+        if straight < 1e-9 {
+            return self.to;
+        }
+        let gone = (t - self.t0).max(0.0) * self.speed;
+        if self.is_drop(sky_r) {
+            let r0 = len2(self.from).sqrt();
+            let r1 = len2(self.to).sqrt();
+            let cruise = r0.max(r1).max(sky_r + HAULER_CLEAR_M);
+            return route_at(self.from, self.to, cruise, gone / straight);
+        }
+        let k = (gone / straight).min(1.0);
+        let own = fields.get(self.flock as usize).and_then(|f| f.as_deref());
+        // (Which ends are drop-off points, hanging in the air over the
+        // field: only those may drop into it from above.)
+        let docks = (self.state == 1 && self.cloud & 1 == 1, self.state == 2);
+        if let Some(p) = own.and_then(|f| leg_way(f, self.from, self.to, docks, k)) {
+            return p;
+        }
+        // An end its field can't take (a flock far off, work past the
+        // field's edge): out of the ground the way its field (or any field
+        // round it) goes, up, round and down as a hauler flies, and in.
+        if straight > LEG_SKY_MIN_M {
+            return leg_over(fields, own, self.from, self.to, sky_r, k);
+        }
+        self.at(t)
+    }
 }
+
+impl Leg {
+    /// Whether it is dropping from the mother swarm (it starts above
+    /// `sky_r`, the highest ground).
+    fn is_drop(&self, sky_r: f64) -> bool {
+        self.state == 2 && self.from.0 * self.from.0 + self.from.1 * self.from.1 > sky_r * sky_r
+    }
+
+    /// As `drawn_at`, for every drone at once zoomed out: a drop over the
+    /// top, a long flight (over COARSE_M) its whole way, a short one
+    /// straight (tens of metres are a pixel or two there).
+    pub fn drawn_at_coarse(&self, t: f64, fields: &[Option<std::sync::Arc<FlowField>>], sky_r: f64) -> (f64, f64) {
+        if self.is_drop(sky_r) || len2((self.to.0 - self.from.0, self.to.1 - self.from.1)) > LEG_COARSE_M * LEG_COARSE_M {
+            return self.drawn_at(t, fields, sky_r);
+        }
+        self.at(t)
+    }
+
+    /// Where it charts the fog when nobody is looking closely: a drop
+    /// along its way over the top, anything else at the end of its flight
+    /// it is nearer (both ends are open ground or the rock it cuts; the
+    /// way between may not be).
+    pub fn charted_at(&self, t: f64, sky_r: f64) -> (f64, f64) {
+        if self.state != 1 && self.state != 2 {
+            return self.at(t);
+        }
+        if self.is_drop(sky_r) {
+            return self.drawn_at(t, &[], sky_r);
+        }
+        let d = len2((self.to.0 - self.from.0, self.to.1 - self.from.1)).sqrt();
+        if d < 1e-9 || (t - self.t0).max(0.0) * self.speed >= 0.5 * d { self.to } else { self.from }
+    }
+}
+
+/// Zoomed out, flights shorter than this are drawn straight (m).
+const LEG_COARSE_M: f64 = 300.0;
+
+/// The field to climb out of the ground from `p` by: its own flock's if
+/// `p` is in it, else any whose ground it is in. None: `p` is in open air
+/// over the fields (or no field has it).
+fn field_at<'a>(fields: &'a [Option<std::sync::Arc<FlowField>>], own: Option<&'a FlowField>, p: (f64, f64)) -> Option<&'a FlowField> {
+    if let Some(f) = own.filter(|f| f.way_m(p).is_some()) {
+        return Some(f);
+    }
+    fields.iter().flatten().map(|f| &**f).find(|f| f.covers(p) && f.way_m(p).is_some())
+}
+
+/// A share `k` of the way from `a` to `b` over the top: from `a` along
+/// the field it is in to that field's hub (if it is in one), up to
+/// cruising height and round, down to the hub of the field `b` is in, and
+/// along it to `b`.
+fn leg_over(fields: &[Option<std::sync::Arc<FlowField>>], own: Option<&FlowField>, a: (f64, f64), b: (f64, f64), sky_r: f64, k: f64) -> (f64, f64) {
+    let (fa, fb) = (field_at(fields, own, a), field_at(fields, own, b));
+    let (sa, sb) = (fa.map_or(a, |f| f.hub), fb.map_or(b, |f| f.hub));
+    let (wa, wb) = (fa.and_then(|f| f.way_m(a)).unwrap_or(0.0), fb.and_then(|f| f.way_m(b)).unwrap_or(0.0));
+    let (ra, rb) = (len2(sa).sqrt(), len2(sb).sqrt());
+    let arc = ang_dist(sa.1.atan2(sa.0), sb.1.atan2(sb.0)) * ra.max(rb);
+    // (Far round: over the highest ground anywhere; near: just over both.)
+    let cruise = if arc > LEG_FAR_ARC_M { ra.max(rb).max(sky_r + HAULER_CLEAR_M) } else { ra.max(rb) + LEG_CRUISE_M };
+    let sky = route_len(sa, sb, cruise);
+    let total = wa + sky + wb;
+    if total < 1e-9 {
+        return b;
+    }
+    let s = k * total;
+    if s <= wa {
+        return fa.and_then(|f| f.along(a, wa - s)).unwrap_or(sa);
+    }
+    if s <= wa + sky {
+        return route_at(sa, sb, cruise, if sky > 0.0 { (s - wa) / sky } else { 1.0 });
+    }
+    fb.and_then(|f| f.along(b, s - wa - sky)).unwrap_or(b)
+}
+
+fn len2(p: (f64, f64)) -> f64 {
+    p.0 * p.0 + p.1 * p.1
+}
+
+/// Shorter flights with no way through a field are flown straight (m).
+const LEG_SKY_MIN_M: f64 = 30.0;
+/// Over the top: this high over the higher end, or over the highest
+/// ground on the body once the ends are this far apart round it (m).
+const LEG_CRUISE_M: f64 = 30.0;
+const LEG_FAR_ARC_M: f64 = 400.0;
+
+/// A share `k` (0 to 1) of the way from `a` to `b` through field `f`: from
+/// each end into the field (an end that is a drop-off point, `docks`,
+/// hangs over it, see `FlowField::way_in`), down from one to where the two ways meet, and up
+/// to the other. None: no way through it.
+fn leg_way(f: &FlowField, a: (f64, f64), b: (f64, f64), docks: (bool, bool), k: f64) -> Option<(f64, f64)> {
+    let drop = |dock: bool| if dock { LEG_DROP_IN_M } else { 0.0 };
+    let (ea, eb) = (f.way_in(a, drop(docks.0))?, f.way_in(b, drop(docks.1))?);
+    let (da, db, dj) = (f.way_m(ea)?, f.way_m(eb)?, f.meet_m(ea, eb)?);
+    let (xa, xb) = (dist2(a, ea).sqrt(), dist2(b, eb).sqrt());
+    let (la, lb) = ((da - dj).max(0.0), (db - dj).max(0.0));
+    let total = xa + la + lb + xb;
+    if total < 1e-9 {
+        return Some(b);
+    }
+    let s = k * total;
+    let lerp = |p: (f64, f64), q: (f64, f64), u: f64| (p.0 + (q.0 - p.0) * u, p.1 + (q.1 - p.1) * u);
+    if s <= xa {
+        return Some(lerp(a, ea, if xa > 0.0 { s / xa } else { 1.0 }));
+    }
+    if s <= xa + la {
+        return f.along(ea, da - (s - xa));
+    }
+    if s <= xa + la + lb {
+        return f.along(eb, dj + (s - xa - la));
+    }
+    Some(lerp(eb, b, if xb > 0.0 { (s - xa - la - lb) / xb } else { 1.0 }))
+}
+
+/// How far below a drop-off point its way into the flock's field may be
+/// (m): it hangs up to dock_stack_max_m over the ground.
+const LEG_DROP_IN_M: f64 = 400.0;
 
 /// What each `Sim::prof` entry measures.
 pub const PROF_NAMES: [&str; 8] = ["drone events", "sand and heat", "rock bodies", "per-second work", "events: work search", "per-second: building", "per-second: packet", "per-second: orbit and landing"];

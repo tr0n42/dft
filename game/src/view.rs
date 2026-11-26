@@ -140,12 +140,14 @@ fn controls(
     }
     if kx != 0.0 || ky != 0.0 {
         cam.manual(now);
+        cam.follow = None;
         let speed = view.w.max(view.h) * view.mpp / 1.5;
         view.x += kx * speed * dt;
         view.y += ky * speed * dt;
     }
     if keys.just_pressed(KeyCode::Home) || buttons.just_pressed(MouseButton::Middle) {
         glide.to = None;
+        cam.follow = None;
         if cam.director {
             cam.resume();
         } else {
@@ -154,6 +156,7 @@ fn controls(
     }
     if (buttons.pressed(MouseButton::Right) || buttons.pressed(MouseButton::Left)) && motion.delta != Vec2::ZERO {
         cam.manual(now);
+        cam.follow = None;
         let (dx, dy) = (-(motion.delta.x as f64) * view.mpp, motion.delta.y as f64 * view.mpp);
         view.x += dx;
         view.y += dy;
@@ -182,7 +185,8 @@ fn controls(
         let from = glide.to.map_or(view.mpp, |g| g.0);
         let new = (from * f).clamp(1.0 / 64.0, max_mpp.max(1.0 / 64.0));
         // The point under the cursor stays still as the zoom glides there.
-        let off = windows.single().ok().and_then(|w| w.cursor_position()).map_or((0.0, 0.0), |c| (c.x as f64 - view.w / 2.0, view.h / 2.0 - c.y as f64));
+        // (Following a unit: about the unit, in the middle.)
+        let off = if cam.follow.is_some() { None } else { windows.single().ok().and_then(|w| w.cursor_position()) }.map_or((0.0, 0.0), |c| (c.x as f64 - view.w / 2.0, view.h / 2.0 - c.y as f64));
         let at = (view.x + off.0 * view.mpp, view.y + off.1 * view.mpp);
         glide.to = Some((new, at, off));
     }

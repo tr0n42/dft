@@ -39,6 +39,9 @@ pub struct Control {
     pub view: Option<([i64; 4], f64)>,
     /// Ignore the screen and move everything everywhere (dev panel).
     pub full_detail: bool,
+    /// Make one of these now, free, to watch it (the Watch panel); the
+    /// answer comes back in `Out::summoned`.
+    pub summon: Option<dft_sim::production::Unit>,
     pub quit: bool,
 }
 
@@ -199,11 +202,14 @@ pub struct Out {
     pub chunks: Vec<dft_sim::bodies::AirCell>,
     /// The flocks' flow fields (drones on screen fly along them), with the
     /// simulation's count of rebuilds when they were taken.
-    pub fields: Vec<Arc<dft_sim::flow::FlowField>>,
+    /// (By flock: a drone's leg names its flock's.)
+    pub fields: Vec<Option<Arc<dft_sim::flow::FlowField>>>,
     pub fields_version: u64,
     pub stats: Stats,
     /// When it was published (the screen moves drones on from here).
     pub at: Option<Instant>,
+    /// The answer to `Control::summon`: the new unit's id, or why none.
+    pub summoned: Option<(dft_sim::production::Unit, Result<u32, String>)>,
     /// Changed places since the screen last took them.
     pub blocks: HashSet<(i64, i64)>,
     /// The 8 x 8-cell squares whose cells changed in the screen's copy of the
@@ -429,6 +435,13 @@ fn run(shared: &Shared) {
             }
             // No fabricator or bays yet: units are built the moment they're ordered.
             s.instant_build = true;
+            // (The control is let go before the screen's copy is taken: the
+            // screen takes them the other way round.)
+            let summon = shared.control.lock().summon.take();
+            if let Some(u) = summon {
+                let r = s.summon(u);
+                shared.out.lock().summoned = Some((u, r));
+            }
             for (at, size, scrap) in std::mem::take(&mut *shared.blasts.lock()) {
                 s.big_boom(at, size, scrap);
             }
@@ -569,7 +582,7 @@ fn run(shared: &Shared) {
                 let mother = (s.mother.centre, s.mother.half, s.mother.radius);
                 let fields = if s.fields_version != fields_seen {
                     fields_seen = s.fields_version;
-                    Some(s.fields.iter().flatten().cloned().collect::<Vec<_>>())
+                    Some(s.fields.clone())
                 } else {
                     None
                 };
@@ -740,7 +753,7 @@ fn run(shared: &Shared) {
                 // stderr, for tracking down memory.)
                 if std::env::var("DFT_SIZES").is_ok() && sizes_at.elapsed() >= Duration::from_secs(30) {
                     sizes_at = Instant::now();
-                    eprintln!("t {:.0}: {:?}; out legs {} changes {} hubs {} fields {} blocks {} rects {} fine {}", s.time(), s.sizes(), out.leg_full.as_ref().map_or(0, |v| v.len()), out.leg_changes.len(), out.hubs.len(), out.fields.len(), out.blocks.len(), out.rects.len(), out.fine.len());
+                    eprintln!("t {:.0}: {:?}; out legs {} changes {} hubs {} fields {} blocks {} rects {} fine {}", s.time(), s.sizes(), out.leg_full.as_ref().map_or(0, |v| v.len()), out.leg_changes.len(), out.hubs.len(), out.fields.iter().flatten().count(), out.blocks.len(), out.rects.len(), out.fine.len());
                 }
                 if far_drawn_at.elapsed() >= Duration::from_secs(2) && far_drawn != s.world.far.levels {
                     far_drawn_at = Instant::now();

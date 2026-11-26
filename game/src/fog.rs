@@ -175,7 +175,7 @@ fn toggle(keys: Res<ButtonInput<KeyCode>>, mut fog: ResMut<Fog>) {
 
 /// Chart what the drones and landing points can see (a share of the swarm
 /// each frame).
-fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate::Run>, body: Res<crate::Body>, time: Res<Time<Real>>) {
+fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate::Run>, body: Res<crate::Body>, time: Res<Time<Real>>, view: Res<View>) {
     let id = std::sync::Arc::as_ptr(&body.0) as usize;
     if fog.body != id {
         // A new body: forget the charts, and learn its outline.
@@ -271,13 +271,29 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
     let start = fog.cursor.min(n);
     let end = (start + per).min(n);
     fog.cursor = if end >= n { 0 } else { end };
-    let parts = (&fleet.legs[start..end]).par_chunk_map(ComputeTaskPool::get(), 8192, |_, legs| {
+    // Where each is: near the screen, zoomed in, its whole way as drawn
+    // (round through open space, never straight through rock); elsewhere a
+    // cheaper place that is never deep in rock either (see
+    // `Leg::charted_at`). Benjamin, 26 Nov: drones charted straight lines
+    // through the planet, clearing great swathes of fog.
+    let paths = &fleet.paths;
+    let near = if view.mpp < 2.0 {
+        let (l, b, r, t) = view.bounds();
+        let m = 0.5 * (r - l).max(t - b);
+        Some((l - m, b - m, r + m, t + m))
+    } else {
+        None
+    };
+    // (Small chunks: a frame's share is a few thousand drones, and placing
+    // one along its way costs about a microsecond; all cores share it.)
+    let parts = (&fleet.legs[start..end]).par_chunk_map(ComputeTaskPool::get(), 512, |_, legs| {
         let mut set = HashSet::new();
+        let inside = |p: (f64, f64)| near.is_some_and(|(l, b, r, t)| p.0 >= l && p.0 <= r && p.1 >= b && p.1 <= t);
         for leg in legs {
             if leg.state > 2 {
                 continue;
             }
-            let (x, y) = leg.at(t);
+            let (x, y) = if inside(leg.from) || inside(leg.to) { paths.at(leg, t) } else { paths.charted(leg, t) };
             set.insert(cell(x, y));
         }
         set

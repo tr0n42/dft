@@ -31,6 +31,8 @@
 //!   --frames <n>          with --screenshot: n pictures, 4 frames apart
 //!   --view <x>,<y>,<mpp>  where to look (metres, and metres per pixel)
 //!   --watch <unit>        keep the view on the first unit of a kind (forester, sapper...)
+//!   --summon <unit>       press that unit's Watch button 30 game seconds in (sapper, tunneler,
+//!                         heatsink, forester, abductor)
 //!   --size <w>x<h>        a window this size (default: maximized)
 //!   --windowed            a 1600x900 window rather than maximized
 //!   --continue            load the newest save (saves folder)
@@ -42,6 +44,9 @@
 //! pan, the wheel (or Page Up / Page Down) zooms toward the cursor, Home
 //! shows the whole body, C turns the action cam on and off. Space pauses, 1 to 8 pick a speed (1x, 2x, 5x, 10x,
 //! 30x, 100x, 300x, as fast as possible), + and - step it. F1: dev panel.
+//! The Watch panel (bottom left): a button per specialist makes one free at
+//! once and the camera follows it; drag or pan to let go (the wheel still
+//! zooms, about the unit).
 //! F2: fog of war on and off. F5 saves, F9 loads the newest save. The game
 //! also autosaves every five minutes and on quitting (the last three kept).
 mod bench;
@@ -67,6 +72,7 @@ mod rig;
 mod tiles;
 mod units;
 mod view;
+mod watch;
 
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
@@ -101,6 +107,8 @@ pub struct Options {
     pub view: Option<(f64, f64, f64)>,
     /// Keep the view on the first unit of this kind (--watch forester).
     pub watch: Option<String>,
+    /// Press this unit's Watch button 30 game seconds in (--summon sapper).
+    pub summon: Option<String>,
     pub size: (u32, u32),
     /// A window of `size` (--size, --windowed) rather than maximized.
     pub windowed: bool,
@@ -136,6 +144,7 @@ impl Options {
             frames: 1,
             view: None,
             watch: None,
+            summon: None,
             size: (1600, 900),
             windowed: false,
             load: None,
@@ -240,6 +249,7 @@ impl Options {
                 "--screenshot" => o.screenshot = Some(PathBuf::from(val(i)?)),
                 "--frames" => o.frames = val(i)?.parse().map_err(|_| "--frames takes a number")?,
                 "--watch" => o.watch = Some(val(i)?),
+                "--summon" => o.summon = Some(val(i)?),
                 "--view" => {
                     let v: Vec<f64> = val(i)?.split(',').filter_map(|x| x.parse().ok()).collect();
                     if v.len() != 3 {
@@ -383,7 +393,7 @@ fn main() {
         }
     };
     let Start { planet, sim, source, restore } = start;
-    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, focus: None, view: None, full_detail: o.full_detail, quit: false };
+    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, focus: None, view: None, full_detail: o.full_detail, summon: None, quit: false };
     let script = match o.camera.as_deref().map(bench::parse) {
         Some(Ok(steps)) => Some(bench::Script::new(steps)),
         Some(Err(e)) => {
@@ -436,7 +446,7 @@ fn main() {
         .insert_resource(Body(planet, Arc::new(source)))
         .insert_resource(Run(run))
         .insert_resource(o)
-        .add_plugins((view::ViewPlugin, tiles::TilesPlugin, drones::DronesPlugin, dev::DevPlugin, log::LogPlugin, bench::BenchPlugin, stars::StarsPlugin, fog::FogPlugin, camera::CameraPlugin, saves::SavesPlugin, eyedropper::EyedropperPlugin, stockpile::StockpilePlugin, finder::FinderPlugin))
+        .add_plugins((view::ViewPlugin, tiles::TilesPlugin, drones::DronesPlugin, dev::DevPlugin, log::LogPlugin, bench::BenchPlugin, stars::StarsPlugin, fog::FogPlugin, camera::CameraPlugin, saves::SavesPlugin, eyedropper::EyedropperPlugin, stockpile::StockpilePlugin, finder::FinderPlugin, watch::WatchPlugin))
         .add_plugins((storage::StoragePlugin, swarmview::SwarmViewPlugin, lights::LightsPlugin, fx::FxPlugin))
         .add_systems(Startup, |mut c: Commands| {
             c.spawn(Camera2d);

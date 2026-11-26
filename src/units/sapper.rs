@@ -153,8 +153,9 @@ impl Sim {
     }
 
     pub(super) fn launch_sapper(&mut self) {
-        // Its charge, as cast when its bay started it.
-        let fissile = self.units.charges.pop_front().unwrap_or_else(|| self.fissile_per_charge());
+        // Its charge, as cast when its bay started it (one made free to
+        // watch, a new one: it takes nothing the swarm made).
+        let fissile = if self.units.summoning { self.fissile_per_charge() } else { self.units.charges.pop_front().unwrap_or_else(|| self.fissile_per_charge()) };
         // No flock on view struggling, but a far sector is: it goes off
         // there, as math.
         let near = self.eco.units.sapper.stall_ratio <= 0.0 || !self.stalled_sites().is_empty();

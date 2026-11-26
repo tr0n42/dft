@@ -251,3 +251,47 @@ obsidian skin) went from minutes to over 50 minutes.
     at most 96 columns, every 32 m, 3 cells. Under 0.5 ms; stage 3 280 s
     real against the baseline's 278.
   - Heat sinks 1.4 ms (baseline 2.7), foresters 0.65 (1.25), sappers 0.15.
+
+### The Watch panel and cutters through the planet (26 Nov, afternoon)
+
+Benjamin asked for a button that makes the right specialist at once and
+follows it, and reported cutters flying through the planet, clearing great
+swathes of fog.
+
+**Watch panel** (`game/src/watch.rs`): a button per specialist, bottom left.
+`Control::summon` asks the sim thread; `Sim::summon` (platform.rs) launches
+through the normal launch code, free (`Units::summoning`: a sapper casts its
+own charge rather than taking a stocked one; no parts, no queue), and
+answers with the id or why not (no magma, no plants...) in `Out::summoned`.
+The camera follows (`camera::Follow`, ahead of the director): a 1.5 s glide
+in position and log zoom to 0.25 m/px, then locked on, at the drones' own
+clock (`advance_clock`, moved to PreUpdate so the camera and the drawing see
+the same moment). Drag, keys, Home or middle click let go; the wheel zooms
+about the unit. A unit gone (blew up, retired) holds 3 s, then lets go.
+Pitfall: `UnitView.lift` is a walker's height but a tunneler's or heat
+sink's crew size; the view is raised by it only for walkers.
+`--summon <unit>` presses the button 30 game s in (for screenshots).
+
+**Cutters through rock** (`Leg::drawn_at`, swarm.rs; measured with
+`src/bin/legcheck.rs`, which counts metres of rock along every flying leg):
+not new (14 Nov drop-off points onward), just seen now. On the Dev planet,
+20k cutters, at any moment 100-1,500 legs were drawn straight through rock,
+worst 5.3 km:
+- drops from the mother swarm to a flock round the body (its nearer end):
+  kilometres; now up, round and down as a hauler flies, in the same time;
+- legs to and from drop-off points (40-100 m from the flock's hub, 60 m+ up,
+  above the field's 40 m of swept sky): the game only looked for a field
+  within 8 m of a leg's end, so they went straight. Now each leg names its
+  flock (`Leg::flock`); each end comes into the field (a drop-off point
+  straight down into it); the way runs down from one end to where the two
+  ways toward the hub meet (`FlowField::meet_m`) and up to the other;
+- ends no field takes (a far flock, work past the field's edge): out the
+  way its field goes, over the top, and in.
+After: 10-50 legs at a time, worst ~160 m (stale fields: rock settling
+into dug ground in the 15 s between sweeps; field approximations near the
+surface; a cutter deep in a cave with no field). Costs: each square's way
+down is stored once (`FlowField::down`), ~0.75 us a flying drone. The fog
+charts the full way near the screen zoomed in, else `Leg::charted_at`
+(drops over the top, else the nearer end: never deep rock); zoomed out the
+drawing uses `drawn_at_coarse` (short flights straight). The sim's own
+results don't change (only drawing uses these).

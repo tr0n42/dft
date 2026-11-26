@@ -182,6 +182,9 @@ pub struct Units {
     pub blast_hurt_haulers: u64,
     /// The tick before which no new sapper is ordered (order_gap_s).
     pub(super) next_sapper_tick: u64,
+    /// A unit is being made free to watch (see `Sim::summon`): it takes
+    /// nothing the swarm made (a sapper casts its own charge).
+    pub(super) summoning: bool,
 }
 
 /// What the ground units have done, for tests and reports.
@@ -536,6 +539,64 @@ impl Sim {
             _ => {}
         }
         self.director_log_push(format!("the replicator finishes a {}", u.name()));
+    }
+
+    /// Benjamin's "make one and watch it" button (26 Nov): a specialist of
+    /// kind `u` out of the replicator at once and free, sent to the best
+    /// work there is for it now, as the director would send it (a sapper
+    /// to the hardest-going flock in sight even if none has stalled yet,
+    /// and never a far sector's math: it is there to be watched). Its id,
+    /// or why there is none.
+    pub fn summon(&mut self, u: Unit) -> Result<u32, String> {
+        let before = self.units.next_id;
+        // (Free: nothing is taken from the swarm's stock, parts or charges.)
+        self.units.summoning = true;
+        let made = self.summon_launch(u);
+        self.units.summoning = false;
+        made?;
+        let id = self.unit_views().iter().filter(|v| v.kind == u && v.id > before).map(|v| v.id).max();
+        match id {
+            Some(id) => {
+                self.director_log_push(format!("a {} is made on request, free, to watch", u.name()));
+                Ok(id)
+            }
+            None => Err(match u {
+                Unit::Tunneler => "the tunneler found no ground worth opening".into(),
+                Unit::HeatSink => "there is no magma for a heat sink to cool".into(),
+                Unit::Forester => "there are no plants for a forester".into(),
+                Unit::Abductor => "there are no animals for an abductor".into(),
+                _ => "there is no work for a sapper here".into(),
+            }),
+        }
+    }
+
+    fn summon_launch(&mut self, u: Unit) -> Result<(), String> {
+        match u {
+            Unit::Sapper => {
+                if self.live_sites().is_empty() {
+                    return Err("no flock is digging yet for a sapper to help".into());
+                }
+                let keep = self.eco.units.sapper.stall_ratio;
+                self.eco.units.sapper.stall_ratio = 0.0;
+                self.launch_sapper();
+                self.eco.units.sapper.stall_ratio = keep;
+            }
+            Unit::Tunneler => self.launch_tunneler(),
+            Unit::HeatSink => {
+                if self.units.molten.is_empty() && self.heat_work_waiting() == 0 {
+                    self.scan_molten();
+                }
+                self.launch_bot();
+            }
+            Unit::Forester | Unit::Abductor => {
+                if u == Unit::Forester && self.units.flora.is_empty() {
+                    self.scan_flora();
+                }
+                self.launch_walker(u);
+            }
+            _ => return Err(format!("a {} isn't a specialist", u.name())),
+        }
+        Ok(())
     }
 
     /// Every second: look for work now and then, and step every specialist.
