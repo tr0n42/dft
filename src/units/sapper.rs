@@ -539,6 +539,15 @@ impl Sim {
             self.sandbox.wake_around(n);
             self.apply_sandbox(vec![crate::sandbox::Change { cell: c, from: m, to: VACUUM }, crate::sandbox::Change { cell: n, from: VACUUM, to: m }]);
             self.settling.insert(n);
+            // Melt that flowed takes its cooling with it (the queue's entry
+            // for where it was finds no melt there; before this, melt that
+            // had run never cooled and glowed on: Benjamin, 26 Nov). It cools
+            // a couple of seconds on, or with the last melt queued if later,
+            // keeping the queue in order.
+            if melt {
+                let due = (self.tick + self.ticks(2.0)).max(self.melt.back().map_or(0, |b| b.0));
+                self.melt.push_back((due, n));
+            }
             // What rested on it may follow.
             self.unsettle_around(c);
         }

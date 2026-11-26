@@ -30,6 +30,8 @@
 //!   --quit-after <s>      close by itself after s seconds of real time (benchmarks)
 //!   --screenshot <file>   draw, save a PNG of the window and quit
 //!   --frames <n>          with --screenshot: n pictures, 4 frames apart
+//!   --film <s>            with --screenshot and --frames: after the first picture
+//!                         the game plays on (1x), a picture every s seconds
 //!   --view <x>,<y>,<mpp>  where to look (metres, and metres per pixel)
 //!   --watch <unit>        keep the view on the first unit of a kind (forester, sapper...)
 //!   --summon <unit>       press that unit's Watch button 30 game seconds in (sapper, tunneler,
@@ -107,6 +109,9 @@ pub struct Options {
     pub screenshot: Option<PathBuf>,
     /// With --screenshot: this many pictures, a few frames apart (name-0.png, ...).
     pub frames: u32,
+    /// With --screenshot: the game plays on after the first picture, one
+    /// every this many real seconds (--film).
+    pub film: Option<f64>,
     pub view: Option<(f64, f64, f64)>,
     /// Keep the view on the first unit of this kind (--watch forester).
     pub watch: Option<String>,
@@ -147,6 +152,7 @@ impl Options {
             free_zoom: true,
             screenshot: None,
             frames: 1,
+            film: None,
             view: None,
             watch: None,
             summon: None,
@@ -254,6 +260,7 @@ impl Options {
                 }
                 "--screenshot" => o.screenshot = Some(PathBuf::from(val(i)?)),
                 "--frames" => o.frames = val(i)?.parse().map_err(|_| "--frames takes a number")?,
+                "--film" => o.film = Some(val(i)?.parse().map_err(|_| "--film takes seconds")?),
                 "--watch" => o.watch = Some(val(i)?),
                 "--summon" => o.summon = Some(val(i)?),
                 "--old-look" => {
@@ -563,7 +570,7 @@ fn speed_keys(keys: Res<ButtonInput<KeyCode>>, run: Res<Run>) {
 
 /// In screenshot mode: once the simulation has paused and every tile in view
 /// is drawn, save the window and quit.
-fn screenshot_when_ready(mut commands: Commands, o: Res<Options>, time: Res<Time>, tiles: Res<tiles::Tiles>, run: Res<Run>, mut state: Local<(u32, bool, u32)>, mut exit: MessageWriter<AppExit>) {
+fn screenshot_when_ready(mut commands: Commands, o: Res<Options>, time: Res<Time>, tiles: Res<tiles::Tiles>, run: Res<Run>, mut state: Local<(u32, bool, u32)>, mut filmed: Local<f64>, mut exit: MessageWriter<AppExit>) {
     let Some(path) = &o.screenshot else { return };
     let shoot = |commands: &mut Commands, n: u32| {
         let p = if o.frames > 1 {
@@ -576,6 +583,19 @@ fn screenshot_when_ready(mut commands: Commands, o: Res<Options>, time: Res<Time
     };
     if state.1 {
         state.0 += 1;
+        // Filming: playing on, a picture every so often.
+        if let Some(gap) = o.film {
+            let now = time.elapsed_secs_f64();
+            if state.2 < o.frames && now - *filmed >= gap {
+                shoot(&mut commands, state.2);
+                state.2 += 1;
+                *filmed = now;
+            }
+            if state.2 >= o.frames && now - *filmed > 1.0 {
+                exit.write(AppExit::Success);
+            }
+            return;
+        }
         // More pictures, a few frames apart.
         if state.2 < o.frames && state.0 % 4 == 0 {
             shoot(&mut commands, state.2);
@@ -597,6 +617,12 @@ fn screenshot_when_ready(mut commands: Commands, o: Res<Options>, time: Res<Time
     if state.0 >= 10 {
         shoot(&mut commands, 0);
         state.1 = true;
+        if o.film.is_some() {
+            let mut c = run.0.control.lock();
+            c.paused = false;
+            c.speed = 0;
+            *filmed = time.elapsed_secs_f64();
+        }
         state.0 = 0;
         state.2 = 1;
     }

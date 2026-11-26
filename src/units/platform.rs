@@ -658,7 +658,7 @@ impl Sim {
     // ---- For the screen ----
 
     /// Every specialist, for drawing. States: sapper 0 flying, 1 crawling,
-    /// 2 drilling, 3 armed (a = seconds armed); tunneler 0 moving, 1 boring
+    /// 2 drilling, 3 armed (a = seconds armed, c = seconds armed when it goes off); tunneler 0 moving, 1 boring
     /// (a, b = heading); heat-sink bot 0 flying, 1 working, 2 leaving (a =
     /// tentacle reach, `mark` = a tentacle tip); walker 0 falling, 1
     /// unfolding, 2 striding, 3 working (a = facing, b = bag share, c = 1
@@ -669,7 +669,7 @@ impl Sim {
         let sec = self.ticks(1.0) as f64 * self.eco.tick_s;
         let mut out = Vec::new();
         for s in &self.units.sappers {
-            out.push(UnitView { kind: Unit::Sapper, id: s.id, state: s.state as u8, from: s.prev, to: s.pos, t0: t(s.moved_at), t1: t(s.moved_at) + sec, a: s.armed_s as f32, b: s.drilled as f32, c: 0.0, mark: s.goal , lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
+            out.push(UnitView { kind: Unit::Sapper, id: s.id, state: s.state as u8, from: s.prev, to: s.pos, t0: t(s.moved_at), t1: t(s.moved_at) + sec, a: s.armed_s as f32, b: s.drilled as f32, c: self.eco.units.sapper.arm_s.ceil() as f32, mark: s.goal , lift: 0.0, sweep_from: (0.0, 0.0), fired_at: -1e9, claw: (0.0, 0.0), cut_at: -1e9 });
         }
         self.opener_views(&mut out);
         for b in &self.units.bores {

@@ -231,6 +231,9 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
     // Tunnelers see behind the fog (Benjamin, 25 Nov): round each one's head
     // as it digs, twice a landing point's reach.
     let diggers: Vec<(f64, f64)> = run.0.out.lock().units.iter().filter(|u| u.kind == dft_sim::production::Unit::Tunneler && u.state != 0).map(|u| u.to).collect();
+    // Sappers see as far round them as a drone does, down their holes too,
+    // so their glow shows (Benjamin, 26 Nov: the sapper's green light).
+    let sappers: Vec<(f64, f64)> = run.0.out.lock().units.iter().filter(|u| u.kind == dft_sim::production::Unit::Sapper).map(|u| u.to).collect();
     let (t, hubs) = {
         let out = run.0.out.lock();
         // Flocks every frame; far sectors' marks (a swarm worked as a
@@ -316,6 +319,7 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
         v
     };
     let (near, hub_near) = (disc(SENSE), disc(HUB_SENSE));
+    cells.extend(sappers.iter().map(|&(x, y)| cell(x, y)));
     for c in cells {
         for &(dx, dy) in &near {
             fog.mark((c.0 + dx, c.1 + dy), now);

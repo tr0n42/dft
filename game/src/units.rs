@@ -11,9 +11,6 @@ use bevy::prelude::*;
 use dft_sim::production::Unit;
 use dft_sim::swarm::UnitView;
 
-/// A sapper, top row first: A hull, n charge, L light.
-const SAPPER: [&str; 3] = [" AAA ", "AnnLA", "A A A"];
-
 /// A heat-sink bot, top row first: r radiator fins, A armour, D dark, z
 /// lens, L light, p strut.
 const HEATSINK: [&str; 11] = [
@@ -192,6 +189,291 @@ fn gait_of(un: &UnitView) -> crate::rig::GaitSpec {
     }
 }
 
+/// The sapper's sickly green: the unstable charge glowing through its hull.
+const SAP_GREEN: [f32; 3] = [0.6, 1.0, 0.26];
+
+/// Of the arming countdown: heating up until this share, melting down until
+/// the next, then the core collapsing into the blast.
+const SAP_HEAT_TO: f32 = 0.42;
+const SAP_MELT_TO: f32 = 0.88;
+
+/// Hull colour as it heats (0 cold armour .. 1 yellow-white).
+fn sap_heat(base: [f32; 3], h: f32) -> [f32; 3] {
+    let stops: [(f32, [f32; 3]); 4] = [(0.0, base), (0.35, [0.5, 0.1, 0.05]), (0.7, [1.0, 0.42, 0.08]), (1.0, [1.0, 0.88, 0.55])];
+    let h = h.clamp(0.0, 1.0);
+    for w in stops.windows(2) {
+        if h <= w[1].0 {
+            let f = (h - w[0].0) / (w[1].0 - w[0].0);
+            return [w[0].1[0] + (w[1].1[0] - w[0].1[0]) * f, w[0].1[1] + (w[1].1[1] - w[0].1[1]) * f, w[0].1[2] + (w[1].1[2] - w[0].1[2]) * f];
+        }
+    }
+    stops[3].1
+}
+
+/// A sapper (Benjamin, 26 Nov: "lateral thrusters... more animated like a
+/// maniacal suicide bot... a sickly green glow from the unstable material in
+/// it, lighting and sparks and radiation... when it begins its explosion
+/// sequence, have it heat up, melt down, then detonate").
+///
+/// A squat armoured canister with a window onto its green core, a thruster
+/// pod either side and a single darting eye. It never holds still: it
+/// twitches, its eye flicks about, its side thrusters kick it along in
+/// bursts. Its core crackles with radiation (green specks round it, green
+/// sparks leaking, green light). Armed, it heats from the core out (dull red
+/// to yellow-white), shaking harder; then melts down, its hull sagging and
+/// dripping away to bare the core blazing green-white; then the core
+/// collapses to a point and the blast takes it.
+#[allow(clippy::too_many_arguments)]
+fn sapper(un: &UnitView, now: f64, real_t: f64, x: f64, y: f64, p: Vec2, half: f32, up_angle: f32, cell_px: f32, lamp: f32, lc: [f32; 3], pos: &mut Vec<[f32; 3]>, col: &mut Vec<[f32; 4]>) {
+    let tt = real_t as f32;
+    let id = un.id;
+    // Random numbers that change a few times a second (its twitching).
+    let beat = |rate: f32, k: i32| shade(id, (tt * rate) as i32, k);
+    let armed = un.state == 3;
+    // How far through the countdown (0 armed .. 1 the blast).
+    let span = (un.t1 - un.t0).max(1e-6);
+    let frac = ((now - un.t0) / span).clamp(0.0, 1.0) as f32;
+    let k = if armed { ((un.a + frac) / un.c.max(1.0)).clamp(0.0, 1.0) } else { 0.0 };
+    let heat = (k / SAP_HEAT_TO).min(1.0);
+    let melt = ((k - SAP_HEAT_TO) / (SAP_MELT_TO - SAP_HEAT_TO)).clamp(0.0, 1.0);
+    let end = ((k - SAP_MELT_TO) / (1.0 - SAP_MELT_TO)).clamp(0.0, 1.0);
+    // From its own frame (m along, up) to the world.
+    let (sa, ca) = (up_angle as f64).sin_cos();
+    let world = |u: f64, w: f64| (x + u * ca - w * sa, y + u * sa + w * ca);
+    // Which way it is going, in its frame.
+    let (mu, mw) = {
+        let (dx, dy) = (un.to.0 - un.from.0, un.to.1 - un.from.1);
+        ((dx * ca + dy * sa) as f32, (-dx * sa + dy * ca) as f32)
+    };
+    // Its twitching: a jerk a metre aside now and then (shaking harder the
+    // nearer the blast), and a jittery tilt.
+    let (shake_rate, shake_p, shake_m) = match un.state {
+        3 => (14.0 + 30.0 * k, 0.4 + 0.6 * k, if melt > 0.0 { 2.0 } else { 1.0 }),
+        2 => (16.0, 0.55, 1.0),
+        _ => (7.0, 0.22, 1.0),
+    };
+    let (ju, jw) = if end > 0.0 || beat(shake_rate, 1) >= shake_p {
+        (0.0, 0.0)
+    } else {
+        let m = shake_m;
+        ((beat(shake_rate, 2) * (2.0 * m + 1.0)).floor() - m, (beat(shake_rate, 3) * 3.0).floor() - 1.0)
+    };
+    let tilt = if un.state == 1 || un.state == 0 { (beat(5.0, 4) - 0.5) * 0.3 } else { 0.0 };
+    let angle = up_angle + tilt;
+    let (st, ct) = angle.sin_cos();
+    let at = Vec2::new(p.x + (ju * ct - jw * st) * cell_px, p.y + (ju * st + jw * ct) * cell_px);
+    let mut pen = Pen { pos, col, p: at, half, angle };
+
+    // ---- The core: sickly green, flickering; brighter and whiter armed ----
+    let flick = 0.75 + 0.25 * beat(22.0 + 40.0 * k, 5);
+    let core_k = (0.55 + 0.45 * heat) * flick;
+    let core_white = (0.5 * melt + 0.5 * end).min(1.0);
+    let core = |b: f32| -> [f32; 4] {
+        let c = [SAP_GREEN[0] * b, SAP_GREEN[1] * b, SAP_GREEN[2] * b];
+        lin(c[0] + (1.0 - c[0]) * core_white, c[1] + (1.0 - c[1]) * core_white, c[2] + (1.0 - c[2]) * core_white)
+    };
+
+    if end > 0.0 {
+        // The end: what is left of it falls in on the core, which shrinks to
+        // a white-green point inside a ring of light closing on it.
+        let r = (1.0 - end) * 7.0;
+        let n = ((r * 7.0) as usize).max(8);
+        for i in 0..n {
+            let a = i as f32 / n as f32 * std::f32::consts::TAU + tt * 3.0;
+            pen.block((a.cos() * r).round(), (a.sin() * r).round(), lina(0.85, 1.0, 0.7, 0.4 + 0.6 * end));
+        }
+        let size = if end < 0.6 { 1 } else { 0 };
+        for du in -size..=size {
+            for dw in -size..=size {
+                pen.block(du as f32, dw as f32, lin(0.95, 1.0, 0.85));
+            }
+        }
+        crate::fx::emit(x, y, 10.0 + 30.0 * end as f64, [190.0, 255.0, 150.0], 1.0 + 1.5 * end);
+        return;
+    }
+
+    // ---- The hull (top row first, its lower-left corner at (-3, -2)) ----
+    // A armour, g core window, G the core's heart, T thruster pod, p dark
+    // plate, L the eye's slot, c clamp.
+    const ROWS: [&str; 6] = ["  AAA  ", " AAAAA ", "TAgGgAT", "TAgggAT", " ApLpA ", "  c c  "];
+    // The eye darts about its slot (and stares, fixed and blazing, armed).
+    let eye_u = if armed { 0 } else { (beat(4.0 + 3.0 * shade(id, 0, 9), 6) * 3.0) as i32 - 1 };
+    let eye_on = armed || beat(9.0, 7) > 0.18;
+    let h = ROWS.len() as i32;
+    for (r, line) in ROWS.iter().enumerate() {
+        for (c, ch) in line.bytes().enumerate() {
+            if ch == b' ' {
+                continue;
+            }
+            let (u, w) = (c as i32 - 3, h - 1 - r as i32 - 2);
+            let glow_part = matches!(ch, b'g' | b'G');
+            // Heat runs out from the core (at about (0, 0.5)).
+            let d = ((u * u) as f32 + ((w as f32 - 0.5) * (w as f32 - 0.5))).sqrt();
+            let hb = (heat * 1.5 - d * 0.18).clamp(0.0, 1.0);
+            // Melting: each block of hull lets go at its own moment, sags
+            // and drips away toward the ground, glowing.
+            let mut dw = 0.0f32;
+            let mut alpha = 1.0f32;
+            if melt > 0.0 && !glow_part {
+                let lets_go = 0.75 * shade(id, u, w + 40) + 0.08 * (w as f32 - 0.5).max(0.0);
+                let m = ((melt - lets_go) / 0.35).max(0.0);
+                if m > 0.0 {
+                    dw = -(m * m * 7.0).floor();
+                    alpha = (1.0 - m * 0.7).max(0.0);
+                    if alpha <= 0.05 {
+                        continue;
+                    }
+                }
+            }
+            let colour = match ch {
+                b'g' => core(core_k * (0.62 + 0.25 * shade(id, u, w))),
+                b'G' => core(core_k),
+                b'L' => {
+                    if u == eye_u && eye_on {
+                        if armed { lin(1.0, 0.25 + 0.6 * (1.0 - heat), 0.15) } else { lin(lc[0] * lamp, lc[1] * lamp, lc[2] * lamp) }
+                    } else {
+                        lin(0.06, 0.07, 0.07)
+                    }
+                }
+                _ => {
+                    let base = match ch {
+                        b'T' => [0.2, 0.21, 0.22],
+                        b'p' => [0.13, 0.14, 0.15],
+                        b'c' => [0.36, 0.37, 0.38],
+                        _ => {
+                            let a = armour(id, u, w);
+                            // (armour() is linear; back to roughly sRGB.)
+                            [a[0].powf(1.0 / 2.2), a[1].powf(1.0 / 2.2), a[2].powf(1.0 / 2.2)]
+                        }
+                    };
+                    // A sickly cast where the core shines through the seams.
+                    let seam = if d < 2.3 { 0.12 * flick } else { 0.0 };
+                    let mut c = [base[0] + seam * 0.4, base[1] + seam, base[2] + seam * 0.2];
+                    if dw < 0.0 {
+                        // Molten and running.
+                        c = sap_heat(c, 0.75 + 0.25 * shade(id, u, (tt * 10.0) as i32));
+                    } else {
+                        c = sap_heat(c, hb);
+                    }
+                    lina(c[0], c[1], c[2], alpha)
+                }
+            };
+            pen.block(u as f32, w as f32 + dw, colour);
+            // Drips throw sparks as they go.
+            if dw < -1.0 && shade(id, u * 31 + w, (tt * 20.0) as i32) < 0.06 {
+                let (wx, wy) = world((u as f32 + ju) as f64, (w as f32 + dw + jw) as f64);
+                crate::fx::spark(wx, wy, 1, [255.0, 170.0, 70.0], 6.0);
+            }
+        }
+    }
+
+    // ---- Thrusters ----
+    // A plume out of a pod or the base: white-hot at the nozzle, then
+    // orange, ragged at the tip.
+    let plume = |pen: &mut Pen, from: (i32, i32), dir: (i32, i32), len: i32, k: i32| {
+        for i in 0..len {
+            let (u, w) = (from.0 + dir.0 * i, from.1 + dir.1 * i);
+            let q = i as f32 / len.max(1) as f32;
+            let c = if i == 0 { lin(1.0, 0.96, 0.82) } else if q < 0.5 { lina(1.0, 0.7, 0.3, 0.9) } else { lina(0.95, 0.42, 0.15, 0.75 - 0.4 * q) };
+            pen.block(u as f32, w as f32, c);
+        }
+        if shade(id, k, (tt * 30.0) as i32) < 0.25 {
+            let (wx, wy) = world((from.0 + dir.0 * len) as f64, from.1 as f64 + 0.5);
+            crate::fx::spark(wx, wy, 1, [255.0, 200.0, 120.0], 9.0);
+        }
+        let (wx, wy) = world(from.0 as f64 + 0.5, from.1 as f64 + 0.5);
+        crate::fx::emit(wx, wy, 5.0, [255.0, 180.0, 100.0], 0.5);
+    };
+    // Which side pods fire now: in bursts, against the way it is going,
+    // with twitchy kicks either way; armed, sputtering in panic; molten,
+    // dead.
+    let burst = |rate: f32, k: i32, p: f32| beat(rate, k) < p;
+    let (mut left, mut right) = (false, false);
+    match un.state {
+        0 => {
+            // Dropping: the main thruster braking under it, side pods
+            // kicking it this way and that.
+            let n = 2 + (beat(20.0, 10) * 3.0) as i32;
+            plume(&mut pen, (0, -3), (0, -1), n, 11);
+            if burst(6.0, 12, 0.4) {
+                if beat(6.0, 13) < 0.5 { left = true } else { right = true }
+            }
+        }
+        1 => {
+            // Crawling: kicked along by the pod behind it, in bursts.
+            if mu.abs() > 0.15 && burst(8.0, 14, 0.7) {
+                if mu > 0.0 { left = true } else { right = true }
+            } else if mw.abs() > 0.15 && burst(10.0, 15, 0.5) {
+                if beat(10.0, 16) < 0.5 { left = true } else { right = true }
+            }
+            if burst(5.0, 17, 0.12) {
+                left = !left;
+            }
+        }
+        2 => {
+            // Drilling: both pods bracing it, in turns.
+            if beat(12.0, 18) < 0.5 { left = burst(12.0, 19, 0.7) } else { right = burst(12.0, 19, 0.7) }
+        }
+        _ => {
+            if melt <= 0.0 {
+                left = burst(18.0 + 30.0 * heat, 20, 0.15 + 0.4 * heat);
+                right = burst(18.0 + 30.0 * heat, 21, 0.15 + 0.4 * heat);
+            }
+        }
+    }
+    let len = |k: i32| 1 + (beat(24.0, k) * 3.0) as i32;
+    if left {
+        plume(&mut pen, (-4, 0), (-1, 0), len(22), 23);
+    }
+    if right {
+        plume(&mut pen, (4, 0), (1, 0), len(24), 25);
+    }
+    // Drilling: the bit turning under it, hot flecks, dust out of the hole.
+    if un.state == 2 {
+        let spin = ((tt * 20.0) as i32 % 2) as f32;
+        pen.block(-1.0 + spin, -3.0, lin(0.89, 0.88, 0.84));
+        pen.block(0.0 - spin, -3.0, lin(0.59, 0.59, 0.61));
+        pen.block(0.0, -4.0, lina(1.0, 0.86, 0.6, 0.9));
+        let (bx, by) = world(0.0, -4.0);
+        if beat(40.0, 26) < 0.5 {
+            crate::fx::spark(bx, by, 1, [255.0, 210.0, 140.0], 10.0);
+        }
+        crate::fx::emit(bx, by, 4.0, [255.0, 190.0, 110.0], 0.6);
+        if beat(8.0, 27) < 0.13 {
+            crate::fx::dust(un.mark.0, un.mark.1 + 1.0, [110.0, 100.0, 88.0], 12.0, 4.0, 4.0);
+        }
+    }
+
+    // ---- Radiation ----
+    // Green specks crackling round it (a Geiger counter you can see), more
+    // and further out the nearer the blast; green sparks leaking from the
+    // core; and the core's green light.
+    let specks = 3 + (12.0 * k) as i32;
+    for i in 0..specks {
+        if beat(14.0, 30 + i) < 0.45 {
+            let a = beat(14.0, 60 + i) * std::f32::consts::TAU;
+            let d = 3.0 + beat(14.0, 90 + i) * (3.0 + 6.0 * k);
+            let b = 0.5 + 0.5 * beat(14.0, 120 + i);
+            pen.block((a.cos() * d).round(), (0.5 + a.sin() * d).round(), lina(SAP_GREEN[0] * b + 0.2 * core_white, SAP_GREEN[1] * b, SAP_GREEN[2] * b + 0.2 * core_white, 0.35 + 0.5 * b));
+        }
+    }
+    if beat(10.0 + 30.0 * k, 150) < 0.18 + 0.5 * k {
+        let (cx, cy) = world((beat(30.0, 151) * 3.0 - 1.5) as f64, 0.5);
+        crate::fx::spark(cx, cy, 1 + (k * 3.0) as usize, [150.0, 255.0, 90.0], 4.0 + 10.0 * k as f64);
+    }
+    let (cx, cy) = world(0.5, 1.0);
+    crate::fx::emit(cx, cy, 9.0 + 14.0 * k as f64, [150.0, 255.0, 90.0], (0.45 + 0.7 * k) * flick);
+    // Armed, the heat's own light, orange, as it glows.
+    if heat > 0.0 {
+        crate::fx::emit(cx, cy, 6.0 + 8.0 * heat as f64, [255.0, 140.0, 50.0], 0.4 + 0.6 * heat);
+    }
+    // Molten, smoke boiling off it.
+    if melt > 0.0 && melt < 0.8 && beat(12.0, 160) < 0.12 {
+        let (sx, sy) = world(0.5, 3.0);
+        crate::fx::smoke(sx, sy, [110.0, 120.0, 96.0]);
+    }
+}
+
 /// Draw every specialist in view into the haulers' mesh.
 #[allow(clippy::too_many_arguments)]
 pub fn draw(units: &[UnitView], now: f64, real_t: f64, v: &View, bounds: [f64; 4], cell_px: f32, lc: [f32; 3], solid: &dyn Fn(i64, i64) -> bool, pos: &mut Vec<[f32; 3]>, col: &mut Vec<[f32; 4]>) {
@@ -217,55 +499,7 @@ pub fn draw(units: &[UnitView], now: f64, real_t: f64, v: &View, bounds: [f64; 4
         };
         let half = cell_px * 0.5;
         match un.kind {
-            Unit::Sapper => {
-                let mut pen = Pen { pos: &mut *pos, col: &mut *col, p, half, angle: up_angle };
-                let armed = un.state == 3;
-                // Its light blinks, faster and faster once armed; the charge
-                // glows in its back.
-                let blink = if armed { (tt * (8.0 + un.a * 14.0)).sin() > 0.0 } else { (tt * 3.0 + un.id as f32).sin() > 0.5 };
-                let charge = if armed { 0.6 + 0.4 * (tt * 20.0).sin() } else { 0.3 };
-                pen.rows(&SAPPER, -2, -1, |ch, u, w| {
-                    Some(match ch {
-                        b'A' => armour(un.id, u, w),
-                        b'L' => {
-                            if blink {
-                                light(lamp)
-                            } else {
-                                light(0.3)
-                            }
-                        }
-                        _ => lin(0.35 + 0.65 * charge, 0.27 + 0.6 * charge, 0.12 + 0.35 * charge),
-                    })
-                });
-                match un.state {
-                    // Dropping on its thruster.
-                    0 => {
-                        pen.block(0.0, -2.0, lin(1.0, 0.86, 0.6));
-                        pen.block(0.0, -3.0, lina(1.0, 0.55, 0.24, 0.8));
-                    }
-                    // Drilling: the bit turning, a spark.
-                    2 => {
-                        let spin = ((tt * 20.0) as i32 % 2) as f32;
-                        pen.block(-1.0 + spin, -2.0, lin(0.89, 0.88, 0.84));
-                        pen.block(0.0 - spin, -2.0, lin(0.59, 0.59, 0.61));
-                        pen.block(0.0, -3.0, lina(1.0, 0.86, 0.6, 0.9));
-                        // Hot flecks at the bit, and dust out of the hole.
-                        let (sa, ca) = (up_angle as f64).sin_cos();
-                        let (bx, by) = (x + 2.0 * sa, y - 2.0 * ca);
-                        if dft_sim::noise::unit(dft_sim::noise::hash(un.id as u64, (real_t * 40.0) as i64, 0, 0xD1)) < 0.5 {
-                            crate::fx::spark(bx, by, 1, [255.0, 210.0, 140.0], 10.0);
-                        }
-                        crate::fx::emit(bx, by, 4.0, [255.0, 190.0, 110.0], 0.6);
-                        if dft_sim::noise::unit(dft_sim::noise::hash(un.id as u64, (real_t * 8.0) as i64, 1, 0xD2)) < 0.13 {
-                            crate::fx::dust(un.mark.0, un.mark.1 + 1.0, [110.0, 100.0, 88.0], 12.0, 4.0, 4.0);
-                        }
-                    }
-                    _ => {}
-                }
-                if blink {
-                    crate::fx::emit(x, y, if armed { 6.0 } else { 3.0 }, [lc[0] * 255.0, lc[1] * 255.0, lc[2] * 255.0], if armed { 1.0 } else { 0.4 });
-                }
-            }
+            Unit::Sapper => sapper(un, now, real_t, x, y, p, half, up_angle, cell_px, lamp, lc, &mut *pos, &mut *col),
             Unit::Tunneler => {
                 // Along its shaft, nose (the drill) at the head. States (the
                 // opener): 0 flying down, 1 boring, 2 down a passage, 3
