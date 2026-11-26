@@ -266,9 +266,11 @@ fn draw(
         let bits_h = meshes.add(empty());
         let sparks_h = meshes.add(empty());
         let light_h = meshes.add(empty());
-        commands.spawn((Mesh2d(sparks_h.clone()), MeshMaterial2d(add_materials.add(crate::glow::AddMaterial::default())), Transform::from_xyz(0.0, 0.0, 16.5), NoFrustumCulling));
-        // Effects over the machines.
-        commands.spawn((Mesh2d(bits_h.clone()), MeshMaterial2d(materials.add(ColorMaterial::default())), Transform::from_xyz(0.0, 0.0, 16.0), NoFrustumCulling));
+        commands.spawn((Mesh2d(sparks_h.clone()), MeshMaterial2d(add_materials.add(crate::glow::AddMaterial::default())), Transform::from_xyz(0.0, 0.0, 13.9), NoFrustumCulling));
+        // Effects behind the machines (haulers and specialists at z 14),
+        // over the cutters; an explosion (z 15) over them (Benjamin, 26
+        // Nov: sparks and smoke were drawn in front of the sapper).
+        commands.spawn((Mesh2d(bits_h.clone()), MeshMaterial2d(materials.add(ColorMaterial::default())), Transform::from_xyz(0.0, 0.0, 13.8), NoFrustumCulling));
         // The light is added over what it falls on (see glow.rs): the
         // ground and plants, under the fog (z 8), so nothing uncharted shows
         // lit (Benjamin, 26 Nov: lava light showed through the fog).

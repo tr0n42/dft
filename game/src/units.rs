@@ -292,81 +292,7 @@ fn sapper(un: &UnitView, now: f64, real_t: f64, x: f64, y: f64, p: Vec2, half: f
         return;
     }
 
-    // ---- The hull (top row first, its lower-left corner at (-3, -2)) ----
-    // A armour, g core window, G the core's heart, T thruster pod, p dark
-    // plate, L the eye's slot, c clamp.
-    const ROWS: [&str; 6] = ["  AAA  ", " AAAAA ", "TAgGgAT", "TAgggAT", " ApLpA ", "  c c  "];
-    // The eye darts about its slot (and stares, fixed and blazing, armed).
-    let eye_u = if armed { 0 } else { (beat(4.0 + 3.0 * shade(id, 0, 9), 6) * 3.0) as i32 - 1 };
-    let eye_on = armed || beat(9.0, 7) > 0.18;
-    let h = ROWS.len() as i32;
-    for (r, line) in ROWS.iter().enumerate() {
-        for (c, ch) in line.bytes().enumerate() {
-            if ch == b' ' {
-                continue;
-            }
-            let (u, w) = (c as i32 - 3, h - 1 - r as i32 - 2);
-            let glow_part = matches!(ch, b'g' | b'G');
-            // Heat runs out from the core (at about (0, 0.5)).
-            let d = ((u * u) as f32 + ((w as f32 - 0.5) * (w as f32 - 0.5))).sqrt();
-            let hb = (heat * 1.5 - d * 0.18).clamp(0.0, 1.0);
-            // Melting: each block of hull lets go at its own moment, sags
-            // and drips away toward the ground, glowing.
-            let mut dw = 0.0f32;
-            let mut alpha = 1.0f32;
-            if melt > 0.0 && !glow_part {
-                let lets_go = 0.75 * shade(id, u, w + 40) + 0.08 * (w as f32 - 0.5).max(0.0);
-                let m = ((melt - lets_go) / 0.35).max(0.0);
-                if m > 0.0 {
-                    dw = -(m * m * 7.0).floor();
-                    alpha = (1.0 - m * 0.7).max(0.0);
-                    if alpha <= 0.05 {
-                        continue;
-                    }
-                }
-            }
-            let colour = match ch {
-                b'g' => core(core_k * (0.62 + 0.25 * shade(id, u, w))),
-                b'G' => core(core_k),
-                b'L' => {
-                    if u == eye_u && eye_on {
-                        if armed { lin(1.0, 0.25 + 0.6 * (1.0 - heat), 0.15) } else { lin(lc[0] * lamp, lc[1] * lamp, lc[2] * lamp) }
-                    } else {
-                        lin(0.06, 0.07, 0.07)
-                    }
-                }
-                _ => {
-                    let base = match ch {
-                        b'T' => [0.2, 0.21, 0.22],
-                        b'p' => [0.13, 0.14, 0.15],
-                        b'c' => [0.36, 0.37, 0.38],
-                        _ => {
-                            let a = armour(id, u, w);
-                            // (armour() is linear; back to roughly sRGB.)
-                            [a[0].powf(1.0 / 2.2), a[1].powf(1.0 / 2.2), a[2].powf(1.0 / 2.2)]
-                        }
-                    };
-                    // A sickly cast where the core shines through the seams.
-                    let seam = if d < 2.3 { 0.12 * flick } else { 0.0 };
-                    let mut c = [base[0] + seam * 0.4, base[1] + seam, base[2] + seam * 0.2];
-                    if dw < 0.0 {
-                        // Molten and running.
-                        c = sap_heat(c, 0.75 + 0.25 * shade(id, u, (tt * 10.0) as i32));
-                    } else {
-                        c = sap_heat(c, hb);
-                    }
-                    lina(c[0], c[1], c[2], alpha)
-                }
-            };
-            pen.block(u as f32, w as f32 + dw, colour);
-            // Drips throw sparks as they go.
-            if dw < -1.0 && shade(id, u * 31 + w, (tt * 20.0) as i32) < 0.06 {
-                let (wx, wy) = world((u as f32 + ju) as f64, (w as f32 + dw + jw) as f64);
-                crate::fx::spark(wx, wy, 1, [255.0, 170.0, 70.0], 6.0);
-            }
-        }
-    }
-
+    // (What is round it first, so the hull is drawn over it.)
     // ---- Thrusters ----
     // A plume out of a pod or the base: white-hot at the nozzle, then
     // orange, ragged at the tip.
@@ -471,6 +397,81 @@ fn sapper(un: &UnitView, now: f64, real_t: f64, x: f64, y: f64, p: Vec2, half: f
     if melt > 0.0 && melt < 0.8 && beat(12.0, 160) < 0.12 {
         let (sx, sy) = world(0.5, 3.0);
         crate::fx::smoke(sx, sy, [110.0, 120.0, 96.0]);
+    }
+
+    // ---- The hull (top row first, its lower-left corner at (-3, -2)) ----
+    // A armour, g core window, G the core's heart, T thruster pod, p dark
+    // plate, L the eye's slot, c clamp.
+    const ROWS: [&str; 6] = ["  AAA  ", " AAAAA ", "TAgGgAT", "TAgggAT", " ApLpA ", "  c c  "];
+    // The eye darts about its slot (and stares, fixed and blazing, armed).
+    let eye_u = if armed { 0 } else { (beat(4.0 + 3.0 * shade(id, 0, 9), 6) * 3.0) as i32 - 1 };
+    let eye_on = armed || beat(9.0, 7) > 0.18;
+    let h = ROWS.len() as i32;
+    for (r, line) in ROWS.iter().enumerate() {
+        for (c, ch) in line.bytes().enumerate() {
+            if ch == b' ' {
+                continue;
+            }
+            let (u, w) = (c as i32 - 3, h - 1 - r as i32 - 2);
+            let glow_part = matches!(ch, b'g' | b'G');
+            // Heat runs out from the core (at about (0, 0.5)).
+            let d = ((u * u) as f32 + ((w as f32 - 0.5) * (w as f32 - 0.5))).sqrt();
+            let hb = (heat * 1.5 - d * 0.18).clamp(0.0, 1.0);
+            // Melting: each block of hull lets go at its own moment, sags
+            // and drips away toward the ground, glowing.
+            let mut dw = 0.0f32;
+            let mut alpha = 1.0f32;
+            if melt > 0.0 && !glow_part {
+                let lets_go = 0.75 * shade(id, u, w + 40) + 0.08 * (w as f32 - 0.5).max(0.0);
+                let m = ((melt - lets_go) / 0.35).max(0.0);
+                if m > 0.0 {
+                    dw = -(m * m * 7.0).floor();
+                    alpha = (1.0 - m * 0.7).max(0.0);
+                    if alpha <= 0.05 {
+                        continue;
+                    }
+                }
+            }
+            let colour = match ch {
+                b'g' => core(core_k * (0.62 + 0.25 * shade(id, u, w))),
+                b'G' => core(core_k),
+                b'L' => {
+                    if u == eye_u && eye_on {
+                        if armed { lin(1.0, 0.25 + 0.6 * (1.0 - heat), 0.15) } else { lin(lc[0] * lamp, lc[1] * lamp, lc[2] * lamp) }
+                    } else {
+                        lin(0.06, 0.07, 0.07)
+                    }
+                }
+                _ => {
+                    let base = match ch {
+                        b'T' => [0.2, 0.21, 0.22],
+                        b'p' => [0.13, 0.14, 0.15],
+                        b'c' => [0.36, 0.37, 0.38],
+                        _ => {
+                            let a = armour(id, u, w);
+                            // (armour() is linear; back to roughly sRGB.)
+                            [a[0].powf(1.0 / 2.2), a[1].powf(1.0 / 2.2), a[2].powf(1.0 / 2.2)]
+                        }
+                    };
+                    // A sickly cast where the core shines through the seams.
+                    let seam = if d < 2.3 { 0.12 * flick } else { 0.0 };
+                    let mut c = [base[0] + seam * 0.4, base[1] + seam, base[2] + seam * 0.2];
+                    if dw < 0.0 {
+                        // Molten and running.
+                        c = sap_heat(c, 0.75 + 0.25 * shade(id, u, (tt * 10.0) as i32));
+                    } else {
+                        c = sap_heat(c, hb);
+                    }
+                    lina(c[0], c[1], c[2], alpha)
+                }
+            };
+            pen.block(u as f32, w as f32 + dw, colour);
+            // Drips throw sparks as they go.
+            if dw < -1.0 && shade(id, u * 31 + w, (tt * 20.0) as i32) < 0.06 {
+                let (wx, wy) = world((u as f32 + ju) as f64, (w as f32 + dw + jw) as f64);
+                crate::fx::spark(wx, wy, 1, [255.0, 170.0, 70.0], 6.0);
+            }
+        }
     }
 }
 

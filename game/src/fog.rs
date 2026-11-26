@@ -320,6 +320,13 @@ fn chart(mut fog: ResMut<Fog>, fleet: Res<crate::drones::Fleet>, run: Res<crate:
     };
     let (near, hub_near) = (disc(SENSE), disc(HUB_SENSE));
     cells.extend(sappers.iter().map(|&(x, y)| cell(x, y)));
+    // Round a blast while it glows, as far as it reaches.
+    for &(x, y, reach, _) in &fleet.blasts {
+        let c = cell(x, y);
+        for &(dx, dy) in &disc((reach / CELL).ceil() as i64) {
+            fog.mark((c.0 + dx, c.1 + dy), now);
+        }
+    }
     for c in cells {
         for &(dx, dy) in &near {
             fog.mark((c.0 + dx, c.1 + dy), now);

@@ -36,6 +36,9 @@ pub struct Fleet {
     pub legs: Vec<Leg>,
     pub paths: PathIndex,
     pub clock: f64,
+    /// Buried blasts lately (where, how far they reach (m), when, real s):
+    /// the fog is lifted round them while they glow.
+    pub blasts: Vec<(f64, f64, f64, f64)>,
     /// The moment drawn last frame (None at first).
     prev_clock: Option<f64>,
     started: bool,
@@ -1034,7 +1037,13 @@ fn draw(
         // Only a blast the player can see flashes and shakes the screen;
         // anywhere else the physics just runs.
         let near = b.x > vl && b.x < vr && b.y > vb && b.y < vt;
+        if b.buried {
+            fleet.blasts.push((b.x, b.y, b.size_m as f64, real));
+        }
         if b.buried && near {
+            // Hot flecks thrown out of the broken rock.
+            crate::fx::spark(b.x, b.y, 50, [255.0, 200.0, 120.0], 45.0);
+            crate::fx::spark(b.x, b.y, 14, [150.0, 255.0, 90.0], 30.0);
             // A charge going off underground: a white flash over everything,
             // the screen shaking (the proving ground's flash and shake).
             let kt = (b.size_m as f64 / 2.2 / 14.0).powi(3);
@@ -1046,6 +1055,7 @@ fn draw(
         }
     }
     shown.retain(|(bm, at)| real - at < if bm.buried { BURIED_LIFE_S } else { boom_life(bm.size_m) });
+    fleet.blasts.retain(|b| real - b.3 < BURIED_LIFE_S);
     if let Some(mut mm) = meshes.get_mut(&meshes_r.booms) {
         let mut pos = take_positions(&mut mm);
         let mut col = Vec::new();
@@ -1093,25 +1103,35 @@ fn draw(
             let (ux, uy) = (bm.x / rr, bm.y / rr);
             let g = 9.0;
             if bm.buried {
-                // Underground: a shock ring of blocks running out at 260 m/s
-                // to twice the blast's reach, fading (the proving ground's
-                // rings); and the broken rock's heat, glowing and fading.
+                // Underground: a white-hot flash of light lighting the rock
+                // far round, gone in under a second; a shock ring of blocks
+                // racing out past the blast's reach, white at its front with
+                // dust behind, fading (the proving ground's rings); and the
+                // broken rock's heat, glowing and fading.
                 let max = bm.size_m as f64;
-                let rr_ = age * 260.0;
-                if rr_ <= max {
-                    let a = (1.0 - rr_ / max) as f32 * 0.8;
-                    let n = ((rr_ * 6.0) as usize).max(24);
+                let fl = (1.0 - age / 0.8).max(0.0) as f32;
+                if fl > 0.0 {
+                    crate::fx::emit(bm.x, bm.y, max * 1.4, [255.0, 235.0, 190.0], 3.0 * fl * fl);
+                }
+                let ring_t = 0.5;
+                if age < ring_t {
+                    let q = age / ring_t;
+                    let a = (1.0 - q) as f32;
                     let mut seen = std::collections::HashSet::new();
-                    for k in 0..n {
-                        let ang = k as f64 / n as f64 * std::f64::consts::TAU;
-                        let c = ((bm.x + ang.cos() * rr_).round(), (bm.y + ang.sin() * rr_).round());
-                        if seen.insert((c.0 as i64, c.1 as i64)) {
-                            block(&mut pos, &mut col, c.0, c.1, 1.0, [1.0, 0.94, 0.82, a]);
+                    for (k, (back, c)) in [(0.0, [1.0, 0.94, 0.82]), (1.5, [0.85, 0.6, 0.35]), (3.0, [0.55, 0.5, 0.45])].into_iter().enumerate() {
+                        let rr_ = (max * 1.3 * q.sqrt() - back).max(0.0);
+                        let n = ((rr_ * 6.0) as usize).max(24);
+                        for i in 0..n {
+                            let ang = (i as f64 + 0.5 * k as f64) / n as f64 * std::f64::consts::TAU;
+                            let cc = ((bm.x + ang.cos() * rr_).round(), (bm.y + ang.sin() * rr_).round());
+                            if seen.insert((cc.0 as i64, cc.1 as i64)) {
+                                block(&mut pos, &mut col, cc.0, cc.1, 1.0, [c[0], c[1], c[2], a * (0.9 - 0.25 * k as f32)]);
+                            }
                         }
                     }
                 }
                 let heat = (1.0 - age / BURIED_LIFE_S).clamp(0.0, 1.0) as f32;
-                crate::fx::emit(bm.x, bm.y, max * 0.55, [255.0, 150.0, 50.0], 1.3 * heat * heat);
+                crate::fx::emit(bm.x, bm.y, max * 0.75, [255.0, 150.0, 50.0], 1.8 * heat * heat);
                 continue;
             }
             let start = pos.len();
