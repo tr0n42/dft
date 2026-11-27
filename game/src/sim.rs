@@ -42,6 +42,8 @@ pub struct Control {
     /// Make one of these now, free, to watch it (the Watch panel); the
     /// answer comes back in `Out::summoned`.
     pub summon: Option<dft_sim::production::Unit>,
+    /// A test blast of this many kt under the middle of the view (--test-blast).
+    pub blast: Option<f64>,
     pub quit: bool,
 }
 
@@ -496,6 +498,13 @@ fn run(shared: &Shared) {
             if let Some(u) = summon {
                 let r = s.summon(u);
                 shared.out.lock().summoned = Some((u, r));
+            }
+            let blast = {
+                let mut c = shared.control.lock();
+                c.blast.take().map(|kt| (kt, c.attention))
+            };
+            if let Some((kt, Some(Some([x0, x1, y0, y1])))) = blast {
+                s.test_blast((((x0 + x1) / 2) as f64, ((y0 + y1) / 2) as f64), kt);
             }
             // The molten rock's heat round the view, a few times a second,
             // close enough in to see it.

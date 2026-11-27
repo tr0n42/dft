@@ -326,7 +326,11 @@ fn sapper(un: &UnitView, now: f64, real_t: f64, x: f64, y: f64, p: Vec2, half: f
             }
         }
         1 => {
-            // Crawling: kicked along by the pod behind it, in bursts.
+            // Hovering along the ground looking for its way down (Benjamin,
+            // 26 Nov): held up by the main thruster, flickering, and kicked
+            // along by the pod behind it, in bursts.
+            let n = 1 + (beat(20.0, 20) * 2.5) as i32;
+            plume(&mut pen, (0, -3), (0, -1), n, 21);
             if mu.abs() > 0.15 && burst(8.0, 14, 0.7) {
                 if mu > 0.0 { left = true } else { right = true }
             } else if mw.abs() > 0.15 && burst(10.0, 15, 0.5) {

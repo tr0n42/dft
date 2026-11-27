@@ -57,6 +57,47 @@ first. The agreed behaviour is `docs/design/ground-units.md`.
 - **26 Nov:** Benjamin raised the yield to 10 kt (blast radius 30 m) and set
   the depth to 80% of the rule below, so more goes flying:
   `depth_m_per_cbrt_kt = 36.8` (79 m at 10 kt).
+- **26 Nov, later (crater, cracks, hover):** he asked for the ground over the
+  blast to be thrown off, for the shock to crack rock well outside ground
+  zero, for an even throw, and for the sapper to hover while it searches and
+  bore a wider shaft.
+  - `sapper_crater`: a ragged bowl (`CRATER_W` 0.85 of the column's top
+    half-width each side, `CRATER_D` 0.4 of that deep; at most `CRATER_MAX`
+    20,000 cells) is queued in `Sim::eject` and lifted as it goes, highest
+    first by distance from the centre, all of a tick's cells lifted before
+    any is thrown. Each flies from the mouth of its own column, square to the
+    local slope, at 35 x (0.8 + 0.35 cbrt kt) m/s, always steeper than the
+    crater wall beside it. (Flown from where they lay, most of a big
+    crater's pieces snagged on a cell beside them still due, or on a pocket
+    something had fallen into, and the hole filled back in: 18,000 lifted,
+    floor 14 m down of 84.) The speed is the blast's, not ballistic: on the
+    5 km dev planet (g 0.0046) a ballistic throw is a crawl.
+  - No plume where a crater was thrown (its jet out of one hole beside the
+    fan looked lopsided).
+  - `sapper_fracture`: past where each ray stopped, `CRACK_REACH` 1.2 radii
+    further, and either side of the column (wider near the surface), rock is
+    cracked into blocks (3.5 to 10 m, bigger further out; fewer further out,
+    more in hard rock): `fractured` (cut in half the time) with the block
+    edges drawn as cracks. Wandering ray cracks every 4th ray (was 9th),
+    longer.
+  - The sapper hovers `HOVER_M` 5 m over the ground while it moves (less
+    under a low roof; the game draws its main thruster then), and bores a
+    shaft `2 x SHAFT_HALF + 1` = 7 m wide (was 3).
+  - `--test-blast <kt>` (game) / `Sim::test_blast`: a buried charge of any
+    yield under the middle of the view, 2 game seconds after --run-s;
+    `test-big-blast.bat` asks for the yield.
+  - **How big a blast the screen takes** (dev planet, flat ground, 1600x900,
+    15 s after; `logs/bench_blast.sh`, read with `logs/bench_blast_read.py`):
+    10, 30, 100, 300, 1000 and 3000 kt all held 60 fps (worst second 59.4);
+    the blast's own sim step 35 / 40 / 50 / 61 / 84 / 108 ms (once). The
+    1000 kt crater is 18,700 cells, all flown. With the caps lifted to
+    150,000 (3000 kt: crater past 20,000), drawing never limits (frames
+    under 6 ms at that zoom); the sim does: 126 ms at 3000 kt, 611 ms at
+    10,000 kt (half speed for a second). So: up to ~1000 kt as is; past
+    that, the blast step (rays, column, cracks over a huge area) needs
+    spreading over ticks first. Zoomed out past ~2 m a pixel a blast is out
+    of sight (pure math). Big craters (3000 kt) also came out shallower than
+    their bowl: not looked into yet.
 - **Depth from yield**: `depth_m_per_cbrt_kt = 46` (79 m at 5 kt). The old
   rays break only about the blast radius (24 m at 5 kt), so a new
   **loosened column** (`sapper_column`) turns every solid cell from the charge

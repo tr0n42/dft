@@ -36,6 +36,9 @@
 //!   --watch <unit>        keep the view on the first unit of a kind (forester, sapper...)
 //!   --summon <unit>       press that unit's Watch button 30 game seconds in (sapper, tunneler,
 //!                         heatsink, forester, abductor)
+//!   --test-blast <kt>     a buried charge of that yield goes off under the middle of the
+//!                         view 2 game seconds after --run-s (how big a blast the screen
+//!                         can show)
 //!   --size <w>x<h>        a window this size (default: maximized)
 //!   --windowed            a 1600x900 window rather than maximized
 //!   --continue            load the newest save (saves folder)
@@ -117,6 +120,9 @@ pub struct Options {
     pub watch: Option<String>,
     /// Press this unit's Watch button 30 game seconds in (--summon sapper).
     pub summon: Option<String>,
+    /// A buried charge of this many kt under the middle of the view, 2 game
+    /// seconds after --run-s (--test-blast 100).
+    pub test_blast: Option<f64>,
     /// Blocks drawn the 5 Nov way (--old-look), for comparison.
     pub old_look: bool,
     pub size: (u32, u32),
@@ -156,6 +162,7 @@ impl Options {
             view: None,
             watch: None,
             summon: None,
+            test_blast: None,
             old_look: false,
             size: (1600, 900),
             windowed: false,
@@ -263,6 +270,7 @@ impl Options {
                 "--film" => o.film = Some(val(i)?.parse().map_err(|_| "--film takes seconds")?),
                 "--watch" => o.watch = Some(val(i)?),
                 "--summon" => o.summon = Some(val(i)?),
+                "--test-blast" => o.test_blast = Some(val(i)?.parse().map_err(|_| "--test-blast takes kilotons")?),
                 "--old-look" => {
                     o.old_look = true;
                     used = 1;
@@ -413,7 +421,7 @@ fn main() {
         }
     };
     let Start { planet, sim, source, restore } = start;
-    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, focus: None, view: None, full_detail: o.full_detail, summon: None, quit: false };
+    let control = sim::Control { speed: if o.run_s.is_some() { sim::SPEEDS.len() - 1 } else { o.speed }, paused: o.paused, pause_at: o.run_s, free_drones: o.free_drones, attention: None, focus: None, view: None, full_detail: o.full_detail, summon: None, blast: None, quit: false };
     let script = match o.camera.as_deref().map(bench::parse) {
         Some(Ok(steps)) => Some(bench::Script::new(steps)),
         Some(Err(e)) => {

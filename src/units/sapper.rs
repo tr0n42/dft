@@ -1,5 +1,6 @@
-//! Sappers: carry a 5 kt charge to where the going is hardest, crawl or
-//! drill down until deep enough, and go off. The blast (rays, cracks, held
+//! Sappers: carry a charge (10 kt) to where the going is hardest, hover
+//! along to a way down (cracks and caves) or bore one, until deep enough,
+//! and go off. The blast (rays, cracks, held
 //! chunks, a molten heart, rubble, thrown rock and a plume), rubble
 //! settling, chain blasts, and the charges themselves (nuclear, fused
 //! uranium, or conventional; uranium left in rubble).
@@ -16,9 +17,11 @@ use crate::world::Look;
 pub enum SapState {
     /// Dropping from the mother swarm to the ground.
     Fly,
-    /// Crawling down cracks and caves.
+    /// Along the ground and down cracks and caves to its spot, hovering
+    /// HOVER_M up while it moves (Benjamin, 26 Nov).
     Crawl,
-    /// Boring straight down where there was no way deep enough.
+    /// Boring straight down where there was no way deep enough, a shaft
+    /// as wide as its hull.
     Drill,
     /// Armed: its light blinking faster.
     Arm,
@@ -62,6 +65,23 @@ pub(super) const SIDEWAYS_MAX_M: f64 = 200.0;
 pub(super) const THROW_MAX: usize = 500;
 
 pub(super) const PLUME_MAX: usize = 500;
+/// The crater thrown out over a blast: this share of the loosened column's
+/// top half-width each side...
+pub(super) const CRATER_W: f64 = 0.85;
+/// ...and this share of that deep at its middle.
+pub(super) const CRATER_D: f64 = 0.4;
+/// Most cells thrown out of a crater (the top layers first; the rest stays
+/// as rubble). Raised from 3000 on 26 Nov (Benjamin: the throw looked
+/// uneven) to what the screen can fly at once.
+pub(super) const CRATER_MAX: usize = 20_000;
+/// A sapper hovers this high over the ground while it moves along it
+/// looking for its way down (less under a low roof) (Benjamin, 26 Nov).
+pub(super) const HOVER_M: f64 = 5.0;
+/// Half the width of the shaft a sapper bores (m either side of its middle):
+/// as wide as its hull (it was 3 m wide; Benjamin, 26 Nov: wider).
+pub(super) const SHAFT_HALF: i64 = 3;
+/// How far past the broken rock the shock cracks it, in blast radii.
+pub(super) const CRACK_REACH: f64 = 1.2;
 
 /// Rubble cells moved per tick, at most.
 pub(super) const SETTLE_PER_TICK: usize = 20_000;
@@ -272,12 +292,13 @@ impl Sim {
             }
             match s.state {
                 SapState::Fly => {
-                    if approach(&mut s.pos, s.goal, sp.fly_speed) {
+                    let over = self.hover_over(s.goal);
+                    if approach(&mut s.pos, over, sp.fly_speed) {
                         s.state = SapState::Crawl;
                         // Where the others are going (the end of their way).
                         let taken: Vec<(f64, f64)> = self.units.sappers.iter().filter(|o| o.id != s.id && !o.path.is_empty()).map(|o| mid(*o.path.last().unwrap())).collect();
                         let r = sp.radius_m_per_cbrt_kt * sp.yield_kt.max(0.0).cbrt();
-                        s.path = self.sapper_path(s.pos, s.ground_r, s.want, sp.crawl_m, &taken, 0.7 * r);
+                        s.path = self.sapper_path(s.goal, s.ground_r, s.want, sp.crawl_m, &taken, 0.7 * r);
                         s.along = 0.0;
                     }
                 }
@@ -285,8 +306,10 @@ impl Sim {
                     s.along += sp.crawl_speed;
                     let last = s.path.len().saturating_sub(1);
                     let i = (s.along as usize).min(last);
+                    // Along its way hovering over the ground (Benjamin, 26
+                    // Nov), then down to its bottom to bore or go off.
                     if let Some(&c) = s.path.get(i) {
-                        s.pos = mid(c);
+                        s.pos = if i >= last { mid(c) } else { self.hover_over(mid(c)) };
                     }
                     if i >= last {
                         s.state = if s.ground_r - len(s.pos) >= s.want { SapState::Arm } else { SapState::Drill };
@@ -294,8 +317,8 @@ impl Sim {
                 }
                 SapState::Drill => {
                     // Straight down (or sideways, keeping clear of a
-                    // tunneler), a shaft three wide; what it bores through
-                    // spouts up out of the hole and lands round it.
+                    // tunneler), a shaft as wide as its hull; what it bores
+                    // through spouts up out of the hole and lands round it.
                     let down = unit_of(s.pos);
                     let sideways = s.side != (0.0, 0.0);
                     let dir = if sideways { s.side } else { (-down.0, -down.1) };
@@ -303,7 +326,8 @@ impl Sim {
                     for _ in 0..sp.drill_speed.ceil().max(1.0) as usize {
                         let next = (s.pos.0 + dir.0, s.pos.1 + dir.1);
                         let across = (-dir.1, dir.0);
-                        for o in [-1.0, 0.0, 1.0] {
+                        for o in -SHAFT_HALF..=SHAFT_HALF {
+                            let o = o as f64;
                             let q = cell_of((next.0 + across.0 * o, next.1 + across.1 * o));
                             let m = self.world.material(q.0, q.1);
                             if m != VACUUM && self.world.planet.mats.get(m).state == State::Liquid {
@@ -316,7 +340,8 @@ impl Sim {
                             // just stops at and arms.
                             break;
                         }
-                        for (k, o) in [-1.0, 0.0, 1.0].into_iter().enumerate() {
+                        for (k, o) in (-SHAFT_HALF..=SHAFT_HALF).enumerate() {
+                            let o = o as f64;
                             let q = cell_of((next.0 + across.0 * o, next.1 + across.1 * o));
                             let Some(m) = self.world.lift_cell(q.0, q.1) else { continue };
                             self.undope(q, false);
@@ -388,6 +413,35 @@ impl Sim {
         }
     }
 
+    /// Where a sapper hovers over the ground at `p`: HOVER_M up, or less
+    /// under a low roof.
+    pub(super) fn hover_over(&self, p: (f64, f64)) -> (f64, f64) {
+        let up = unit_of(p);
+        let mut h = 0.0;
+        while h < HOVER_M + 1.5 {
+            let c = cell_of((p.0 + up.0 * (h + 1.0), p.1 + up.1 * (h + 1.0)));
+            if self.world.material(c.0, c.1) != VACUUM {
+                break;
+            }
+            h += 1.0;
+        }
+        let h = (h - 1.5).clamp(0.0, HOVER_M);
+        (p.0 + up.0 * h, p.1 + up.1 * h)
+    }
+
+    /// A test: a charge of `kt` going off under the ground at `over`, as
+    /// deep as a sapper would bury it (the game's --test-blast, for seeing
+    /// how big a blast the screen can show).
+    pub fn test_blast(&mut self, over: (f64, f64), kt: f64) {
+        let sp = &self.eco.units.sapper;
+        let depth = if sp.depth_m_per_cbrt_kt > 0.0 { sp.depth_m_per_cbrt_kt * kt.max(0.0).cbrt() } else { sp.radius_m_per_cbrt_kt * kt.max(0.0).cbrt() + sp.bury_m };
+        let a = over.1.atan2(over.0);
+        let g = self.ground_at(a, true);
+        let at = (a.cos() * (g - depth), a.sin() * (g - depth));
+        let fissile = self.fissile_per_charge();
+        self.sapper_blast(at, kt, fissile);
+    }
+
     /// Whether whatever is round a sapper at `p` destroys it: magma, or
     /// ground hot from a blast, touching it.
     pub(super) fn sapper_destroyed(&self, p: (f64, f64)) -> bool {
@@ -446,6 +500,30 @@ impl Sim {
             let y = self.eco.units.sapper.yield_kt;
             for (_, at, fissile) in now {
                 self.sapper_blast(at, y, fissile);
+            }
+        }
+        // The crater's ground due now: all of it lifted first, then thrown
+        // (thrown one by one, a piece could fly into a neighbour due the
+        // same tick but not yet lifted, and fall back in).
+        let mut flying = Vec::new();
+        while let Some(&(due, c, from, vel)) = self.eject.front() {
+            if due > self.tick {
+                break;
+            }
+            self.eject.pop_front();
+            let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
+            self.loose.remove(&c);
+            self.progress.remove(&c);
+            self.reserved.remove(&c);
+            self.open_cell(c);
+            flying.push((from, m, vel));
+        }
+        for (from, m, vel) in flying {
+            if let Some(t) = self.bodies.throw(&mut self.world, from, m, vel) {
+                self.loose.insert(t);
+                self.world.set_look(t.0, t.1, Look::RUBBLE);
+                self.settling.insert(t);
+                self.scrap_landed(t);
             }
         }
         while let Some(&(due, from, m, vel)) = self.plume_out.front() {
@@ -615,6 +693,8 @@ impl Sim {
         let mut broken: CellMap<(f64, f64)> = CellMap::default();
         let mut order: Vec<(i64, i64)> = Vec::new();
         let mut cracked = 0u64;
+        // Where each ray stopped breaking rock (the shock cracks it further).
+        let mut stop = vec![reach as f64; rays];
         for ray in 0..rays {
             let a = ray as f64 / rays as f64 * std::f64::consts::TAU + (crate::noise::unit(hash(blast, ray as i64, 0, 5)) - 0.5) * 0.01;
             let (ca, sa) = crate::noise::cos_sin(a);
@@ -638,10 +718,11 @@ impl Sim {
                 let h = hard(self, m);
                 e -= (0.45 + 1.7 * h) / r;
                 if e <= 0.0 {
+                    stop[ray] = step as f64;
                     // A crack may run on, wandering, further in harder rock.
-                    if ray % 9 == 0 {
+                    if ray % 4 == 0 {
                         let (mut ax, mut ay, mut aa) = (c.0 as f64, c.1 as f64, a);
-                        let len = (r * (0.2 + 0.7 * h)) as i64;
+                        let len = (r * (0.3 + 0.9 * h)) as i64;
                         for k in 0..len {
                             aa += (crate::noise::unit(hash(blast, ray as i64, k, 9)) - 0.5) * (1.2 - h);
                             let (cc, ss) = crate::noise::cos_sin(aa);
@@ -774,9 +855,22 @@ impl Sim {
         // the yield sets the depth, deep enough that the ground over it is
         // loosened for the cutters to scoop up).
         let top = if self.eco.units.sapper.depth_m_per_cbrt_kt > 0.0 { self.sapper_column(at, r, blast, &broken, &mut rubble) } else { at };
+        // The ground right over it thrown out, leaving a crater (in sight).
+        let mut cratered = false;
+        if seen && self.eco.units.sapper.depth_m_per_cbrt_kt > 0.0 {
+            let height = (len(top) - len(at)).max(1.0);
+            let thrown = self.sapper_crater(at, r, yield_kt, height, blast);
+            cratered = !thrown.is_empty();
+            rubble.retain(|c| !thrown.contains(c));
+        }
+        // The rock round it cracked by the shock.
+        let height = if self.eco.units.sapper.depth_m_per_cbrt_kt > 0.0 { (len(top) - len(at)).max(1.0) } else { 0.0 };
+        cracked += self.sapper_fracture(at, r, blast, &stop, height, &broken);
         self.units.cracked += cracked + broken.len() as u64;
-        // The plume: most blasts find a way up.
-        if seen && crate::noise::unit(hash(blast, 0, 0, 77)) < 0.9 && !rubble.is_empty() {
+        // The plume: most blasts find a way up. (Not where the ground over
+        // it was thrown out as a crater: a jet out of one hole beside the
+        // crater's even fan looked lopsided; Benjamin, 26 Nov.)
+        if seen && !cratered && crate::noise::unit(hash(blast, 0, 0, 77)) < 0.9 && !rubble.is_empty() {
             if let Some(mouth) = self.way_up(c0, r) {
                 let share = 0.35 + 0.25 * crate::noise::unit(hash(blast, 0, 0, 7));
                 let take = ((rubble.len() as f64 * share).round() as usize).min(rubble.len()).min(PLUME_MAX);
@@ -808,6 +902,7 @@ impl Sim {
                 }
             }
         }
+        self.plume_out.make_contiguous().sort_by_key(|p| p.0);
         // Unreacted uranium: a share is left through the rubble still here.
         let sp = &self.eco.units.sapper;
         let unreacted = (fissile - yield_kt / sp.kt_per_kg_fissioned.max(1e-9)).max(0.0) * sp.unreacted_doped.clamp(0.0, 1.0);
@@ -886,6 +981,225 @@ impl Sim {
         }
         self.units.cracked += cracked;
         (a.cos() * ground, a.sin() * ground)
+    }
+
+    /// The ground right over a blast thrown out, leaving a crater (Benjamin,
+    /// 26 Nov: the top layer over the blast should be thrown off). A bowl
+    /// `CRATER_W` of the loosened column's top half-width each side and
+    /// `CRATER_D` of that deep at its middle (and the plants on it) is
+    /// lifted and thrown, the top layer first and the deeper ground after:
+    /// near the middle steeply up (much of it falls back in), towards the
+    /// rim out at about 45 degrees, coming down round the crater. `height`
+    /// is how far the ground is over the charge. Returns how many cells.
+    pub(super) fn sapper_crater(&mut self, at: (f64, f64), r: f64, yield_kt: f64, height: f64, blast: u64) -> CellSet {
+        let lt = self.eco.units.sapper.loosen_top.max(1.0);
+        let w0 = (r * lt * CRATER_W).max(2.0);
+        let dmax = (w0 * CRATER_D).min(height * 0.8).max(1.0);
+        let a0 = at.1.atan2(at.0);
+        let g0 = len(at) + height;
+        // How hard it throws (as the plume does).
+        let pw = (0.8 + 0.35 * yield_kt.max(0.0).cbrt()).min(6.0);
+        let flora = |s: &Self, m: MatId| s.units.is_flora.get(m as usize).copied().unwrap_or(false);
+        let un = |k: i64, salt: u64| crate::noise::unit(hash(blast, k, 0, salt));
+        // A ragged bowl: each side reaches its own way out, and the depth
+        // wanders a little (smooth noise, a fifth of the crater across).
+        let (wl, wr) = (w0 * (0.85 + 0.3 * un(0, 0xC1)), w0 * (0.85 + 0.3 * un(1, 0xC1)));
+        let period = (w0 / 5.0).max(6.0);
+        let wander = |s: f64| {
+            let t = s / period;
+            let i = t.floor();
+            let f = t - i;
+            let f = f * f * (3.0 - 2.0 * f);
+            un(i as i64, 0xC2) * (1.0 - f) + un(i as i64 + 1, 0xC2) * f
+        };
+        // The ground along it, and its slope: the throw goes out square to
+        // the ground there, not to the sky straight up (on a hillside
+        // straight up throws the uphill side into the hill).
+        // (Down a shaft, a narrow dip, the ground either side of it.)
+        let ground = |s: &Self, x: f64| {
+            let at = |x: f64| s.ground_at(a0 + x / g0, true);
+            let (c, side) = (at(x), at(x - 5.0).min(at(x + 5.0)));
+            if c < side - 3.0 { side } else { c }
+        };
+        let slope = ((ground(self, wr) - ground(self, -wl)) / (wl + wr)).clamp(-1.5, 1.5);
+        // (cell, offset across, depth share, depth m)
+        let mut take: Vec<((i64, i64), f64, f64, f64)> = Vec::new();
+        let mut seen = CellSet::default();
+        let mut x = -wl;
+        while x <= wr {
+            let ang = a0 + x / g0;
+            let (ux, uy) = (ang.cos(), ang.sin());
+            let gr = ground(self, x);
+            let e = if x < 0.0 { x / wl } else { x / wr };
+            let d = dmax * (1.0 - e * e) * (0.85 + 0.3 * wander(x));
+            // The plants on it.
+            let mut z = 0.5;
+            while z < 24.0 {
+                let c = cell_of((ux * (gr + z), uy * (gr + z)));
+                let m = self.world.material(c.0, c.1);
+                if m != VACUUM && flora(self, m) && seen.insert(c) {
+                    take.push((c, x, 0.0, -z));
+                }
+                z += 0.7;
+            }
+            let mut z = 0.0;
+            while z <= d {
+                let c = cell_of((ux * (gr - 0.5 - z), uy * (gr - 0.5 - z)));
+                // (The bottom edge frayed.)
+                let frayed = z > d - 1.5 && crate::noise::unit(hash(blast, c.0, c.1, 0xC3)) < 0.5;
+                if !frayed && seen.insert(c) && self.world.material(c.0, c.1) != VACUUM {
+                    take.push((c, x, z / d.max(1.0), z));
+                }
+                z += 0.7;
+            }
+            x += 0.7;
+        }
+        if take.len() > CRATER_MAX {
+            take.sort_by(|a, b| a.2.total_cmp(&b.2));
+            take.truncate(CRATER_MAX);
+        }
+        let out: CellSet = take.iter().map(|t| t.0).collect();
+        // Highest first, by height (not depth under the ground just over it,
+        // which differs column to column: a piece flew into the cell beside
+        // it, as high but due later, and fell back in).
+        let top = take.iter().map(|t| len(mid(t.0))).fold(f64::MIN, f64::max);
+        let low = take.iter().map(|t| len(mid(t.0))).fold(f64::MAX, f64::min);
+        let span = (top - low).max(1.0);
+        // The highest of each column (by its place across).
+        let mut col_top: HashMap<i64, f64> = HashMap::new();
+        for t in &take {
+            let e = col_top.entry((t.1 / 0.7).round() as i64).or_insert(f64::MIN);
+            *e = e.max(len(mid(t.0)));
+        }
+        let k = (1.0 + slope * slope).sqrt();
+        for (c, x, q, _) in take {
+            let u = |k: u64| crate::noise::unit(hash(blast, c.0, c.1, 0xC0 + k));
+            let f = (if x < 0.0 { -x / wl } else { x / wr }).min(1.0);
+            let sgn = if x.abs() < 0.5 { if u(0) < 0.5 { -1.0 } else { 1.0 } } else { x.signum() };
+            // Steep in the middle, about 45 degrees at the rim, and always
+            // steeper than the crater's wall beside it (thrown flatter, most
+            // of a big crater hit its own wall and fell back in).
+            let wall = (2.0 * dmax * f / (if x < 0.0 { wl } else { wr })).atan().to_degrees() * 1.15;
+            let th = (82.0 - 40.0 * f).max(wall + 12.0).min(86.0);
+            let th = (th + (u(1) - 0.5) * 12.0).clamp(wall + 6.0, 89.0).to_radians();
+            // As fast as the blast throws it (not as far as the body's pull
+            // would bring it back: on a small body that is a crawl, and the
+            // rest of the blast flies out fast): the deep ground slower.
+            let v = 35.0 * pw * (1.0 - 0.45 * q) * (0.75 + 0.5 * u(2));
+            let p = mid(c);
+            let pr = len(p).max(1.0);
+            let (ux, uy) = (p.0 / pr, p.1 / pr);
+            // Square to the ground: its normal and its line across.
+            let nrm = ((ux + uy * slope) / k, (uy - ux * slope) / k);
+            let tan = (-nrm.1, nrm.0);
+            let (vn, vt) = (v * th.sin(), sgn * v * th.cos());
+            let vel = (nrm.0 * vn + tan.0 * vt, nrm.1 * vn + tan.1 * vt);
+            // The top layer lifts off first, the deeper ground after it,
+            // layer by layer (each on its way before the one under it goes:
+            // a jumbled order threw cells into the ground still over them,
+            // and the crater filled back in).
+            let due = self.tick + self.ticks(0.08 + 0.6 * ((top - len(p)) / span).clamp(0.0, 1.0));
+            // It flies from the crater's mouth, over the top of its column (a
+            // piece flown from down in the hole could snag on a bit left
+            // standing or a pocket something fell into, and drop back in;
+            // flown all from one height, pieces caught on each other).
+            let up_by = col_top.get(&((x / 0.7).round() as i64)).copied().unwrap_or(top) - len(p) + 1.5;
+            self.eject.push_back((due, c, (p.0 + nrm.0 * up_by, p.1 + nrm.1 * up_by), vel));
+        }
+        self.eject.make_contiguous().sort_by_key(|e| e.0);
+        out
+    }
+
+    /// The rock round a blast cracked by its shock (Benjamin, 26 Nov: the
+    /// shockwave should crack and frack more): past where each ray stopped
+    /// breaking rock (`stop`, m, by ray), `CRACK_REACH` blast radii further,
+    /// and either side of the loosened column (more widely near the surface,
+    /// where the ground lifts), the rock is cracked into blocks: small near,
+    /// bigger further out, fewer the further out, more in hard brittle
+    /// rock. A cracked cell is cut in half the time (`fracture_dig`); the
+    /// blocks' edges show as cracks. `height`: how far the ground is over
+    /// the charge (0: no column). Returns how many cells were cracked.
+    pub(super) fn sapper_fracture(&mut self, at: (f64, f64), r: f64, blast: u64, stop: &[f64], height: f64, broken: &CellMap<(f64, f64)>) -> u64 {
+        let lt = self.eco.units.sapper.loosen_top.max(1.0);
+        let up = unit_of(at);
+        let side = (-up.1, up.0);
+        let rays = stop.len().max(1);
+        let reach = r * CRACK_REACH;
+        let far = stop.iter().fold(0.0f64, |a, &b| a.max(b)) + reach;
+        let wide = far.max(r * lt + r);
+        let block = |x: i64, y: i64, size: f64| -> u64 {
+            let (i0, j0) = ((x as f64 / size).floor() as i64, (y as f64 / size).floor() as i64);
+            let (mut best, mut id) = (f64::INFINITY, 0u64);
+            for i in i0 - 1..=i0 + 1 {
+                for j in j0 - 1..=j0 + 1 {
+                    let px = (i as f64 + crate::noise::unit(hash(47, i, j, size as u64))) * size;
+                    let py = (j as f64 + crate::noise::unit(hash(53, j, i, size as u64))) * size;
+                    let d = (px - x as f64).powi(2) + (py - y as f64).powi(2);
+                    if d < best {
+                        best = d;
+                        id = hash(0xF2AC, i, j, size as u64);
+                    }
+                }
+            }
+            id
+        };
+        let mut cracked = 0u64;
+        let mut seen = CellSet::default();
+        let mut h = -far;
+        while h <= height + 1.0 {
+            let mut s = -wide;
+            while s <= wide {
+                let c = cell_of((at.0 + up.0 * h + side.0 * s, at.1 + up.1 * h + side.1 * s));
+                s += 0.7;
+                if !seen.insert(c) || broken.contains_key(&c) || self.loose.contains(&c) {
+                    continue;
+                }
+                let p = mid(c);
+                let (dx, dy) = (p.0 - at.0, p.1 - at.1);
+                // Round the charge, past where the rays stopped.
+                let d = (dx * dx + dy * dy).sqrt();
+                let k = ((dy.atan2(dx) / std::f64::consts::TAU * rays as f64).round() as i64).rem_euclid(rays as i64) as usize;
+                let mut t = ((d - stop[k]) / reach).max(0.0);
+                // Either side of the column, more widely near the surface.
+                if height > 0.0 {
+                    let along = dx * up.0 + dy * up.1;
+                    if along >= -0.5 * r && along <= height + 2.0 {
+                        let f = (along / height).clamp(0.0, 1.0);
+                        let half = r * (1.0 + (lt - 1.0) * f);
+                        let out = (dx * side.0 + dy * side.1).abs() - half;
+                        t = t.min((out / (r * (0.35 + 0.65 * f))).max(0.0));
+                    }
+                }
+                if t >= 1.0 {
+                    continue;
+                }
+                let m = self.world.material(c.0, c.1);
+                if m == VACUUM || self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
+                    continue;
+                }
+                let mat = self.world.planet.mats.get(m);
+                if mat.state != State::Solid {
+                    continue;
+                }
+                let hd = (mat.hardness as f64 / 10.0).clamp(0.05, 0.95);
+                let size = [3.5, 5.0, 7.0, 10.0][((t * 4.0) as usize).min(3)];
+                let id = block(c.0, c.1, size);
+                if crate::noise::unit(hash(id, blast as i64, 0, 71)) >= ((1.0 - t).powf(0.8) * (0.45 + 0.75 * hd)).min(1.0) {
+                    continue;
+                }
+                // (Newly cracked only: what an earlier blast held or cracked
+                // keeps its look.)
+                if !self.fractured.insert(c) {
+                    continue;
+                }
+                cracked += 1;
+                if (block(c.0 + 1, c.1, size) != id || block(c.0, c.1 + 1, size) != id) && crate::noise::unit(hash(blast, c.0, c.1, 72)) < 0.9 - 0.4 * t {
+                    self.world.set_look(c.0, c.1, Look::CRACKED);
+                }
+            }
+            h += 0.7;
+        }
+        cracked
     }
 
     /// What a blast does to the swarm (Benjamin, 25 Nov: blasts kill

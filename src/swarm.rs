@@ -626,6 +626,11 @@ pub struct Sim {
     /// Broken rock in the air on its way out of a plume, thrown a little at
     /// a time: (tick, from, material, velocity).
     plume_out: std::collections::VecDeque<(u64, (f64, f64), MatId, (f64, f64))>,
+    /// Ground over a blast to be thrown out of its crater, a layer at a
+    /// time, lifted only as it goes (so the crater opens as it is thrown):
+    /// (tick, cell, where it flies from, velocity). Not saved: what is left
+    /// of it stays put.
+    pub(super) eject: std::collections::VecDeque<(u64, (i64, i64), (f64, f64), (f64, f64))>,
     /// Sappers caught in a blast, going off a moment later: (tick, where).
     chain: Vec<(u64, (f64, f64), f64)>,
     next_tunnel_k: usize,
@@ -1044,6 +1049,7 @@ impl Sim {
             settling: CellSet::default(),
             settle_wait: CellSet::default(),
             plume_out: Default::default(),
+            eject: Default::default(),
             chain: Vec::new(),
             next_tunnel_k: 0,
             tunnel_m: 0,
