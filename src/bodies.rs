@@ -796,6 +796,36 @@ impl Bodies {
         None
     }
 
+    /// A piece of rock still in the ground (`cells`, joined up) thrown out
+    /// whole by a blast, as one tumbling body flying at `vel` (m/s) and
+    /// turning at `spin` (radians a second): lifted out of the grid as a
+    /// chunk that breaks free is (booked as in the air until it lands), but
+    /// only in sight and while there is room for another body. (The blast
+    /// throws none bigger than `island_max_cells`, as a chunk bigger than
+    /// that breaking free moves as a slab, and a slab sheds a piece every
+    /// so often as it moves: a fast one drifting off a small body for
+    /// minutes shed hundreds of them.) Returns the cells lifted (none if it
+    /// wasn't).
+    pub fn throw_chunk(&mut self, w: &mut World, cells: &[Cell], vel: (f64, f64), spin: f64) -> Vec<Cell> {
+        let Some(&first) = cells.first() else { return Vec::new() };
+        if self.loose.len() >= MAX_LOOSE || !crate::sandbox::in_attention(self.attention, first) {
+            return Vec::new();
+        }
+        let mut lifted = Vec::with_capacity(cells.len());
+        for &c in cells {
+            if !is_rock(w, w.material(c.0, c.1)) {
+                continue;
+            }
+            let Some(m) = w.lift_cell(c.0, c.1) else { continue };
+            self.stale(c);
+            lifted.push((c, m));
+        }
+        self.launch_lifted(w, &lifted, false, Vector::new(vel.0 as Real, vel.1 as Real), spin as Real);
+        self.stats.broken_free += 1;
+        self.stats.cells_lifted += lifted.len() as u64;
+        lifted.into_iter().map(|c| c.0).collect()
+    }
+
     /// A cell already lifted out of the ground (booked as in the air) thrown
     /// from `at` at `vel`: liquid blasted out of a pressurised hole. In sight
     /// it flies as a drop and lands where it falls; otherwise (or with too

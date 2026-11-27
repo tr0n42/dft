@@ -126,13 +126,14 @@ column and 218,000 cracked cells, one by one, in a single tick.
    2 m a pixel, single cells are invisible anyway). This lifts the crater cap
    without more pieces in the air.
 5. **Look and physics (later).**
-   - Wider cracked zone (80 to 120 m/kt^1/3).
+   - Wider cracked zone (80 to 120 m/kt^1/3). (Done 27 Nov, see below.)
    - Ejecta speed falling off with launch distance, so the middle is fastest.
    - The held big chunks thrown as rock bodies (the game already has falling
-     rock bodies), rather than as loose cells.
+     rock bodies), rather than as loose cells. (Done 27 Nov, see below.)
    - A shock that runs along soft layers and is stopped by caves (fast
      marching on a 4 m grid).
    - Rock over the cavity falling in after the blast (a rubble chimney).
+     (Done 27 Nov, see below.)
 
 Steps 1 and 2 together should let any yield go off without a hitch. Step 3
 keeps memory and saves sane for planet-scale blasts.
@@ -259,4 +260,292 @@ minutes to come down on a small body, half the crater kept) or the fast
 fan (all of it thrown off a small body for good, in a few seconds)? A
 middle way would be to keep the fan's look but hold the rim under escape
 speed, so the outer part comes back down later, out of sight of the blast.
+
+## A wider cracked zone (27 Nov)
+
+The shock now cracks rock out to about 80 m/kt^1/3, as underground tests
+do, where it stopped at 45 to 50 before. Past the rock cracked all through
+into small blocks (`CRACK_REACH`, 1.2 radii past where each ray stopped), a
+thin far zone runs `CRACK_FAR` = 3.2 radii further:
+
+- **Bigger blocks, fewer of them.** Three patterns of blocks for its inner,
+  middle and outer thirds, 10, 14 and 20 m across at 10 kt and bigger as
+  the square root of the blast radius (32, 44 and 63 m at 10,000 kt). A
+  block cracks at most 75% of the time at the inner edge, less in softer
+  rock, and never at the outer edge. (Changed after review: it now starts
+  inside the near zone and more thinly; see "Review fixes" below.)
+- **Only the cracks themselves.** In a block that cracks, only some of its
+  edges are cracks (90% at the inner edge, 40% at the outer), and only those
+  cells are cracked and drawn. The rock between them holds, as real far
+  cracks do. Each edge is bent a little at its middle.
+- **Decided a block at a time.** The near zone looks at every cell. Out
+  here that would look at ten times as many cells as it cracks, so each
+  block is decided once, when the front has passed it and its neighbours.
+  Its outline is worked out from its neighbours' sites, and only the cells
+  along the edges that crack are looked at. All the work is charged to the
+  blast's budget.
+- **A fix on the way.** Past the column's cracked band, the near zone still
+  walked every row of each shell while the front ran on. That cost the last
+  tick of a 10,000 kt blast 20 ms. It now stops there, with the same result.
+
+Measured headless with `blast_crack_reach` (3 km barren test body; run with
+`cargo test --release --test sapper_blast -- --ignored --nocapture`).
+"Reach" is measured below the charge. Over it, the cracks beside the
+loosened column run on up to the ground.
+
+| Yield | Cells cracked before / after | Drawn as cracks before / after | Reach (farthest) before / after | Blast ticks before / after | Blast work in all before / after | Dearest tick before / after |
+|---|---|---|---|---|---|---|
+| 10 kt | 4,636 / 6,304 (1.36x) | 1,861 / 3,529 | 43 / 74 m/kt^1/3 | 9 / 15 | 43 / 47 ms | 25.6 / 25.7 ms |
+| 1,000 kt | 56,875 / 66,312 (1.17x) | 21,483 / 30,792 | 49 / 83 | 60 / 63 | 394 / 435 ms | 10.7 / 10.8 ms |
+| 10,000 kt | 211,066 / 228,838 (1.08x) | 78,228 / 96,003 | 50 / 87 | 231 / 240 | 1,822 / 1,930 ms | 13.9 / 12.5 ms |
+
+The dearest 10 kt tick is the first one, when the crater is planned. That
+is unchanged.
+
+The cracked cells (which also go into saves) grow only 8 to 36%, well under
+the 2 to 3 times allowed. At 10,000 kt on this small body, most of the far
+zone is open space past the curve of the ground, so it adds little there.
+At 10 kt the front now runs for 1.5 s instead of 0.9 s. A far block is
+decided only once the front is past it and its neighbours, so the far
+cracks appear a little behind the shock ring. If the far zone should show
+more, `FAR_SHARE`, `FAR_EDGE` and `FAR_SIZES` in `src/units/sapper.rs` set
+how thick it is.
+
+## The rubble chimney (27 Nov)
+
+After a real buried blast, the roof of the cavity falls in and leaves a
+chimney of rubble over it. A sapper's blast already loosens a column up to
+the surface, wider than any chimney, so nothing changes there. A blast
+with no column now gets a chimney. Today that means a tunneler's 50 kt end,
+or a sapper on the old depth rule.
+
+- **How tall.** (After review: never closer than a melt radius under the
+  ground; see "Review fixes" below.) At least 6 melt radii over the charge (`CHIMNEY_TALL`). The
+  melt radius is the molten heart's, about 4 m/kt^1/3; real chimneys rise 4
+  to 6 cavity radii, and our melt radius is at the small end of real
+  cavities. In soft rock the rays already break the ground out to nearly 2
+  blast radii, past that height (1.7 to 1.9 radii straight up on the test
+  body). So the chimney also rises at least 2 melt radii (`CHIMNEY_OVER`)
+  past where the rays going straight up stopped (the middle of those within
+  15 degrees of up).
+- **Shape.** 2.5 melt radii either side at the charge, narrowing to 1.5 at
+  the top, with the top fifth rounded off and the edges frayed. Real
+  chimneys are about as wide as the cavity, which is about 2 of our melt
+  radii.
+- **When.** It starts falling in 1 s after the blast (`CHIMNEY_DELAY_S`).
+  It climbs from the top of the broken ground to the chimney's top over 1
+  s (`CHIMNEY_CLIMB_S`), a 0.5 m band at a time. It waits until the rays
+  are all done and the front has passed all of it, so the rays and cracks
+  come out exactly as before. The work is charged to the blast's budget, so
+  a big blast's chimney falls in at the budget's pace. A save finishes it
+  at once along with the rest of the blast.
+- **What it does.** Each solid rock cell in it that isn't already broken or
+  loose is left loose where it is, drawn as rubble, and put in settling, so
+  it slumps into whatever opened under it: the tunneler's own shaft, the
+  cells the blast threw, or melt that ran off. Nothing is moved or made,
+  so the books are unchanged (the new test
+  `a_blast_with_no_column_leaves_a_rubble_chimney_and_keeps_the_books`
+  checks them every 3 ticks and through a save).
+- **No uranium in it.** The unreacted uranium is still left only through
+  the blast's own rubble (the rock its rays broke), and the plume still
+  blows only that rubble out. The chimney is rock from over the cavity
+  that falls in later. It never saw the fireball, so it gets none. The
+  doping also runs before the roof falls in, so it can't depend on how far
+  the chimney has got.
+
+Measured headless with `blast_chimney_reach` (3 km barren test body, a
+charge with no column at the old rule's depth, a blast radius + 50 m:
+80 m at 10 kt). "Before" has the chimney switched off. "Over the charge"
+is the highest loose cell within a quarter radius of straight up. At
+1,000 and 10,000 kt the charge (190 and 350 m deep) is under less ground
+than the chimney's height, so it reaches the surface there, and the
+figure is the rubble lying on the ground.
+
+| Yield | Loose cells before / after (chimney) | Over the charge before / after | Blast ticks before / after | Blast work in all before / after | Dearest tick before / after |
+|---|---|---|---|---|---|
+| 10 kt | 6,588 / 7,037 (+449) | 1.68 / 2.24 radii (24 / 31 m/kt^1/3) | 15 / 20 | 59 / 60 ms | 30 / 30 ms |
+| 50 kt | 16,972 / 17,902 (+930) | 1.82 / 2.23 radii | 24 / 24 | 41 / 40 ms | 18 / 17 ms |
+| 1,000 kt | 90,129 / 95,730 (+5,601) | surface | 58 / 58 | 291 / 294 ms | 86 / 89 ms |
+| 10,000 kt | 284,787 / 304,544 (+19,757) | surface | 132 / 140 | 1,227 / 1,256 ms | 136 / 135 ms |
+
+These figures are from before the review. After it, the chimney stops a
+melt radius under the ground, so the loose cells at the end are 7,050 /
+17,902 / 95,383 / 290,754, and the loose ground over the charge reaches
+1.90 and 1.76 radii at 1,000 and 10,000 kt instead of the surface. The
+plume now goes on the budget too, so the 10,000 kt blast runs 182 ticks
+(about 4 s more) and 1,490 ms of work in all, but no tick of it costs
+more than 16 ms.
+
+At 10 kt the blast job now runs 2 s instead of 1.5 s, because it waits
+for the roof. The chimney's own work is lost in the noise up to
+1,000 kt, and about 30 ms in all, spread over the ticks, at 10,000 kt.
+
+**Found, not fixed** (fixed after review; see "Review fixes" below). The dearest tick of a blast with no column is its
+plume, not the chimney: `way_up` searches up to 40,000 cells for a way to
+the surface and looks up the ground (`ground_at`) as it goes, outside the
+budget. It took 28 ms at 10 kt, 78 ms at 1,000 kt and 123 ms at
+10,000 kt. A sapper's blast with a column throws a crater instead, so it
+never runs this. The 50 kt blast on the test body happened to make no
+plume (1 blast in 10 makes none), so it cost nothing there. A tunneler's
+blast that does make one would cost something between the 10 kt and
+1,000 kt figures.
+
+## Held chunks thrown whole (27 Nov)
+
+Hard rock that a blast holds together in big pieces (`Look::HELD`) used to
+stay where it was, or, in the crater's ground, fly out cell by cell with
+the rest of it. Now, on screen only, up to `CHUNKS_MAX` = 24 pieces a blast
+fly out whole as tumbling rock bodies, the same bodies that overhangs make
+when they break off.
+
+- **Only rock harder than 6 is ever held** (granite, gabbro and
+  anorthosite are 6; quartzite, olivine and iron-nickel are 7). That rule
+  was there before. So on the barren test body and the dev planet's
+  sediments and granite, a blast holds nothing and nothing changes. The
+  numbers below are from the 3 km test body with its crust's rock made
+  hardness 8 (in the tests only).
+- **Pieces in the crater go first.** The crater lies far above where the
+  rays reach, so the only thing that holds rock there is the column's
+  rule, which depends only on the cell, its rock and the blast
+  (`column_piece`). So the crater can tell, while it is planned, which of
+  its cells are held and in which piece. A piece with at least
+  `island_min_cells` (8) cells in the crater flies whole (after review:
+  each joined part of 8 to 120 cells, when its lowest layer goes; see
+  "Review fixes" below) when its top layer goes, as the ground over it has gone by then. It flies from where it
+  lies, the way the ground there flies, at `CHUNK_SHARE` = 0.2 of the
+  crater's middle speed. Bigger pieces go slower and smaller ones faster
+  (60 cells is the middle), with some spin. The rest of the crater flies as
+  before.
+- **Then the pieces left behind.** Once the rays are done, the column is
+  loosened and the crater is all out, the held pieces left are gone
+  through highest first. One goes if the biggest joined part of it still
+  held is at least 8 cells, some of its sides face open space (the crater,
+  the cavity, the sky) and it can move 4 m (`CHUNK_CLEAR`) in a straight
+  line without touching anything. The way it tries first is out from the
+  charge, turned towards its open side. Then it tries the open side
+  itself, that turned up to 60 degrees either way, and straight up. It
+  never goes back towards the charge. (A piece sticking out of the crater's
+  sloping wall is open on its side, but slid that way it hits the slope
+  under it.) This work is charged to the blast's budget.
+- **The books.** Each piece is lifted out of the grid with `lift_cell` and
+  becomes a body through the same code as a chunk that breaks off
+  (`Bodies::throw_chunk`). It is booked as in the air until it lands (as
+  rubble), is grabbed, or leaves the body. If the view has moved off it,
+  or 400 small bodies are already in the air, a crater piece flies in
+  clumps like the rest of the crater instead. A save (`finish_blasts`) throws none of the pieces
+  left behind; they stay held. The new test
+  `held_pieces_are_thrown_out_whole_and_keep_the_books` checks the books
+  every 3 ticks, through a save with pieces in the air, and when the view
+  leaves them.
+
+Measured headless with `blast_chunks` (the hard-rock body, over the blast
+and the minute after it; "before" has both throws switched off). The counts
+are the same every run.
+
+| Yield | Pieces held | Thrown whole (crater + left behind) | Cells in them | Most rock bodies in the air before / after | Blast work in all before / after | Dearest step before / after | Dearest flying before / after |
+|---|---|---|---|---|---|---|---|
+| 10 kt | 32 | 6 (6 + 0) | 264 | 1 / 6 | 41 / 42 ms | 68 / 62 ms | 1.1 / 2.8 ms |
+| 100 kt | 135 | 24 (19 + 5) | 2,202 | 2 / 24 | 104 / 103 ms | 73 / 78 ms | 3.8 / 4.5 ms |
+| 1,000 kt | 368 | 24 (24 + 0) | 3,369 | 3 / 24 | 430 / 429 ms | 92 / 96 ms | 12.0 / 10.2 ms |
+| 10,000 kt | 1,142 | 24 (24 + 0) | 3,058 | 53 / 59 | 1,899 / 1,897 ms | 115 / 107 ms | 11.1 / 23.1 ms |
+
+The blast's own work hardly changes. The cost is in moving the bodies: at
+10,000 kt the dearest tick of flying doubled to about 23 ms, with 59 bodies
+in the air (about 35 of them chunks that broke off by themselves, as
+before). The pieces fly at about 5 to 17 m/s at 10 kt and 18 to 65 m/s at
+10,000 kt. On this small body that is past its escape speed of 4.5 m/s,
+so most are still drifting away a minute on, as the crater's ground does;
+on a body with more pull, more would come back down. At 10 kt the crater
+swallows most of the pieces near the surface, and those left behind are
+all shut in by rubble or can't move 4 m clear, so only the crater's 6 fly. If chunks should fly in common rock too, the rule that rock must be
+harder than 6 to be held (`blast_broken`, `column_piece`) is the thing to
+change; that would change the look of every blast in granite.
+
+## Review fixes for the three above (27 Nov)
+
+A review of the far cracks, the chimney and the thrown chunks found these,
+all fixed:
+
+- **Cracks stopped at the charge's level with no column.** The cracks
+  stop at the ground over the charge, but with no column that was taken
+  as 0 m, so a tunneler's blast cracked only the rock under its charge: a
+  crack field cut off in a straight line, and a chimney rising into
+  uncracked rock. The ground over the charge is now looked up for every
+  blast. With no column, the cracks over and under the charge now lie
+  about as thickly (10 kt, 8 blasts, drawn cracks per square metre 2.5 to
+  3.5 radii out: 0.037, 0.023, 0.030, 0.024 under it; 0.039, 0.021, 0.022,
+  0.020 over it, where over it was 0 or 1 cell a ring before).
+- **A thin ring, then a thicker ring of cracks outside it.** The near zone
+  faded to nothing, then the far zone started thick. The far zone now
+  starts 0.4 of the way into the near zone (`FAR_FROM`) and comes in
+  gradually over the near zone's fading end, with fewer blocks cracking
+  (`FAR_SHARE` 0.2 at 10 kt, more for bigger blasts, as their blocks are
+  bigger) and fewer edges (`FAR_EDGE` 0.7), thinning slowly outward.
+  Drawn cracks per square metre below the charge, in rings a quarter
+  radius wide from 2.25 radii out, at 10 kt (new ignored test
+  `blast_crack_profile`): before (one blast) 0.072, 0.046, 0.066, 0.115,
+  0.132, 0.123, 0.094, 0.048; now (averaged over 8 blasts) 0.108, 0.044,
+  0.028, 0.027, 0.021, 0.024, 0.019, 0.014. At 1,000 kt (3 blasts) it now falls steadily too;
+  the single 10,000 kt blast still has one small bump (0.017 then 0.025),
+  within what one blast's big blocks vary by.
+- **Far blocks judged twice could disagree.** A block's verdict is now
+  kept the first time it is asked, so the crater lifting its site later
+  can't change it.
+- **The chimney reached the surface.** With nothing empty under it to
+  sink into, that only turned a strip of surface to rubble, which then ran
+  down slopes. It now stops a melt radius under the ground. It also waits
+  until the plume has found its way up, so a save (which finishes a blast
+  at once) finds the same way as play does.
+- **The plume was the dearest tick of a blast with no column.** Its
+  search for a way up looked up the ground about 50 to 160 times, each
+  about half a millisecond, all in one tick, then went through all the
+  rubble and lifted up to 500 cells at once. Now each ground lookup starts
+  from the ground found beside it, and the search, the pass over the
+  rubble and the lifting all go a budget's worth per tick. The stream's
+  timing is counted from when the plume began, so it looks the same. The
+  dearest blast tick with no column (`blast_chimney_reach`): 10 kt 30 ->
+  22 ms (now the first tick, the front's own), 50 kt 18 -> 18, 1,000 kt
+  89 -> 13, 10,000 kt 135 -> 16.
+- **Crater pieces thrown too early, and in halves.** A held piece in the
+  crater flew when its top layer went, sideways into the ground still
+  standing beside its lower part. It now goes when its lowest layer goes.
+  A piece cut by the sapper's shaft flew as one body with a 7 m gap in
+  it; each joined part now goes on its own (new test
+  `held_pieces_cut_by_a_shaft_fly_joined_up`). The held cells that don't
+  go whole now fly in their normal clumps (they had been taken out of
+  them and flew one by one, up to 10,000 drops at once at 10,000 kt). If a
+  piece can't become a body when its time comes, its cells fly each as it
+  would have with the crater.
+- **Pieces left behind thrown across narrow gaps.** A piece must now be
+  able to move clear as far as it flies in its first 0.3 s, and at least
+  its own size, not just 4 m.
+- **Pieces bigger than a tumbling body may be.** None over
+  `island_max_cells` (120) is thrown whole now. (Moving them as slabs, as
+  big break-offs move, was tried: a slab sheds a piece every so often as
+  it moves, and a fast one drifting off a small body for minutes shed
+  hundreds, filling the 400 bodies the game allows, with 147 ms ticks of
+  flying at 10,000 kt.) So fewer and smaller pieces fly at big yields.
+- **Smaller fixes.** Pieces left behind are judged only once the
+  crater's last layer is out (one tick late). Rock that broke free as a
+  body stayed listed as loose and cracked (up to 206 empty cells after a
+  10 kt blast in hard rock); it is now taken off both lists.
+
+Measured headless (3 km barren test body; held pieces on the hard-rock
+copy), before the review fixes / after:
+
+| Yield | Cracked cells | Farthest crack below the charge | Pieces thrown whole (cells) | Most rock bodies in the air | Dearest flying tick |
+|---|---|---|---|---|---|
+| 10 kt | 6,304 / 4,947 | 74 / 69 m/kt^1/3 | 6 (264) / 5 (254) | 6 / 5 | 2.8 / 3.0 ms |
+| 100 kt | | | 24 (2,202) / 15 (771) | 24 / 17 | 4.5 / 6.2 ms |
+| 1,000 kt | 66,312 / 61,141 | 83 / 88 | 24 (3,369) / 11 (503) | 24 / 14 | 10.2 / 10.9 ms |
+| 10,000 kt | 228,838 / 224,632 | 87 / 87 | 24 (3,058) / 21 (1,312) | 59 / 56 | 23.1 / 26.1 ms |
+
+`blast_timings` on the plain body is as before: the blast's own work at
+most 11 to 13 ms a tick from 100 kt up (24 ms at 10 kt, its first tick,
+planning the crater; it read 15 to 26 ms across runs before too), and the
+crater the same.
+
+**For Benjamin:** at 1,000 kt and up, most held pieces are bigger than
+120 cells, so only the smaller ones fly whole. Cutting the big ones into
+a few pieces each would let more fly; say if that is wanted.
 

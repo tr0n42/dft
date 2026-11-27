@@ -634,6 +634,10 @@ pub struct Sim {
     /// The last crater thrown: its cells, and how deep its bowl was planned
     /// at the middle (m), for the timings and tests.
     pub last_crater: (usize, f64),
+    /// The last blast on screen with held pieces: how many it held, how
+    /// many it threw out whole as rock bodies, and how many cells those
+    /// were (for the timings and tests).
+    pub last_chunks: (usize, usize, usize),
     /// Sappers caught in a blast, going off a moment later: (tick, where).
     chain: Vec<(u64, (f64, f64), f64)>,
     /// Blasts going off, their shock fronts running out over the ticks
@@ -1057,6 +1061,7 @@ impl Sim {
             plume_out: Default::default(),
             eject: Default::default(),
             last_crater: (0, 0.0),
+            last_chunks: (0, 0, 0),
             chain: Vec::new(),
             blast_jobs: Vec::new(),
             next_tunnel_k: 0,
@@ -1643,6 +1648,18 @@ impl Sim {
         }
     }
 
+    /// A cell lifted out of the ground into a body: it leaves the dig face,
+    /// and is no longer loose or cracked. (Left in `loose`, rubble that broke
+    /// free was saved as loose, put back to settle on load, and skipped by
+    /// later blasts as already broken, once something filled its place.)
+    fn cell_lifted(&mut self, c: (i64, i64)) {
+        self.loose.remove(&c);
+        self.fractured.remove(&c);
+        self.progress.remove(&c);
+        self.reserved.remove(&c);
+        self.open_cell(c);
+    }
+
     /// Apply what the loose bodies did this tick: cells that broke free leave
     /// the dig face, cells that landed join it, and fast rock wrecks drones
     /// working where it passes.
@@ -1652,9 +1669,7 @@ impl Sim {
         {
             let lifted = self.bodies.break_free_big(&mut self.world);
             for c in lifted {
-                self.progress.remove(&c);
-                self.reserved.remove(&c);
-                self.open_cell(c);
+                self.cell_lifted(c);
             }
         }
         let q1 = clock();
@@ -1662,9 +1677,7 @@ impl Sim {
         {
             let lifted = self.bodies.break_free(&mut self.world);
             for c in lifted {
-                self.progress.remove(&c);
-                self.reserved.remove(&c);
-                self.open_cell(c);
+                self.cell_lifted(c);
             }
         }
         let q2 = clock();
@@ -1674,9 +1687,7 @@ impl Sim {
         self.prof2[1] += q2 - q1;
         self.prof2[2] += q3 - q2;
         for c in ev.lifted {
-            self.progress.remove(&c);
-            self.reserved.remove(&c);
-            self.open_cell(c);
+            self.cell_lifted(c);
         }
         for (c, m) in ev.landed {
             if self.eject_k.get(m as usize).is_some_and(|k| *k > 0.0) {
