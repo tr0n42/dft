@@ -983,10 +983,102 @@ life). The production plan below still stands for step 3 of that order.
   radioactivity (technetium, polonium, astatine and francium are on no body
   until then).
 
-## Last session's report (25 to 26 November 2026)
+## Last session's report (26 to 27 November 2026)
 
 When Benjamin asks for a "handoff digestion", repeat this section to him
 as it stands.
+
+**The ask:** make a sapper's blast cheap enough that big yields go off
+without a hitch, following the plan in `docs/explosions-research.md`
+(Benjamin's idea: the shock as a front moving out band by band). He went
+to bed and asked for the rest of the steps done overnight, committed
+locally, for review in the morning.
+
+**Built, step by step** (details and every number in
+`docs/explosions-research.md`; all on the sapper's blast in
+`src/units/sapper.rs`):
+- **Step 1, quick wins** (0906b99): the crater's ground looked up once
+  per column, cracks decided per block. The blast's one tick went from
+  136 to 41 ms at 10 kt and from 871 to 412 ms at 1,000 kt.
+- **Step 2, the shock as a moving front** (68204f0): a blast is now a job
+  that runs out 200 m a game second, half a metre at a time, inside a
+  fixed budget of work per tick (what's on screen goes first). No blast
+  tick costs more than about 10 to 20 ms now, at any yield. A save
+  finishes any blast still going.
+- **Step 4, big craters in clumps** (a6b9914): the 20,000-cell crater
+  cap is gone. Big craters fly as clumps of 4 to 24 cells, so at most
+  about 4,700 pieces are in the air. The 10,000 kt crater is now 50,086
+  cells and 161 m deep (it was cut off at 58 m).
+- **Step 5, look and physics** (8fe2b35, 478cee7):
+  - Cracks reach 70 to 90 m/kt^1/3 (real tests: 80 to 120), thinning
+    outward. They were 43 to 50.
+  - A blast with no loosened column (the tunneler's end) gets a rubble
+    chimney: the cavity's roof falls in a second later.
+  - Hard rock held in big pieces is thrown out whole as tumbling rock
+    bodies. Only rock harder than 6 is ever held, so on the dev planet
+    (granite and softer) you won't see it yet.
+  - A shock field: caves shield the rock behind them (a 4 m gap leaves
+    about 1% broken behind it), soft layers carry the blast further,
+    water and lava carry the shock. Plain rock looks within a few per
+    cent of before.
+- **Step 3, scoped down** (6c3d963): the plan was to keep blast zones as
+  shapes. A study found that saves only about 11 ms over a whole
+  10,000 kt blast, for a lot of risk, so it was not done. Instead the
+  loose and cracked cell lists are kept as compact bit tiles (save
+  version 18; older saves still load), and mined cells now come off
+  them. A minute after a 1,000 kt blast the lists take 0.13 MB instead
+  of 6.7, and the save is 590 KB instead of 938.
+
+**In the game** (dev planet, `--test-blast`, filmed in the background):
+10 and 1,000 kt hold 60 fps. 10,000 kt held 59.9 fps in its worst second
+(before the night it stalled about a second). Contact sheets:
+`logs/q8*/sheet.png` (final: 10, 1000 and 10000 kt), `logs/q6*` and
+`logs/q7*` (after step 5 and after the shock field).
+
+**To try:** `test-big-blast.bat` (type the kilotons; scroll out for the
+big ones).
+
+**Tests:** the blast tests check the mass books every few ticks and
+through saves; new tests for the crater clumps, chimney, chunks, cave
+shadow, soft layer, liquid seam, tunneler's bore and old-version saves.
+One older test was changed: the eruption test counted a one-minute pause
+of the vent as "quiet" and then failed when it added 15% more. That
+happened because rock that breaks off as a body is now correctly taken
+off the loose list. It now checks that the vent has nearly stopped by
+minute 9. The full suite passed at the end of the night (48 groups, 0 failures;
+`logs/full-suite-27nov.txt`).
+
+**Waiting for Benjamin:**
+- **Push:** 20 local commits (7763a6c onward, including the 25 to 26 Nov
+  work) need his go-ahead.
+- **How the crater's rock flies.** Two choices were filmed:
+  - Honest physics: a slow blanket of rubble round the crater that keeps
+    about half the rock. On these weak-gravity worlds it hung over the
+    crater like smoke for minutes.
+  - The fast fan he approved earlier, now gentler at the rim. This is
+    what is in now (`EJECTA_RIM_SHARE` 0.45). On small worlds almost all
+    of the crater's rock leaves the planet for good.
+  - Which one does he want, or a middle way?
+- **Chunks in granite?** Thrown whole pieces only happen in rock harder
+  than 6. Widening that changes the look of every blast in granite.
+  Pieces bigger than 120 cells could also be cut up so more of them fly.
+- **Liquids carry the shock** (a blast beside lava breaks the rock
+  beyond it). That is physically right; one line to change if not
+  wanted.
+
+**Known costs, not fixed:**
+- The worst whole ticks headless (about 105 ms) come from the swarm's
+  once-a-second work and the specialists' 30-second scans, not from the
+  blast. Neither is on a budget.
+- Settling the rubble costs about 20 ms a tick for a while after a big
+  blast.
+- On the dev planet a 10,000 kt blast's dearest tick is about 44 ms
+  headless. The cause hasn't been found.
+- The shock field takes about 0.6 game seconds before the rays set off.
+  It doesn't show in the films, and it doubles a 10 kt blast's total
+  work (to 86 ms, spread over ticks).
+
+## Previous session's report (25 to 26 November 2026)
 
 **The ask:** define every ground unit class with Benjamin, one at a time,
 then build and test them all overnight (he was away for Thanksgiving),
@@ -1036,7 +1128,7 @@ push to GitHub needs Benjamin's go-ahead.
 
 **Open questions for Benjamin:** on the v2 page, under each unit.
 
-## Previous session's report (15 November 2026)
+## Earlier session's report (15 November 2026)
 
 **The ask:** not fixed drone counts but a planet covered in working drones
 at 15x (the game will be capped at 10x; the rest is room for what's still
@@ -1096,7 +1188,7 @@ keeps a bit per charted cell instead of a map entry.
 **Tests:** full suite 112 passed, 0 failed, 3 ignored (as before), with 3
 new far-field tests. Commits ea57dd1 onward, pushed to GitHub on 16 Nov.
 
-## Earlier session's report (14 to 15 November 2026)
+## Older session's report (14 to 15 November 2026)
 
 **What we did (14 Nov, with Benjamin):** the fleet commander for haulers
 (drop-off points, calls, relief), cutters following moved points and
