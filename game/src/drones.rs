@@ -450,7 +450,7 @@ fn draw(
     let shape = swarm.0;
     // Zoomed out this far, each flock is drawn as one mark (see ICON_MPP).
     let icons = view.mpp >= ICON_MPP;
-    let (now, haulers, units, chunks, new_booms, recent, heights, flocks) = {
+    let (now, haulers, units, (chunks, chunks_t), new_booms, recent, heights, flocks) = {
         let mut out = run.0.out.lock();
         if let Some(v) = out.leg_full.take() {
             fleet.legs = v;
@@ -490,7 +490,7 @@ fn draw(
         if out.fields_version != fleet.paths.version || fleet.paths.sky == 0.0 {
             fleet.paths.set(out.fields_version, out.fields.clone(), body.0.max_radius);
         }
-        (t, out.haulers.clone(), (out.units.clone(), out.animals.clone()), out.chunks.clone(), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()), if icons { out.hubs.clone() } else { Vec::new() })
+        (t, out.haulers.clone(), (out.units.clone(), out.animals.clone()), (out.chunks.clone(), out.stats.time), std::mem::take(&mut out.booms), out.stats.recent_mix.clone(), out.heights.as_ref().map(|h| h.1.clone()), if icons { out.hubs.clone() } else { Vec::new() })
     };
     let lc = lights.rgb();
     let v = *view;
@@ -711,7 +711,17 @@ fn draw(
         let ppm = (1.0 / v.mpp) as f32;
         // Texels a cell across: as many as fit (as on the tiles), at most 8,
         // fewer when many cells are on screen.
-        let on_screen: Vec<&dft_sim::bodies::AirCell> = chunks.iter().filter(|a| a.x > l - 2.0 && a.x < r + 2.0 && a.y > b - 2.0 && a.y < t + 2.0).collect();
+        // Each cell moved on from where the simulation last had it to the
+        // moment drawn, by its own speed and turn: the simulation ticks ten
+        // times a game second, and flying rock drawn only where each tick
+        // left it jumped along at that rate (Benjamin, 27 Nov). (Never more
+        // than a few ticks either way, should the clocks part.)
+        let ahead = (now - chunks_t).clamp(-0.3, 0.3);
+        let moved: Vec<dft_sim::bodies::AirCell> = chunks
+            .iter()
+            .map(|a| dft_sim::bodies::AirCell { x: a.x + a.vx as f64 * ahead, y: a.y + a.vy as f64 * ahead, angle: a.angle + a.spin * ahead as f32, ..*a })
+            .collect();
+        let on_screen: Vec<&dft_sim::bodies::AirCell> = moved.iter().filter(|a| a.x > l - 2.0 && a.x < r + 2.0 && a.y > b - 2.0 && a.y < t + 2.0).collect();
         let mut n = 1usize;
         while n < 8 && (n * 2) as f32 <= ppm && on_screen.len() * (n * 2) * (n * 2) <= 150_000 {
             n *= 2;

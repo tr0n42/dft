@@ -34,7 +34,11 @@ pub type Cell = (i64, i64);
 /// rigid piece, without tumbling, under the pull it feels where it is, until
 /// it meets the ground (and sets down there) or drifts off for good.
 /// A cell of rock (or scrap) in the air, for drawing: its middle in world
-/// metres, its body's turn (radians), the cell it was cut from, its material.
+/// metres, its body's turn (radians), the cell it was cut from, its material,
+/// and how fast its middle moves (m/s) and its body turns (radians a
+/// second). The game moves it on by these between the simulation's ticks,
+/// so flying rock is drawn at the screen's frame rate rather than jumping
+/// ten times a second.
 #[derive(Clone, Copy, Debug)]
 pub struct AirCell {
     pub x: f64,
@@ -42,6 +46,9 @@ pub struct AirCell {
     pub angle: f32,
     pub home: Cell,
     pub m: MatId,
+    pub vx: f32,
+    pub vy: f32,
+    pub spin: f32,
 }
 
 struct Slab {
@@ -600,9 +607,16 @@ impl Bodies {
             let o = self.world_point(l, Vector::new(0.0, 0.0));
             let e = self.world_point(l, Vector::new(1.0, 0.0));
             let angle = (e.1 - o.1).atan2(e.0 - o.0) as f32;
+            // (Each cell moves as its point of the body does: the body's
+            // own speed plus its turn about its middle.)
+            let f = &self.frames[&l.frame];
+            let b = &f.phys.bodies[l.handle];
+            let (v, w, c) = (b.linvel(), b.angvel(), b.center_of_mass());
+            let (cx, cy) = (c.x as f64 + f.origin.0, c.y as f64 + f.origin.1);
             for ((i, j), m) in &l.cells {
                 let p = self.world_point(l, Vector::new(*i as Real + 0.5, *j as Real + 0.5));
-                out.push(AirCell { x: p.0, y: p.1, angle, home: (l.origin.0 + *i as i64, l.origin.1 + *j as i64), m: *m });
+                let (rx, ry) = ((p.0 - cx) as f32, (p.1 - cy) as f32);
+                out.push(AirCell { x: p.0, y: p.1, angle, home: (l.origin.0 + *i as i64, l.origin.1 + *j as i64), m: *m, vx: v.x as f32 - w as f32 * ry, vy: v.y as f32 + w as f32 * rx, spin: w as f32 });
             }
         }
         // A clump is drawn as its cells heaped in a square round where it
@@ -614,13 +628,13 @@ impl Bodies {
             for (k, &m) in d.mats().iter().enumerate() {
                 let (gx, gy) = ((k % side) as f64 - half, (k / side) as f64 - half);
                 let home = (d.from.0 + (k % side) as i64, d.from.1 + (k / side) as i64);
-                out.push(AirCell { x: d.p.0 + gx, y: d.p.1 + gy, angle: 0.0, home, m });
+                out.push(AirCell { x: d.p.0 + gx, y: d.p.1 + gy, angle: 0.0, home, m, vx: d.v.0 as f32, vy: d.v.1 as f32, spin: 0.0 });
             }
         }
         for sl in &self.slabs {
             for ((i, j), m) in &sl.cells {
                 let home = (sl.origin.0 + *i as i64, sl.origin.1 + *j as i64);
-                out.push(AirCell { x: home.0 as f64 + 0.5 + sl.pos.0, y: home.1 as f64 + 0.5 + sl.pos.1, angle: 0.0, home, m: *m });
+                out.push(AirCell { x: home.0 as f64 + 0.5 + sl.pos.0, y: home.1 as f64 + 0.5 + sl.pos.1, angle: 0.0, home, m: *m, vx: sl.vel.0 as f32, vy: sl.vel.1 as f32, spin: 0.0 });
             }
         }
         out
