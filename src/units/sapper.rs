@@ -96,6 +96,108 @@ pub(super) const MELT_COOL_S: f64 = 6.0;
 /// Ground this hot next to a sapper (a blast's heat) destroys it, and so sets it off.
 pub(super) const SAPPER_COOK_K: f64 = 800.0;
 
+/// The cells a walk over a box round a blast has met: a bit per cell of
+/// the box. The column and the cracks step through the box at 0.7 m, so
+/// they meet most cells twice; a hash set to tell took most of their time
+/// at big yields. (A cell outside the box, which rounding could give, is
+/// kept in an ordinary set.)
+struct Met {
+    x0: i64,
+    y0: i64,
+    w: i64,
+    h: i64,
+    bits: Vec<u64>,
+    out: CellSet,
+}
+
+impl Met {
+    /// For the box from `at`, `h0` to `h1` along `up` and `s` either side
+    /// along `side`.
+    fn new(at: (f64, f64), up: (f64, f64), side: (f64, f64), h0: f64, h1: f64, s: f64) -> Met {
+        let corners = [(h0, -s), (h0, s), (h1, -s), (h1, s)].map(|(h, s)| (at.0 + up.0 * h + side.0 * s, at.1 + up.1 * h + side.1 * s));
+        let lo = |f: fn(&(f64, f64)) -> f64| corners.iter().map(f).fold(f64::MAX, f64::min).floor() as i64 - 1;
+        let hi = |f: fn(&(f64, f64)) -> f64| corners.iter().map(f).fold(f64::MIN, f64::max).floor() as i64 + 1;
+        let (x0, y0) = (lo(|p| p.0), lo(|p| p.1));
+        let (w, h) = (hi(|p| p.0) - x0 + 1, hi(|p| p.1) - y0 + 1);
+        Met { x0, y0, w, h, bits: vec![0; ((w * h + 63) / 64) as usize], out: CellSet::default() }
+    }
+
+    /// Whether `c` is new (and now met).
+    fn insert(&mut self, c: (i64, i64)) -> bool {
+        let (dx, dy) = (c.0 - self.x0, c.1 - self.y0);
+        if dx < 0 || dy < 0 || dx >= self.w || dy >= self.h {
+            return self.out.insert(c);
+        }
+        let i = (dy * self.w + dx) as usize;
+        let (word, bit) = (i / 64, 1u64 << (i % 64));
+        let new = self.bits[word] & bit == 0;
+        self.bits[word] |= bit;
+        new
+    }
+}
+
+/// The blocks a blast's shock cracks rock into, of one size: a Voronoi
+/// pattern, each block round a site jittered in its square of the grid.
+/// Each site (and its block's roll of the dice) is worked out once over
+/// the box `x0..x1`, `y0..y1`, not nine times for every cell looked at.
+struct Blocks {
+    size: f64,
+    blast: u64,
+    i0: i64,
+    j0: i64,
+    ni: i64,
+    nj: i64,
+    /// Each site's place and its block's roll (NaN: not worked out yet).
+    sites: Vec<[f64; 3]>,
+}
+
+impl Blocks {
+    fn new(size: f64, blast: u64, x0: i64, y0: i64, x1: i64, y1: i64) -> Blocks {
+        let (i0, j0) = ((x0 as f64 / size).floor() as i64 - 2, (y0 as f64 / size).floor() as i64 - 2);
+        let (ni, nj) = ((x1 as f64 / size).floor() as i64 + 3 - i0, (y1 as f64 / size).floor() as i64 + 3 - j0);
+        Blocks { size, blast, i0, j0, ni, nj, sites: vec![[f64::NAN; 3]; (ni * nj) as usize] }
+    }
+
+    fn work_out(&self, i: i64, j: i64) -> [f64; 3] {
+        let (size, k) = (self.size, self.size as u64);
+        let px = (i as f64 + crate::noise::unit(hash(47, i, j, k))) * size;
+        let py = (j as f64 + crate::noise::unit(hash(53, j, i, k))) * size;
+        let id = hash(0xF2AC, i, j, k);
+        [px, py, crate::noise::unit(hash(id, self.blast as i64, 0, 71))]
+    }
+
+    fn site(&mut self, i: i64, j: i64) -> [f64; 3] {
+        let (a, b) = (i - self.i0, j - self.j0);
+        if a < 0 || b < 0 || a >= self.ni || b >= self.nj {
+            return self.work_out(i, j);
+        }
+        let k = (b * self.ni + a) as usize;
+        if self.sites[k][0].is_nan() {
+            self.sites[k] = self.work_out(i, j);
+        }
+        self.sites[k]
+    }
+
+    /// The block cell (x, y) is in (its site's square), and its roll.
+    fn of(&mut self, x: i64, y: i64) -> ((i64, i64), f64) {
+        let size = self.size;
+        let (i0, j0) = ((x as f64 / size).floor() as i64, (y as f64 / size).floor() as i64);
+        let (mut best, mut id, mut roll) = (f64::INFINITY, (0, 0), 0.0);
+        for i in i0 - 1..=i0 + 1 {
+            for j in j0 - 1..=j0 + 1 {
+                let [px, py, u] = self.site(i, j);
+                let d = (px - x as f64).powi(2) + (py - y as f64).powi(2);
+                if d < best {
+                    best = d;
+                    id = (i, j);
+                    roll = u;
+                }
+            }
+        }
+        (id, roll)
+    }
+}
+
 impl Sim {
     /// A sapper's blast radius (m) for its yield.
     pub(super) fn sapper_radius(&self) -> f64 {
@@ -940,7 +1042,7 @@ impl Sim {
             hash(0x91ED, i, j, 0)
         };
         let mut cracked = 0u64;
-        let mut seen = CellSet::default();
+        let mut seen = Met::new(at, up, side, -r * 0.5, height + 1.0, r * lt);
         let mut h = -r * 0.5;
         while h <= height + 1.0 {
             let half = r * (1.0 + (lt - 1.0) * (h / height).clamp(0.0, 1.0));
@@ -983,6 +1085,23 @@ impl Sim {
         (a.cos() * ground, a.sin() * ground)
     }
 
+    /// The ground at angle `a` for a crater, where a dip narrower than the
+    /// two looks `side` either side of it (a shaft or crack) counts as not
+    /// there. The three looks start from `near`, the highest ground found a
+    /// step before, and set it to theirs, so each walks down only a few
+    /// cells of air. It is the highest, not each look's own, because a look
+    /// that went down a hole would carry the hole's floor on and then take a
+    /// cave or bore beside the hole for the ground; a hole narrower than the
+    /// looks always has one of them outside it, which keeps the start up at
+    /// the surface.
+    pub(super) fn crater_ground(&self, a: f64, side: f64, near: &mut f64) -> f64 {
+        let at = |a: f64| self.ground_from(a, true, *near);
+        let (c, l, r) = (at(a), at(a - side), at(a + side));
+        *near = c.max(l).max(r);
+        let side = l.min(r);
+        if c < side - 3.0 { side } else { c }
+    }
+
     /// The ground right over a blast thrown out, leaving a crater (Benjamin,
     /// 26 Nov: the top layer over the blast should be thrown off). A bowl
     /// `CRATER_W` of the loosened column's top half-width each side and
@@ -1016,12 +1135,10 @@ impl Sim {
         // the ground there, not to the sky straight up (on a hillside
         // straight up throws the uphill side into the hill).
         // (Down a shaft, a narrow dip, the ground either side of it.)
-        let ground = |s: &Self, x: f64| {
-            let at = |x: f64| s.ground_at(a0 + x / g0, true);
-            let (c, side) = (at(x), at(x - 5.0).min(at(x + 5.0)));
-            if c < side - 3.0 { side } else { c }
-        };
-        let slope = ((ground(self, wr) - ground(self, -wl)) / (wl + wr)).clamp(-1.5, 1.5);
+        let ground = |s: &Self, near: &mut f64, x: f64| s.crater_ground(a0 + x / g0, 5.0 / g0, near);
+        let (mut nl, mut nr) = (g0, g0);
+        let slope = ((ground(self, &mut nr, wr) - ground(self, &mut nl, -wl)) / (wl + wr)).clamp(-1.5, 1.5);
+        let mut near = g0;
         // (cell, offset across, depth share, depth m)
         let mut take: Vec<((i64, i64), f64, f64, f64)> = Vec::new();
         let mut seen = CellSet::default();
@@ -1029,7 +1146,7 @@ impl Sim {
         while x <= wr {
             let ang = a0 + x / g0;
             let (ux, uy) = (ang.cos(), ang.sin());
-            let gr = ground(self, x);
+            let gr = ground(self, &mut near, x);
             let e = if x < 0.0 { x / wl } else { x / wr };
             let d = dmax * (1.0 - e * e) * (0.85 + 0.3 * wander(x));
             // The plants on it.
@@ -1127,31 +1244,17 @@ impl Sim {
         let reach = r * CRACK_REACH;
         let far = stop.iter().fold(0.0f64, |a, &b| a.max(b)) + reach;
         let wide = far.max(r * lt + r);
-        let block = |x: i64, y: i64, size: f64| -> u64 {
-            let (i0, j0) = ((x as f64 / size).floor() as i64, (y as f64 / size).floor() as i64);
-            let (mut best, mut id) = (f64::INFINITY, 0u64);
-            for i in i0 - 1..=i0 + 1 {
-                for j in j0 - 1..=j0 + 1 {
-                    let px = (i as f64 + crate::noise::unit(hash(47, i, j, size as u64))) * size;
-                    let py = (j as f64 + crate::noise::unit(hash(53, j, i, size as u64))) * size;
-                    let d = (px - x as f64).powi(2) + (py - y as f64).powi(2);
-                    if d < best {
-                        best = d;
-                        id = hash(0xF2AC, i, j, size as u64);
-                    }
-                }
-            }
-            id
-        };
         let mut cracked = 0u64;
-        let mut seen = CellSet::default();
+        let mut seen = Met::new(at, up, side, -far, height + 1.0, wide);
+        let (x0, y0, x1, y1) = (seen.x0, seen.y0, seen.x0 + seen.w, seen.y0 + seen.h);
+        let mut blocks = [3.5, 5.0, 7.0, 10.0].map(|size| Blocks::new(size, blast, x0, y0, x1, y1));
         let mut h = -far;
         while h <= height + 1.0 {
             let mut s = -wide;
             while s <= wide {
                 let c = cell_of((at.0 + up.0 * h + side.0 * s, at.1 + up.1 * h + side.1 * s));
                 s += 0.7;
-                if !seen.insert(c) || broken.contains_key(&c) || self.loose.contains(&c) {
+                if !seen.insert(c) {
                     continue;
                 }
                 let p = mid(c);
@@ -1173,6 +1276,14 @@ impl Sim {
                 if t >= 1.0 {
                     continue;
                 }
+                let blocks = &mut blocks[((t * 4.0) as usize).min(3)];
+                let (id, roll) = blocks.of(c.0, c.1);
+                let near = (1.0 - t).powf(0.8);
+                // Not cracked even if it were the hardest rock: no need to
+                // look at what it is (asking the world is the dear part).
+                if roll >= (near * (0.45 + 0.75 * 0.95)).min(1.0) || broken.contains_key(&c) || self.loose.contains(&c) {
+                    continue;
+                }
                 let m = self.world.material(c.0, c.1);
                 if m == VACUUM || self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
                     continue;
@@ -1182,9 +1293,7 @@ impl Sim {
                     continue;
                 }
                 let hd = (mat.hardness as f64 / 10.0).clamp(0.05, 0.95);
-                let size = [3.5, 5.0, 7.0, 10.0][((t * 4.0) as usize).min(3)];
-                let id = block(c.0, c.1, size);
-                if crate::noise::unit(hash(id, blast as i64, 0, 71)) >= ((1.0 - t).powf(0.8) * (0.45 + 0.75 * hd)).min(1.0) {
+                if roll >= (near * (0.45 + 0.75 * hd)).min(1.0) {
                     continue;
                 }
                 // (Newly cracked only: what an earlier blast held or cracked
@@ -1193,7 +1302,7 @@ impl Sim {
                     continue;
                 }
                 cracked += 1;
-                if (block(c.0 + 1, c.1, size) != id || block(c.0, c.1 + 1, size) != id) && crate::noise::unit(hash(blast, c.0, c.1, 72)) < 0.9 - 0.4 * t {
+                if (blocks.of(c.0 + 1, c.1).0 != id || blocks.of(c.0, c.1 + 1).0 != id) && crate::noise::unit(hash(blast, c.0, c.1, 72)) < 0.9 - 0.4 * t {
                     self.world.set_look(c.0, c.1, Look::CRACKED);
                 }
             }
@@ -1484,5 +1593,70 @@ impl Sim {
             self.units.dope.insert(c, k);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn sim() -> Sim {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let base = crate::load_body(&data, "barren-world").unwrap();
+        let mut spec = base.spec.clone();
+        spec.radius_m = 3000.0;
+        let p = crate::planet::Planet::new(spec, base.mats.clone()).unwrap();
+        let eco = crate::economy::Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
+        Sim::new(crate::world::World::new(p), eco)
+    }
+
+    /// The crater's ground, walked across from one look to the next, is
+    /// the ground found walking down from the sky every time, also beside
+    /// a sapper's shaft with a bore along its bottom, and a shaft that
+    /// opens into a chamber (where a look that kept the hole's floor would
+    /// take the bore's or chamber's floor for the ground).
+    #[test]
+    fn a_crater_finds_the_ground_beside_shafts_bores_and_chambers() {
+        for case in 0..2 {
+            let mut s = sim();
+            let top = |s: &Sim, x: i64| {
+                let mut y = -(s.world.planet.max_radius as i64 + 5);
+                while s.world.material(x, y) == VACUUM {
+                    y += 1;
+                }
+                y
+            };
+            let dig = |s: &mut Sim, xs: std::ops::RangeInclusive<i64>, from: Option<i64>, to: i64| {
+                for x in xs {
+                    for y in from.unwrap_or_else(|| top(s, x))..=to {
+                        s.world.lift_cell(x, y);
+                    }
+                }
+            };
+            let y0 = top(&s, 0);
+            if case == 0 {
+                // A 7 m shaft 20 m off, 80 m down, and a bore along to the charge.
+                dig(&mut s, -23..=-17, None, y0 + 83);
+                dig(&mut s, -23..=-1, Some(y0 + 77), y0 + 83);
+            } else {
+                // A 7 m shaft 30 m down into a 25 m by 8 m chamber beyond it.
+                dig(&mut s, -8..=-2, None, y0 + 30);
+                dig(&mut s, -8..=17, Some(y0 + 30), y0 + 38);
+            }
+            let g0 = -(y0 as f64) + 1.0;
+            let a0 = (-1.0f64).atan2(0.0);
+            let mut near = g0;
+            let mut x = -60.0;
+            while x <= 60.0 {
+                let (a, side) = (a0 + x / g0, 5.0 / g0);
+                let got = s.crater_ground(a, side, &mut near);
+                // (With no hint each look walks down from the sky.)
+                let mut sky = f64::INFINITY;
+                let want = s.crater_ground(a, side, &mut sky);
+                assert_eq!(got, want, "case {case}: the ground {x} m along");
+                x += 0.7;
+            }
+        }
     }
 }

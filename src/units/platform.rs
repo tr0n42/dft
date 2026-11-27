@@ -395,14 +395,33 @@ impl Sim {
     /// from above the highest it could be that is solid (and, with
     /// `under_plants`, not a plant).
     pub(super) fn ground_at(&self, a: f64, under_plants: bool) -> f64 {
+        self.ground_from(a, under_plants, f64::INFINITY)
+    }
+
+    /// `ground_at`, for when the ground is known to be near `near` (m from
+    /// the centre), as it is beside ground just looked up: the walk down
+    /// starts a few metres over it rather than far over the highest the
+    /// ground could be, since every untouched cell of air on the way is
+    /// worked out from the generator (a crater's ground took 90 ms). If it
+    /// starts in the ground (the ground rose more than that), it walks down
+    /// from the top after all. It differs from `ground_at` only under an
+    /// overhang's very edge, where the ledge over the start is missed.
+    pub(super) fn ground_from(&self, a: f64, under_plants: bool, near: f64) -> f64 {
         let (ux, uy) = (a.cos(), a.sin());
+        let ground = |r: f64| {
+            let m = self.world.material((ux * r).floor() as i64, (uy * r).floor() as i64);
+            m != VACUUM && !(under_plants && self.units.is_flora.get(m as usize).copied().unwrap_or(false))
+        };
         let mut r = (self.world.planet.surface_radius(ux, uy) + 64.0).min(self.world.planet.max_radius + 1.0);
-        for _ in 0..4000 {
+        // (Whole metres down from the top, so it meets the same cells.)
+        let skip = (r - near - 4.0).floor();
+        let skip = if skip >= 1.0 && skip < 4000.0 && !ground(r - skip) { skip } else { 0.0 };
+        r -= skip;
+        for _ in skip as usize..4000 {
             if r <= 0.0 {
                 break;
             }
-            let m = self.world.material((ux * r).floor() as i64, (uy * r).floor() as i64);
-            if m != VACUUM && !(under_plants && self.units.is_flora.get(m as usize).copied().unwrap_or(false)) {
+            if ground(r) {
                 return r + 0.5;
             }
             r -= 1.0;
