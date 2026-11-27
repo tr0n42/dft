@@ -150,3 +150,18 @@ event times worked out at the start, not by how far the work has got.
     and walls slumping (settling, built).
 
 Off screen, all of it is worked out at once as numbers, as now.
+
+## Benjamin's decisions (27 Nov)
+
+- **The shock runs at the rock's real speed** (1 to 6 km/s). At 10 kt it
+  reaches the surface in about a tenth of a second; the jump, the dome and
+  the burst (about 2 s) carry the show.
+- **Radiation acts only when it happens** (prompt radiation, the flash, EMP).
+  No lasting hot ground for now.
+- **Harm to the swarm's machines:** the ground thrown under them wrecks them
+  (from the real spall zone), and the pressure wave blasts them away with
+  minor damage that grows with its strength. Heat, EMP and radiation do not
+  harm the swarm.
+- **Sappers stay buried** at their cratering depth. The routine handles any
+  depth, the surface and air bursts, for test blasts and later units or
+  upgrades.
