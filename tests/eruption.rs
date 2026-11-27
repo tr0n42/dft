@@ -38,20 +38,24 @@ fn a_tapped_magma_layer_blasts_out_then_goes_quiet() {
     assert_eq!(s.world.material(0, y), magma, "the shaft should reach the magma");
     let initial: f64 = s.world.ledger.initial.iter().sum();
     let mut last = 0;
-    let mut quiet_at = None;
+    // By the minute-9 mark the vent has nearly stopped: from then on only a
+    // trickle (under 1% of all it blasted out) may follow. (A one-minute
+    // pause used to count as quiet, but the vent can pause while its first
+    // burst is still in the air and then add a tenth or so more as the shaft
+    // clears, which that rule took for flaring up again; 27 Nov.)
+    let mut at_9 = 0;
     for minute in 1..=12 {
         s.run(minute as f64 * 60.0);
         let e = s.sandbox.stats.erupted;
         println!("  minute {minute}: {e} cells blasted out, {} drops in the air", s.bodies.drops());
-        if e == last && e > 0 && quiet_at.is_none() {
-            quiet_at = Some(e);
+        if minute == 9 {
+            at_9 = e;
         }
         last = e;
         assert!(s.world.ledger.imbalance(&s.world.remaining_kg()) < 1e-6 * initial, "the books stopped balancing");
     }
     assert!(last > 100, "the vent should have blasted out plenty, got {last}");
-    let quiet = quiet_at.expect("the vent should have gone quiet");
-    assert!(last - quiet < quiet / 10, "it flared up again after going quiet ({quiet} then {last})");
+    assert!(last - at_9 < last / 100, "the vent should have gone quiet ({at_9} at minute 9, {last} at 12)");
     // Magma came down on the surface, outside the shaft.
     let mut outside = 0;
     for x in -400i64..=400 {
