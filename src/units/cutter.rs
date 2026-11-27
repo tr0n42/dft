@@ -689,6 +689,7 @@ impl Sim {
         let t_touch = self.contact_k(cell);
         let molten = m != VACUUM && self.world.planet.mats.get(m).state == State::Liquid;
         let cold = self.cold_factor(cell, m);
+        let mut emptied = false;
         if kg > 0.0 {
             let mult = self.world.planet.mats.get(m).multiplier;
             let done = self.progress.get(&cell).copied().unwrap_or(0.0);
@@ -703,6 +704,7 @@ impl Sim {
                 self.prof5[0] += b - a;
                 self.prof5[1] += crate::swarm::clock() - b;
                 self.prof5[5] += 1.0;
+                emptied = true;
             } else {
                 self.progress.insert(cell, done + kg);
             }
@@ -744,6 +746,10 @@ impl Sim {
 
         let fly = dist2(from, (cx, cy)).sqrt() / self.cutter_speed();
         let paid = fly + if kg > 0.0 { self.cut_s(cell, m, kg) } else { 0.0 };
+        // (Only now: the cut was timed as rubble or cracked rock if it was.)
+        if emptied {
+            self.cell_mined(cell);
+        }
         if !self.spend(id, paid) {
             self.starved += 1;
             self.lose_on_trip(id, beside);

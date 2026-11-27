@@ -587,6 +587,7 @@ impl Sim {
                 self.progress.remove(&c);
                 self.reserved.remove(&c);
                 self.open_cell(c);
+                self.cell_mined(c);
                 match o.spoil.iter_mut().find(|e| e.0 == m) {
                     Some(e) => e.1 += kg,
                     None => o.spoil.push((m, kg)),

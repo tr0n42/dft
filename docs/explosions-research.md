@@ -121,6 +121,9 @@ column and 218,000 cracked cells, one by one, in a single tick.
    something actually changes (a cell cut, moved or drawn differently). At
    10,000 kt that saves writing about 600,000 cells, the `loose` and
    `fractured` sets stay small, and saves shrink.
+   (Partly done 27 Nov: the two sets kept as bit tiles, and mined cells taken
+   off them. The shapes themselves are left. See "The loose and cracked cells
+   as bit tiles" below.)
 4. **Clumped ejecta past 20,000 pieces.** One flying piece carries 4 to 16
    cells' mass and drops a small pile where it lands, sized for the zoom (at
    2 m a pixel, single cells are invisible anyway). This lifts the crater cap
@@ -734,3 +737,90 @@ of it the field, spread over its first ticks.
 (A test, `held_pieces_cut_by_a_shaft_fly_joined_up`, told bodies apart by
 their angle; two bodies that had hardly turned shared one, 0.00012, and it
 failed. It now leaves out bodies turned less than 0.01.)
+
+## The loose and cracked cells as bit tiles (27 Nov)
+
+Step 3, the safe part. A design study (no code) found that after a big
+blast the `loose` and `fractured` sets held hundreds of thousands of cells
+as a hash set, about 22 bytes a cell in memory and 16 in a save, and that
+mined cells were never taken off them, so in play they only grew. Turning
+the zones into shapes would touch every reader (settling, cutters, the
+forester, the blast itself, saves, tunnelers and openers). So instead:
+
+- **Both sets are now bit tiles**: one bit a cell in tiles of 64 x 64
+  cells, the same store the open space already used. It now counts its
+  cells, lets a tile go once it is empty, and walks its cells in a fixed
+  order (tile by tile, then row by row). Nothing depends on that order:
+  saves sort the cells, settling after a load sorts them by distance from
+  the middle, and the tests count or sort them.
+- **Saves are version 18** and write each set as its tiles: a tile's
+  corner, which of its 64 rows hold anything, and those rows. Older saves
+  still load (their lists of cells are read into tiles), and drop the
+  cells in either set that are empty by then: an empty cell is never mined
+  again, so nothing else would take it off. A new test writes a save in the
+  old layout and checks that it loads the same cells, the same cells
+  settling, and saves again to the same bytes as a new save, and that two
+  cells emptied behind the swarm's back come off both sets as it loads.
+- **A mined cell is taken off both sets**: cut by a cutter (after the cut
+  is timed, so a loose or cracked cell is still cut at its quicker rate),
+  dug by a tunneler, opener, heat sink or a sapper's shaft, harvested or
+  burned by a forester, thrown out by a scrap explosion, or mined a block at
+  a time by the packet swarm out of sight, or eaten out of sight by the far
+  field as a sector's level comes down (only the cells in the band it cut
+  are looked at). (Lifted into a falling body was already done.) Before,
+  whatever later filled the hole was taken for rubble or cracked rock.
+- **The blast leaves no cracked marks on holes either**: its crater ground
+  thrown out (cell by cell, in clumps or whole), its plume, and rubble that
+  settles on take the cell they leave off the cracked set as well as the
+  loose one. (Rubble that was cracked before it broke is cut as loose
+  wherever it comes to rest, so the mark isn't carried with it.) Nothing
+  in a blast asks whether an empty cell is cracked, so the ground comes out
+  the same cell for cell; only the cracked set is smaller.
+- The open-space set no longer keeps emptied tiles in a save (528 bytes
+  each). That was the only difference between an old save and one written
+  now in the old layout.
+
+Measured (`blast_cell_sets`, ignored): the 3 km test body, a blast at the
+top, stepped until the shock has run its course and then a minute more;
+before / now, a minute on. "Sets" is the two sets alone; load is inflating
+plus reading; the best of three runs each.
+
+| | 10 kt | 1,000 kt | 10,000 kt |
+|---|---|---|---|
+| Cells loose / cracked, before | 9,750 / 4,961 | 141,769 / 69,373 | 279,972 / 1,569 |
+| Cells loose / cracked, now | 9,750 / 4,783 | 141,474 / 67,775 | 279,736 / 1,567 |
+| Memory of the sets | 0.42 MB / 0.02 MB | 6.68 MB / 0.13 MB | 8.95 MB / 0.10 MB |
+| The sets in a save, raw | 0.24 MB / 0.01 MB | 3.38 MB / 0.09 MB | 4.50 MB / 0.07 MB |
+| The sets in a save, deflated alone | 27 KB / 3 KB | 381 KB / 34 KB | 503 KB / 14 KB |
+| Whole save, raw | 1.10 MB / 0.88 MB | 9.58 MB / 6.28 MB | 12.32 MB / 7.88 MB |
+| Whole save, deflated | 143 KB / 117 KB | 938 KB / 589 KB | 1,315 KB / 827 KB |
+| Writing the save (the game's pause) | 1.5 / 1.1 ms | 15.6 / 10.0 ms | 22.2 / 14.2 ms |
+| Deflating it (on another thread) | 20 / 14 ms | 168 / 95 ms | 243 / 148 ms |
+| Loading it | 3.5 / 2.8 ms | 33.4 / 25.8 ms | 47.6 / 38.6 ms |
+
+Right as the shock finishes, the 10,000 kt save goes from 10.94 MB raw and
+1,282 KB deflated to 6.48 MB and 789 KB. (These counts differ from the
+design study's, which were taken another way; before and now here are
+taken the same way.)
+
+The same results: as the shock finishes, the ground, the loose cells and
+the cells settling are the same before and now at all three yields (count
+and fingerprint). The cracked cells are fewer by the holes the blast threw
+out or rubble settled out of: 4,803 against 4,961 at 10 kt, 68,071 against
+69,375 at 1,000 kt, and the same 1,569 at 10,000 kt. A minute on the
+ground is still the same, and the loose set is smaller only by the cells
+dug in that minute (none at 10 kt, 295 at 1,000 kt, 236 at 10,000 kt; 4 and 1
+fewer of them queued to settle at the two big yields). Now no cell in
+either set is empty, at either time, at any of the three yields.
+`blast_timings` gives the same ticks, craters, depths, pieces in flight
+and mass thrown off at every yield. The books balance as before.
+
+Left, and why:
+
+- **Shapes.** With the tiles a 10,000 kt blast's 280,000 loose cells take
+  about 0.1 MB and 14 KB of a deflated save, so shapes would now save
+  little. They would also have every reader ask a shape instead of a set,
+  with cut and moved cells kept as exceptions: a lot of change for a few
+  KB. Worth it only for blasts far bigger than 10,000 kt.
+- **Settling after a load** still queues every loose cell. Queuing only the
+  ones with room to move would change what settles first after a load.

@@ -204,6 +204,7 @@ impl Sim {
                     self.undope(c, false);
                     self.progress.remove(&c);
                     self.open_cell(c);
+                    self.cell_mined(c);
                     let credited = kg * mult * t.spoil_recovery;
                     self.stock.add_composition(&self.world.planet.mats.elements, &self.world.planet.mats.get(m).composition, kg * t.spoil_recovery);
                     self.mass += credited;

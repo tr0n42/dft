@@ -514,6 +514,7 @@ impl Sim {
                 self.progress.remove(&c);
                 self.reserved.remove(&c);
                 self.open_cell(c);
+                self.cell_mined(c);
                 self.credit(lifted, 1.0);
                 kg_row += self.world.planet.mats.get(lifted).density;
             }

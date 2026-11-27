@@ -886,26 +886,15 @@ impl World {
         Some(m)
     }
 
-    /// Sector k's level comes down to `to`, from `from` (its old level, or
-    /// the highest ground in it when first cut): every cell already
-    /// generated cell by cell further out than that, in the sector, is
-    /// emptied, and the cells emptied are returned (per material) for the
-    /// swarm to book as eaten out of sight. Untouched cells need nothing:
-    /// they read as empty above the level (see `FarCut`).
-    pub fn far_lower(&mut self, k: usize, from: f64, to: f64) -> Vec<f64> {
-        let nm = self.nm();
-        let mut eaten = vec![0.0; nm];
+    /// The box (lowest x and y, then highest, in cells, corners included)
+    /// round every cell that sector k coming down from `from` to `to` can
+    /// empty: the sector's two edges and middle, at both radii, and half its
+    /// neighbours (whose ramps lean on its level). None for no such sector.
+    pub fn far_band(&self, k: usize, from: f64, to: f64) -> Option<(i64, i64, i64, i64)> {
         let n = self.far.levels.len();
         if k >= n {
-            return eaten;
+            return None;
         }
-        self.far.levels[k] = to as f32;
-        self.far.any = true;
-        self.far.version += 1;
-        let low = (to - FAR_PIT_M - 1.0).max(0.0);
-        self.far.floor2 = self.far.floor2.min(low * low);
-        // The band's box: the sector's two edges and middle, at both radii,
-        // and half its neighbours (whose ramps lean on its level).
         let tau = std::f64::consts::TAU;
         let (a0, a1) = (tau * (k as f64 - 0.5) / n as f64, tau * (k as f64 + 1.5) / n as f64);
         let to = to - FAR_PIT_M;
@@ -922,7 +911,30 @@ impl World {
                 by1 = by1.max(y);
             }
         }
-        let (x0, x1, y0, y1) = (bx0.floor() as i64 - 1, bx1.ceil() as i64 + 1, by0.floor() as i64 - 1, by1.ceil() as i64 + 1);
+        Some((bx0.floor() as i64 - 1, by0.floor() as i64 - 1, bx1.ceil() as i64 + 1, by1.ceil() as i64 + 1))
+    }
+
+    /// Sector k's level comes down to `to`, from `from` (its old level, or
+    /// the highest ground in it when first cut): every cell already
+    /// generated cell by cell further out than that, in the sector, is
+    /// emptied (all of them in `far_band`), and the cells emptied are
+    /// returned (per material) for the swarm to book as eaten out of sight.
+    /// Untouched cells need nothing: they read as empty above the level
+    /// (see `FarCut`).
+    pub fn far_lower(&mut self, k: usize, from: f64, to: f64) -> Vec<f64> {
+        let nm = self.nm();
+        let mut eaten = vec![0.0; nm];
+        let n = self.far.levels.len();
+        if k >= n {
+            return eaten;
+        }
+        self.far.levels[k] = to as f32;
+        self.far.any = true;
+        self.far.version += 1;
+        let low = (to - FAR_PIT_M - 1.0).max(0.0);
+        self.far.floor2 = self.far.floor2.min(low * low);
+        let Some((x0, y0, x1, y1)) = self.far_band(k, from, to) else { return eaten };
+        let to = to - FAR_PIT_M;
         let (lx0, ly0) = self.leaf_of(x0, y0);
         let (lx1, ly1) = self.leaf_of(x1, y1);
         let to2 = to * to;

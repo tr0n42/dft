@@ -202,7 +202,7 @@ const SETTLE_LOOK: usize = 3 * SETTLE_PER_TICK;
 pub(super) struct Settling(std::collections::BTreeSet<(i64, i64, i64)>);
 
 impl Settling {
-    pub(super) fn of(cells: &CellSet) -> Settling {
+    pub(super) fn of(cells: &CellBits) -> Settling {
         Settling(cells.iter().map(|c| (c.0 * c.0 + c.1 * c.1, c.0, c.1)).collect())
     }
 
@@ -1674,6 +1674,7 @@ impl Sim {
                             self.progress.remove(&q);
                             self.reserved.remove(&q);
                             self.open_cell(q);
+                            self.cell_mined(q);
                             let h = hash(self.tick, q.0, q.1, 0xD811 + k as u64);
                             let vs = 45.0 + 35.0 * crate::noise::unit(h);
                             let vx = (crate::noise::unit(hash(h, 1, 0, 0)) - 0.5) * 3.0;
@@ -1845,7 +1846,9 @@ impl Sim {
             let mut mats = Vec::with_capacity(e.cells.len());
             for &c in &e.cells {
                 let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
-                self.loose.remove(&c);
+                // (Off the cracked cells too: left there, the hole was taken
+                // for cracked rock once something filled it.)
+                self.cell_mined(c);
                 self.progress.remove(&c);
                 self.reserved.remove(&c);
                 self.open_cell(c);
@@ -1996,7 +1999,11 @@ impl Sim {
                 continue;
             }
             moves += 1;
+            // The rubble moves on and leaves an empty cell, not a cracked
+            // one. (Where it lands it is cut as loose, so it needs no
+            // cracked mark there either.)
             self.loose.remove(&c);
+            self.fractured.remove(&c);
             self.loose.insert(n);
             if let Some(u) = self.units.dope.remove(&c) {
                 self.units.dope.insert(n, u);
@@ -2324,13 +2331,13 @@ impl Sim {
     /// The cells cracked so far (by blasts' shocks and held pieces, and by
     /// tunnelers and openers), which are cut in half the time.
     pub fn cracked_cells(&self) -> impl Iterator<Item = (i64, i64)> + '_ {
-        self.fractured.iter().copied()
+        self.fractured.iter()
     }
 
     /// The loose cells (rubble, melt and thrown rock, which cutters take
     /// quickly, and which settle).
     pub fn loose_cells(&self) -> impl Iterator<Item = (i64, i64)> + '_ {
-        self.loose.iter().copied()
+        self.loose.iter()
     }
 
     /// One blast's work, shell by shell out to its front while the budget
@@ -2809,6 +2816,9 @@ impl Sim {
         if can && j.thrown < THROW_MAX && crate::noise::unit(hash(blast, c.0, c.1, 0x7E40)) < j.throw_share {
             let fresh = if self.world.dense_leaf(c.0, c.1).is_none() { FRESH_LEAF } else { 0 };
             if let Some(m) = self.world.lift_cell(c.0, c.1) {
+                // (A cell a ray cracked on its way may be thrown: it leaves
+                // no cracked mark on the hole.)
+                self.cell_mined(c);
                 self.progress.remove(&c);
                 self.reserved.remove(&c);
                 self.open_cell(c);
@@ -4014,7 +4024,7 @@ impl Sim {
                 continue;
             }
             let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
-            self.loose.remove(&c);
+            self.cell_mined(c);
             self.undope(c, false);
             self.progress.remove(&c);
             self.reserved.remove(&c);

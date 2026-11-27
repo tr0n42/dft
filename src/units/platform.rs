@@ -880,8 +880,8 @@ impl Sim {
     }
 
     /// What version 12 added: walkers' heights and bags, dropped bags, and
-    /// loose debris.
-    pub(super) fn write_units_12(&self, o: &mut crate::save::W) {
+    /// loose debris (`tiles`: as bit tiles, version 18 on, or as a list).
+    pub(super) fn write_units_12(&self, o: &mut crate::save::W, tiles: bool) {
         let mut looks: Vec<((i64, i64), u8)> = self.world.looks.values().flat_map(|l| l.iter().map(|(c, k)| (*c, *k))).collect();
         looks.sort_unstable();
         o.u32(looks.len() as u32);
@@ -894,10 +894,10 @@ impl Sim {
             o.u64(due);
             put_cell(o, c);
         }
-        let loose = sorted(self.loose.iter());
-        o.u32(loose.len() as u32);
-        for c in loose {
-            put_cell(o, c);
+        if tiles {
+            put_bits(o, &self.loose);
+        } else {
+            put_cell_list(o, &self.loose, false);
         }
         let u = &self.units;
         for w in &u.walkers {
@@ -929,7 +929,7 @@ impl Sim {
         self.settling = super::sapper::Settling::of(&self.loose);
     }
 
-    pub(super) fn read_units_12(&mut self, r: &mut crate::save::R) -> Result<(), String> {
+    pub(super) fn read_units_12(&mut self, r: &mut crate::save::R, tiles: bool) -> Result<(), String> {
         for _ in 0..r.u32()? {
             let c = get_cell(r)?;
             let k = r.u8()?;
@@ -940,8 +940,10 @@ impl Sim {
             let c = get_cell(r)?;
             self.melt.push_back((due, c));
         }
-        for _ in 0..r.u32()? {
-            self.loose.insert(get_cell(r)?);
+        if tiles {
+            get_bits(r, &mut self.loose)?;
+        } else {
+            get_cell_list(r, &mut self.loose, false)?;
         }
         let nm = self.world.planet.mats.len();
         let load = |r: &mut crate::save::R| -> Result<Vec<(MatId, f64)>, String> {

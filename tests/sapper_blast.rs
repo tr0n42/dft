@@ -1054,3 +1054,87 @@ fn blast_crack_profile() {
     }
 }
 
+/// What the loose and cracked sets cost as a blast's shock has run its
+/// course, and a minute on, as the yield grows (run by hand: cargo test
+/// --release --test sapper_blast -- --ignored --nocapture blast_cell_sets).
+#[test]
+#[ignore]
+fn blast_cell_sets() {
+    for kt in [10.0, 1000.0, 10000.0] {
+        let mut s = sim();
+        let over = (0.5, -(s.world.planet.max_radius + 5.0));
+        s.test_blast(over, kt);
+        while s.blasts_pending() > 0 {
+            s.step();
+        }
+        cell_sets_report(&s, &format!("{kt} kt, the shock done"));
+        for _ in 0..(60.0 / s.eco.tick_s).round() as usize {
+            s.step();
+        }
+        cell_sets_report(&s, &format!("{kt} kt, a minute on"));
+    }
+}
+
+/// How many cells the loose and cracked sets hold, the cells still
+/// settling, and how many in each set are empty (dug or thrown away, or
+/// settled out of); the memory the two sets hold; the bytes they take in a save on
+/// their own, raw and deflated; the whole save, raw and deflated; and the
+/// time to write it, to deflate it, to inflate it and to read it back (each
+/// the best of three). Then fingerprints of the ground and of the two sets,
+/// to show a change left them the same. (No blast may be going off.)
+fn cell_sets_report(s: &Sim, what: &str) {
+    let fnv = |h: u64, v: u64| (h ^ v).wrapping_mul(0x100_0000_01b3);
+    let (loose, settling) = s.loose_count();
+    let cracked = s.cracked_cells().count();
+    let empty = |cells: Vec<(i64, i64)>| cells.iter().filter(|c| s.world.material(c.0, c.1) == VACUUM).count();
+    let (empty_loose, empty_cracked) = (empty(s.loose_cells().collect()), empty(s.cracked_cells().collect()));
+    let (held, raw_sets, packed_sets) = s.cell_sets_cost();
+    let best = |f: &mut dyn FnMut() -> f64| (0..3).map(|_| f()).fold(f64::MAX, f64::min) * 1000.0;
+    let mut raw = Vec::new();
+    let write_ms = best(&mut || {
+        let t = std::time::Instant::now();
+        let mut o = W::default();
+        s.write_save(&mut o);
+        let e = t.elapsed().as_secs_f64();
+        raw = o.0;
+        e
+    });
+    let mut packed = Vec::new();
+    let pack_ms = best(&mut || {
+        let t = std::time::Instant::now();
+        packed = dft_sim::save::pack(b"TEST", 1, &raw);
+        t.elapsed().as_secs_f64()
+    });
+    let unpack_ms = best(&mut || {
+        let t = std::time::Instant::now();
+        let back = dft_sim::save::unpack(b"TEST", 1, &packed).unwrap();
+        let e = t.elapsed().as_secs_f64();
+        assert_eq!(back.len(), raw.len());
+        e
+    });
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let eco = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
+    let read_ms = best(&mut || {
+        let t = std::time::Instant::now();
+        let l = Sim::read_save(&mut R(&raw, 0), s.world.planet.clone(), eco.clone()).unwrap();
+        let e = t.elapsed().as_secs_f64();
+        assert_eq!(l.loose_count().0, loose);
+        e
+    });
+    let print = |cells: Vec<(i64, i64)>| {
+        let mut cells = cells;
+        cells.sort_unstable();
+        cells.iter().fold(0xcbf2_9ce4_8422_2325, |h, c| fnv(fnv(h, c.0 as u64), c.1 as u64))
+    };
+    eprintln!(
+        "{what}: {loose} loose, {cracked} cracked, {settling} settling ({empty_loose} loose and {empty_cracked} cracked empty); sets hold {:.2} MB, take {:.2} MB raw / {:.0} KB deflated on their own; save {:.2} MB raw / {:.0} KB deflated; write {write_ms:.1} ms, deflate {pack_ms:.0} ms, inflate {unpack_ms:.1} ms, read {read_ms:.1} ms; ground {:016x}, loose {:016x}, cracked {:016x}",
+        held as f64 / 1e6,
+        raw_sets as f64 / 1e6,
+        packed_sets as f64 / 1e3,
+        raw.len() as f64 / 1e6,
+        packed.len() as f64 / 1e3,
+        s.world.state_hash(),
+        print(s.loose_cells().collect()),
+        print(s.cracked_cells().collect()),
+    );
+}

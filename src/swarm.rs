@@ -82,10 +82,12 @@ pub type CellSet = HashSet<(i64, i64), Fast>;
 
 /// A set of cells stored as one bit per cell in 64 x 64 tiles: far smaller
 /// and quicker than a hash set when the set is large and clustered (all the
-/// open space the swarm has made or broken into). Membership only, no order.
+/// open space the swarm has made or broken into, the rubble and cracked rock
+/// round a blast). A tile emptied is let go, so a set worked away shrinks.
 #[derive(Default)]
 pub struct CellBits {
     tiles: HashMap<(i64, i64), Box<[u64; 64]>, Fast>,
+    len: usize,
 }
 
 impl CellBits {
@@ -102,19 +104,115 @@ impl CellBits {
         let b = self.tiles.entry(t).or_insert_with(|| Box::new([0u64; 64]));
         let was = b[row] & bit != 0;
         b[row] |= bit;
+        self.len += !was as usize;
         !was
     }
     /// True if it was there.
     pub fn remove(&mut self, c: &(i64, i64)) -> bool {
         let (t, row, bit) = Self::at(*c);
-        match self.tiles.get_mut(&t) {
-            Some(b) => {
-                let was = b[row] & bit != 0;
-                b[row] &= !bit;
-                was
-            }
-            None => false,
+        let Some(b) = self.tiles.get_mut(&t) else { return false };
+        if b[row] & bit == 0 {
+            return false;
         }
+        b[row] &= !bit;
+        self.len -= 1;
+        if b[row] == 0 && b.iter().all(|&r| r == 0) {
+            self.tiles.remove(&t);
+        }
+        true
+    }
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    pub fn clear(&mut self) {
+        self.tiles.clear();
+        self.len = 0;
+    }
+    /// The tiles, sorted, each as its corner cell and its rows (bit x of row
+    /// y is the cell corner + (x, y)).
+    pub fn tiles(&self) -> impl Iterator<Item = ((i64, i64), &[u64; 64])> + '_ {
+        let mut keys: Vec<(i64, i64)> = self.tiles.keys().copied().collect();
+        keys.sort_unstable();
+        keys.into_iter().map(move |t| ((t.0 * 64, t.1 * 64), &*self.tiles[&t]))
+    }
+    /// Every cell, in a fixed order: tile by tile (sorted by tile), then
+    /// row by row, then left to right. (A hash set's order depends on its
+    /// history; this depends only on what is in the set.)
+    pub fn iter(&self) -> impl Iterator<Item = (i64, i64)> + '_ {
+        self.tiles().flat_map(|(o, rows)| {
+            rows.iter().enumerate().flat_map(move |(y, &r)| {
+                let mut bits = r;
+                std::iter::from_fn(move || {
+                    if bits == 0 {
+                        return None;
+                    }
+                    let x = bits.trailing_zeros() as i64;
+                    bits &= bits - 1;
+                    Some((o.0 + x, o.1 + y as i64))
+                })
+            })
+        })
+    }
+    /// The whole rows of a tile at once (`corner`: the tile's corner cell,
+    /// a multiple of 64 each way), joined to what is there.
+    pub fn insert_tile(&mut self, corner: (i64, i64), rows: &[u64; 64]) {
+        let (t, _, _) = Self::at(corner);
+        let b = self.tiles.entry(t).or_insert_with(|| Box::new([0u64; 64]));
+        for (r, &n) in b.iter_mut().zip(rows) {
+            self.len += (n & !*r).count_ones() as usize;
+            *r |= n;
+        }
+        if b.iter().all(|&r| r == 0) {
+            self.tiles.remove(&t);
+        }
+    }
+    /// Drops the cells in the box from (x0, y0) to (x1, y1), corners
+    /// included, that `keep` turns down, and lets go of tiles emptied. Only
+    /// the tiles that reach into the box are looked at, so a small box in a
+    /// big set is cheap.
+    pub fn retain_in(&mut self, (x0, y0, x1, y1): (i64, i64, i64, i64), mut keep: impl FnMut((i64, i64)) -> bool) {
+        let (tx0, ty0, tx1, ty1) = (x0.div_euclid(64), y0.div_euclid(64), x1.div_euclid(64), y1.div_euclid(64));
+        let mut emptied = Vec::new();
+        for (&t, rows) in self.tiles.iter_mut() {
+            if t.0 < tx0 || t.0 > tx1 || t.1 < ty0 || t.1 > ty1 {
+                continue;
+            }
+            for (y, row) in rows.iter_mut().enumerate() {
+                let cy = t.1 * 64 + y as i64;
+                if cy < y0 || cy > y1 {
+                    continue;
+                }
+                let mut bits = *row;
+                while bits != 0 {
+                    let x = bits.trailing_zeros();
+                    bits &= bits - 1;
+                    let cx = t.0 * 64 + x as i64;
+                    if cx >= x0 && cx <= x1 && !keep((cx, cy)) {
+                        *row &= !(1u64 << x);
+                        self.len -= 1;
+                    }
+                }
+            }
+            if rows.iter().all(|&r| r == 0) {
+                emptied.push(t);
+            }
+        }
+        for t in emptied {
+            self.tiles.remove(&t);
+        }
+    }
+    /// Drops every cell `keep` turns down (see `retain_in`).
+    pub fn retain(&mut self, keep: impl FnMut((i64, i64)) -> bool) {
+        self.retain_in((i64::MIN, i64::MIN, i64::MAX, i64::MAX), keep);
+    }
+    /// The memory it holds (bytes): its map's slots and its tiles.
+    pub fn held_bytes(&self) -> usize {
+        let cap = self.tiles.capacity();
+        let slots = if cap == 0 { 0 } else { (cap * 8 / 7).next_power_of_two() };
+        slots * (std::mem::size_of::<((i64, i64), Box<[u64; 64]>)>() + 1) + self.tiles.len() * std::mem::size_of::<[u64; 64]>()
     }
 }
 
@@ -149,7 +247,7 @@ impl CellQueue {
     }
     /// Everything in it, emptying it.
     pub fn drain(&mut self) -> Vec<(i64, i64)> {
-        self.bits.tiles.clear();
+        self.bits.clear();
         std::mem::take(&mut self.list)
     }
 }
@@ -607,11 +705,13 @@ pub struct Sim {
     pub lava_swallowed: u64,
     pub tunneler_unlocked: bool,
     tunnelers: Vec<Bore>,
-    /// Rock cracked by a Tunneler's passing: quicker to cut, and no depth penalty.
-    fractured: CellSet,
+    /// Rock cracked by a blast's shock or a Tunneler's passing: quicker to
+    /// cut, and no depth penalty. (Bit tiles, as `loose`: a big blast cracks
+    /// and loosens hundreds of thousands of cells, packed close together.)
+    fractured: CellBits,
     /// Loose debris (blast rubble, thrown and fallen rock): cutters pick it
     /// up in `harvester.loose_s` a cell, whatever it is.
-    loose: CellSet,
+    loose: CellBits,
     /// Materials that are always loose (dead plant matter).
     loose_mat: Vec<bool>,
     /// Melt from sapper blasts, cooling: (tick it turns to glass, cell).
@@ -1055,8 +1155,8 @@ impl Sim {
             lava_swallowed: 0,
             tunneler_unlocked: false,
             tunnelers: Vec::new(),
-            fractured: CellSet::default(),
-            loose: CellSet::default(),
+            fractured: CellBits::default(),
+            loose: CellBits::default(),
             loose_mat,
             melt: Default::default(),
             settling: Default::default(),
@@ -1480,6 +1580,7 @@ impl Sim {
                 self.undope(c, false);
                 self.progress.remove(&c);
                 self.open_cell(c);
+                self.cell_mined(c);
                 // Out from the blast and up, faster near its heart.
                 let (ox, oy) = if d > 1e-6 { (dx as f64 / d, dy as f64 / d) } else { up };
                 let k = 1.0 - d / (r + 1.0);
@@ -1657,11 +1758,42 @@ impl Sim {
     /// free was saved as loose, put back to settle on load, and skipped by
     /// later blasts as already broken, once something filled its place.)
     fn cell_lifted(&mut self, c: (i64, i64)) {
-        self.loose.remove(&c);
-        self.fractured.remove(&c);
+        self.cell_mined(c);
         self.progress.remove(&c);
         self.reserved.remove(&c);
         self.open_cell(c);
+    }
+
+    /// A cell taken away (cut, picked up, dug, burned or lifted out): it is
+    /// no longer loose or cracked. Left in the sets, they only ever grew in
+    /// play, and whatever later filled the hole was taken for rubble or for
+    /// cracked rock.
+    fn cell_mined(&mut self, c: (i64, i64)) {
+        self.loose.remove(&c);
+        self.fractured.remove(&c);
+    }
+
+    /// Drops the loose and cracked cells that are empty now (for a save
+    /// that kept them: an empty cell is never mined again, so nothing else
+    /// would take it off).
+    fn forget_empty_cells(&mut self) {
+        let w = &self.world;
+        self.loose.retain(|c| w.material(c.0, c.1) != VACUUM);
+        self.fractured.retain(|c| w.material(c.0, c.1) != VACUUM);
+    }
+
+    /// The far field has eaten sector k down from `from` to `to`: the cells
+    /// it emptied are no longer loose or cracked. (Only cells in the band it
+    /// cut are looked at; the far field itself never reads either set.)
+    fn far_forget(&mut self, k: usize, from: f64, to: f64) {
+        if self.loose.is_empty() && self.fractured.is_empty() {
+            return;
+        }
+        let Some(band) = self.world.far_band(k, from, to) else { return };
+        let w = &self.world;
+        let gone = |c: (i64, i64)| w.far.cut(c.0, c.1) && w.material(c.0, c.1) == VACUUM;
+        self.loose.retain_in(band, |c| !gone(c));
+        self.fractured.retain_in(band, |c| !gone(c));
     }
 
     /// Apply what the loose bodies did this tick: cells that broke free leave
@@ -3465,6 +3597,7 @@ impl Sim {
                         // already paid, so the block payout slightly overpays them.
                         self.progress.remove(&(x, y));
                     }
+                    self.cell_mined((x, y));
                 }
             }
             for x in x0 - 1..=x1 {
@@ -3979,6 +4112,18 @@ impl Sim {
         (self.loose.len(), self.settling.len())
     }
 
+    /// (Profiling) what the loose and cracked sets cost: the memory they
+    /// hold (bytes), and the bytes they take in a save, raw and deflated on
+    /// their own.
+    pub fn cell_sets_cost(&self) -> (usize, usize, usize) {
+        let mut o = crate::save::W::default();
+        for set in [&self.fractured, &self.loose] {
+            put_bits(&mut o, set);
+        }
+        let packed = crate::save::pack(b"CELL", 0, &o.0).len() - 16;
+        (self.loose.held_bytes() + self.fractured.held_bytes(), o.0.len(), packed)
+    }
+
     /// (Profiling) the sandbox's running totals and its queues (see
     /// `Sandbox::load`).
     pub fn sand_load(&self) -> (crate::sandbox::Stats, [usize; 5]) {
@@ -4337,7 +4482,7 @@ pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches f
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 17; // 17: drops in flight (a blast's crater; 27 Nov); 16: ground units v2 (25 Nov); 15: the far field; 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
+const SIM_VERSION: u32 = 18; // 18: the loose and cracked cells as bit tiles (27 Nov); 17: drops in flight (a blast's crater; 27 Nov); 16: ground units v2 (25 Nov); 15: the far field; 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -4357,6 +4502,60 @@ fn get_opt_cell(r: &mut crate::save::R) -> Result<Option<(i64, i64)>, String> {
     let some = r.u8()? != 0;
     let c = get_cell(r)?;
     Ok(some.then_some(c))
+}
+
+/// A set of cells as its tiles (version 18 on): how many, then each tile's
+/// corner cell, which of its 64 rows hold anything (a bit each), and those
+/// rows. A big blast's rubble and cracks are a few hundred tiles, where a
+/// list of cells was 16 bytes a cell.
+fn put_bits(o: &mut crate::save::W, set: &CellBits) {
+    let tiles: Vec<_> = set.tiles().collect();
+    o.u32(tiles.len() as u32);
+    for (corner, rows) in tiles {
+        put_cell(o, corner);
+        let used = rows.iter().enumerate().fold(0u64, |m, (y, &r)| if r != 0 { m | 1 << y } else { m });
+        o.u64(used);
+        for &r in rows.iter().filter(|&&r| r != 0) {
+            o.u64(r);
+        }
+    }
+}
+
+fn get_bits(r: &mut crate::save::R, set: &mut CellBits) -> Result<(), String> {
+    for _ in 0..r.u32()? {
+        let corner = get_cell(r)?;
+        if corner.0.rem_euclid(64) != 0 || corner.1.rem_euclid(64) != 0 {
+            return Err("corrupt save: a tile of cells off the grid".into());
+        }
+        let used = r.u64()?;
+        let mut rows = [0u64; 64];
+        for (y, row) in rows.iter_mut().enumerate() {
+            if used & 1 << y != 0 {
+                *row = r.u64()?;
+            }
+        }
+        set.insert_tile(corner, &rows);
+    }
+    Ok(())
+}
+
+/// A set of cells as a list (how saves before version 18 kept them; the
+/// count is a u64 for the cracked cells, a u32 for the loose ones).
+fn put_cell_list(o: &mut crate::save::W, set: &CellBits, wide: bool) {
+    if wide { o.u64(set.len() as u64) } else { o.u32(set.len() as u32) }
+    let mut cells: Vec<(i64, i64)> = set.iter().collect();
+    cells.sort_unstable();
+    for c in cells {
+        put_cell(o, c);
+    }
+}
+
+fn get_cell_list(r: &mut crate::save::R, set: &mut CellBits, wide: bool) -> Result<(), String> {
+    let n = if wide { r.u64()? } else { r.u32()? as u64 };
+    for _ in 0..n {
+        set.insert(get_cell(r)?);
+    }
+    Ok(())
 }
 
 /// Cells in a stable order (hash maps iterate in no particular one).
@@ -4379,9 +4578,17 @@ impl Sim {
     /// Blasts going off are not kept: call `finish_blasts` first, so none is
     /// saved half done.
     pub fn write_save(&self, o: &mut crate::save::W) {
+        self.write_save_as(o, SIM_VERSION);
+    }
+
+    /// As `write_save`, in this version's layout or the one before it (for
+    /// the test that older saves still load).
+    #[doc(hidden)]
+    pub fn write_save_as(&self, o: &mut crate::save::W, version: u32) {
+        assert!(version == SIM_VERSION || version == SIM_VERSION - 1, "can only write this save version or the one before");
         debug_assert!(self.blast_jobs.is_empty(), "finish_blasts before write_save");
         crate::save::write_world(o, &self.world);
-        o.u32(SIM_VERSION);
+        o.u32(version);
         o.u64(self.tick);
         o.f64(self.energy);
         o.f64(self.mass);
@@ -4539,10 +4746,10 @@ impl Sim {
             put_cell(o, c);
             o.f64(self.progress[&c]);
         }
-        let frac = sorted(self.fractured.iter());
-        o.u64(frac.len() as u64);
-        for c in frac {
-            put_cell(o, c);
+        if version >= 18 {
+            put_bits(o, &self.fractured);
+        } else {
+            put_cell_list(o, &self.fractured, true);
         }
         // The sandbox: temperatures, banked heat, and cells waiting to move.
         o.u64(self.sandbox.tick);
@@ -4571,7 +4778,7 @@ impl Sim {
             o.u16(m);
         }
         self.write_units(o);
-        self.write_units_12(o);
+        self.write_units_12(o, version >= 18);
         o.f64s(&self.world.ledger.grown);
         o.u8(self.life.is_some() as u8);
         if let Some(l) = &self.life {
@@ -4762,11 +4969,13 @@ impl Sim {
         s.tunnel_kg = r.f64()?;
         for _ in 0..r.u64()? {
             let k = get_cell(r)?;
-            let mut rows = Box::new([0u64; 64]);
+            let mut rows = [0u64; 64];
             for row in rows.iter_mut() {
                 *row = r.u64()?;
             }
-            s.open.tiles.insert(k, rows);
+            // (Through `insert_tile`, so the set counts its cells; older
+            // saves kept tiles emptied since, which it lets go.)
+            s.open.insert_tile((k.0 * 64, k.1 * 64), &rows);
         }
         s.up_cached_cargo = s.up("cargo pods") * s.perk_cargo;
         s.update_sense();
@@ -4791,8 +5000,10 @@ impl Sim {
             let c = get_cell(r)?;
             s.progress.insert(c, r.f64()?);
         }
-        for _ in 0..r.u64()? {
-            s.fractured.insert(get_cell(r)?);
+        if version >= 18 {
+            get_bits(r, &mut s.fractured)?;
+        } else {
+            get_cell_list(r, &mut s.fractured, true)?;
         }
         s.sandbox.tick = r.u64()?;
         for k in 0..2 {
@@ -4818,7 +5029,7 @@ impl Sim {
             s.read_units(r)?;
         }
         if version >= 12 {
-            s.read_units_12(r)?;
+            s.read_units_12(r, version >= 18)?;
             s.resettle();
             s.world.ledger.grown = r.f64s()?;
             let had = r.u8()? != 0;
@@ -4851,6 +5062,15 @@ impl Sim {
         if version >= 17 {
             let mats = s.world.planet.mats.len();
             s.bodies.read_drops(r, mats)?;
+        }
+        // Older saves kept every cell ever loosened or cracked, dug away
+        // or not. Dropped here, with the whole world read (the far field's
+        // cuts too), and the settling queue made again without them.
+        if version < 18 {
+            s.forget_empty_cells();
+            if version >= 12 {
+                s.resettle();
+            }
         }
         s.sandbox.time_s = s.time();
         s.legs_all_changed();
@@ -4956,4 +5176,53 @@ impl EventQueue {
 fn assert_sync() {
     fn is_sync<T: Sync>() {}
     is_sync::<Sim>();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_bits_count_walk_in_order_and_let_empty_tiles_go() {
+        let cells = [(5, -70), (-1, -1), (63, 0), (0, 0), (64, 0), (-64, 3), (0, 1)];
+        let mut b = CellBits::default();
+        for &c in &cells {
+            assert!(b.insert(c));
+        }
+        assert!(!b.insert((0, 0)));
+        assert_eq!(b.len(), cells.len());
+        // Tile by tile, then row by row, then left to right, whatever order
+        // they went in.
+        let walked: Vec<(i64, i64)> = b.iter().collect();
+        assert_eq!(walked, vec![(-1, -1), (-64, 3), (5, -70), (0, 0), (63, 0), (0, 1), (64, 0)]);
+        // Saved as tiles and read back: the same cells.
+        let mut again = CellBits::default();
+        for (corner, rows) in b.tiles() {
+            again.insert_tile(corner, rows);
+        }
+        assert_eq!(again.iter().collect::<Vec<_>>(), walked);
+        assert_eq!(again.len(), b.len());
+        // Thinned in a box: only the cells in it are asked about, and a
+        // tile left empty is let go.
+        let mut asked = Vec::new();
+        again.retain_in((0, 0, 63, 1), |q| {
+            asked.push(q);
+            q != (63, 0)
+        });
+        asked.sort_unstable();
+        assert_eq!(asked, vec![(0, 0), (0, 1), (63, 0)]);
+        assert_eq!(again.len(), cells.len() - 1);
+        again.retain(|q| q.0 < 64);
+        assert_eq!(again.len(), cells.len() - 2);
+        assert_eq!(again.tiles().count(), 4);
+        // Emptied, a tile is let go.
+        assert!(b.remove(&(64, 0)));
+        assert!(!b.remove(&(64, 0)));
+        assert_eq!(b.tiles().count(), 4);
+        for &c in &cells {
+            b.remove(&c);
+        }
+        assert!(b.is_empty());
+        assert_eq!(b.tiles().count(), 0);
+    }
 }

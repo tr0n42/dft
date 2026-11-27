@@ -306,6 +306,7 @@ impl Sim {
                     self.reserved.remove(&c);
                     self.open_cell(c);
                     self.apply_sandbox(vec![Change { cell: c, from: m, to: VACUUM }]);
+                    self.cell_mined(c);
                 }
                 f.burned += 1;
                 self.units.burned_out_of_sight += 1;
@@ -680,6 +681,7 @@ impl Sim {
                 self.progress.remove(&q);
                 self.reserved.remove(&q);
                 self.open_cell(q);
+                self.cell_mined(q);
                 match w.load.iter_mut().find(|e| e.0 == m) {
                     Some(e) => e.1 += 1.0,
                     None => w.load.push((m, 1.0)),

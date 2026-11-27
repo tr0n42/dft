@@ -353,6 +353,7 @@ impl Sim {
                     let (top, wet) = self.far_top(k);
                     self.far.wet[k] = wet > 0.5;
                     let _ = self.world.far_lower(k, top + 64.0, top);
+                    self.far_forget(k, top + 64.0, top);
                 }
             }
             self.far.is_far[k] = want_far[k];
@@ -781,6 +782,7 @@ impl Sim {
     /// down, and what was cut is booked as mined and delivered.
     fn far_apply(&mut self, k: usize, from: f64, to: f64, eaten: &[(MatId, f64)]) {
         let _ = self.world.far_lower(k, from, to);
+        self.far_forget(k, from, to);
         let (mut kg, mut cr) = (0.0, 0.0);
         for &(m, e) in eaten {
             if e <= 0.0 {
@@ -1113,6 +1115,7 @@ impl Sim {
                     let (top, wet) = self.far_top(k);
                     self.far.wet[k] = wet > 0.5;
                     let _ = self.world.far_lower(k, top + 64.0, top);
+                    self.far_forget(k, top + 64.0, top);
                 }
                 if self.far_must_near(k) {
                     continue;
