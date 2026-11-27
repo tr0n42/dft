@@ -221,7 +221,7 @@ fn sap_heat(base: [f32; 3], h: f32) -> [f32; 3] {
 /// bursts. Its core crackles with radiation (green specks round it, green
 /// sparks leaking, green light). Armed, it heats from the core out (dull red
 /// to yellow-white), shaking harder; then melts down, its hull sagging and
-/// dripping away to bare the core blazing green-white; then the core
+/// dripping away in sparks to bare the core blazing green-white; then the core
 /// collapses to a point and the blast takes it.
 #[allow(clippy::too_many_arguments)]
 fn sapper(un: &UnitView, now: f64, real_t: f64, x: f64, y: f64, p: Vec2, half: f32, up_angle: f32, cell_px: f32, lamp: f32, lc: [f32; 3], pos: &mut Vec<[f32; 3]>, col: &mut Vec<[f32; 4]>) {
@@ -392,11 +392,6 @@ fn sapper(un: &UnitView, now: f64, real_t: f64, x: f64, y: f64, p: Vec2, half: f
     // Armed, the heat's own light, orange, as it glows.
     if heat > 0.0 {
         crate::fx::emit(cx, cy, 6.0 + 8.0 * heat as f64, [255.0, 140.0, 50.0], 0.4 + 0.6 * heat);
-    }
-    // Molten, smoke boiling off it.
-    if melt > 0.0 && melt < 0.8 && beat(12.0, 160) < 0.12 {
-        let (sx, sy) = world(0.5, 3.0);
-        crate::fx::smoke(sx, sy, [110.0, 120.0, 96.0]);
     }
 
     // ---- The hull (top row first, its lower-left corner at (-3, -2)) ----

@@ -54,6 +54,9 @@ first. The agreed behaviour is `docs/design/ground-units.md`.
 
 ### Sapper (25 Nov, evening)
 
+- **26 Nov:** Benjamin raised the yield to 10 kt (blast radius 30 m) and set
+  the depth to 80% of the rule below, so more goes flying:
+  `depth_m_per_cbrt_kt = 36.8` (79 m at 10 kt).
 - **Depth from yield**: `depth_m_per_cbrt_kt = 46` (79 m at 5 kt). The old
   rays break only about the blast radius (24 m at 5 kt), so a new
   **loosened column** (`sapper_column`) turns every solid cell from the charge

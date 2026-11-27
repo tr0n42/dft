@@ -57,10 +57,11 @@ pub(super) const SIDEWAYS_MAX_M: f64 = 200.0;
 
 /// At most this many cells of a blast on screen are thrown as flying
 /// pieces, and at most this many blown out of its plume; the rest lies as
-/// rubble. (Flying thousands of pieces stalled the sim for a blast on view.)
-pub(super) const THROW_MAX: usize = 200;
+/// rubble. (Flying thousands of pieces stalled the sim for a blast on view;
+/// 200 each until 26 Nov, raised with the 10 kt yield so more goes flying.)
+pub(super) const THROW_MAX: usize = 500;
 
-pub(super) const PLUME_MAX: usize = 200;
+pub(super) const PLUME_MAX: usize = 500;
 
 /// Rubble cells moved per tick, at most.
 pub(super) const SETTLE_PER_TICK: usize = 20_000;
