@@ -131,7 +131,7 @@ column and 218,000 cracked cells, one by one, in a single tick.
    - The held big chunks thrown as rock bodies (the game already has falling
      rock bodies), rather than as loose cells. (Done 27 Nov, see below.)
    - A shock that runs along soft layers and is stopped by caves (fast
-     marching on a 4 m grid).
+     marching on a 4 m grid). (Done 27 Nov, see "The shock's field" below.)
    - Rock over the cavity falling in after the blast (a rubble chimney).
      (Done 27 Nov, see below.)
 
@@ -549,3 +549,188 @@ crater the same.
 120 cells, so only the smaller ones fly whole. Cutting the big ones into
 a few pieces each would let more fly; say if that is wanted.
 
+
+## The shock's field: stopped by caves, carried along soft layers (27 Nov)
+
+The rays used to go in straight lines, and open space cost them almost
+nothing (0.12 / r a metre against 0.45 + 1.7 x hardness / r in rock). So a
+cave beside the charge hardly slowed a ray, and the rock behind it broke as
+if the cave weren't there (more, in fact). A soft layer only helped the
+rays that happened to lie along it.
+
+Now each blast first works out a field (`ShockField` in
+`src/units/sapper.rs`):
+
+- **The grid.** About 130 nodes across at any yield, a ninth of a blast
+  radius apart (3.4 m at 10 kt, 33 m at 10,000 kt), out as far as any crack
+  can reach. The ground all over each node's square is looked at (see "The
+  field's review fixes" below). Each node costs a metre what it costs a
+  ray; rubble 0.3 / r, water or magma 0.12 / r; vacuum and gas are open
+  space (powder, such as regolith, is rock, as the rays have it).
+- **Two searches.** The cheapest way out to every node (Dijkstra, over the
+  16 nearest nodes, each step as long as the straight line), once with open
+  space counted as the rock round it, and once with mostly open nodes
+  stopping the shock: it reaches a cave's wall but doesn't cross it, as a free
+  surface reflects a shock. In even rock the grid's way is up to 2.7%
+  longer than the straight line; that is put right exactly.
+- **The straight line.** Its cost to every node, nearest the charge first,
+  and how thick the open space lying across it is (with an edge soft over
+  a node or so).
+- **What a ray has.** At each rock cell, its own energy left as before, plus
+  what the cheapest way there saves over the straight line past 5% of it
+  (`GAIN_SLACK`; so along a soft layer and in the rock beside it the blast
+  breaks further), less the shadow: 1.5 (`SHADOW_TURN`) where open space
+  lies across the straight line, and 10 times (`SHADOW_COST`) the extra cost
+  of the way round, at most 3 in all. A ray starts with 1, so a shadow ends
+  it. Both parts count in full where the open space across the line is
+  1.4 nodes thick (`SHADOW_FULL`), and not at all under 1 node
+  (`SHADOW_FROM`).
+- **Why both.** The way round alone was tried first. Behind a 6 m pocket
+  it is only a few per cent longer than straight through, and the shadow
+  came out as a faint line one node wide: 253 cells broken behind the pocket
+  against 287 on the other side. A shock that has to turn a corner loses
+  most of its strength, so being out of the charge's straight sight now
+  costs a fixed amount, and the way round adds to it behind big caves.
+- **Not the unit's own hole.** Open space within the melt radius (the
+  charge's chamber), up the sapper's shaft and along a tunneler's own bore
+  carries the shock as the rock round it would, so those blasts come out as
+  before. The column and the crater don't read the field at all.
+- **Cracks.** The near zone (rock cracked all through) runs further along a
+  soft layer, by what the shock spends past each ray's end, at most 1.25
+  times (`CRACK_SOFT`), never less far than in even rock, and less far into
+  a shadow. The far zone and the band beside the column take the shadow
+  alone. A ray that dies in a shadow leaves no crack running on.
+- **Cost.** 670,000 to 830,000 work, 35 to 70 ms, whatever the yield,
+  spread over the blast's first six or seven ticks; then the rays set off
+  and the front catches up. A save finishes it at once with the rest of the
+  blast.
+
+First pass, measured headless (3 km barren test body, unless said; before
+/ after; the numbers after the review fixes are in the next section):
+
+| | Before | First pass |
+|---|---|---|
+| Cave test (10 kt, 6 m pocket 17 m from the charge): wedge behind it, broken / cracked | 321 / 336 | 0 / 11 |
+| Same wedge mirrored, no pocket | 287 / 233 | 287 / 231 |
+| Soft band test (10 kt, hard rock, 6 m regolith band): broken reaches sideways / down | 72 / 41 m | 82 / 40 m |
+| Hard rock flanking the band: broken / cracked | 136 / 567 | 495 / 680 |
+| `blast_timings` 10 kt: ticks, dearest blast tick, work in all, crater cells | 15, 20.1 ms, 40 ms, 935 | 15, 18.5 ms, 48 ms, 935 |
+| 100 kt | 28, 13.7, 114, 3,541 | 28, 12.2, 102, 3,541 |
+| 1,000 kt | 61, 11.3, 424, 15,346 | 57, 11.1, 320, 15,346 |
+| 3,000 kt | 116, 12.1, 889, 25,962 | 83, 10.5, 533, 25,962 |
+| 10,000 kt | 238, 14.1, 1,924, 50,086 | 140, 10.5, 921, 50,086 |
+| `blast_crack_reach` 10 kt: cracked cells, farthest (m/kt^1/3) | 4,947, 78 | 4,882, 78 |
+| 1,000 kt | 61,141, 88 | 69,229, 91 |
+| 10,000 kt | 224,632, 87 | 2,240, 60 |
+| Dev planet 1,000 kt: loose / cracked cells | 117,328 / 113,399 | 126,493 / 113,086 |
+| Dev planet 10,000 kt | 731,557 / 622,355 | 732,196 / 615,544 |
+
+**Read the big yields on the test body with care.** That body's great
+impact basins have left a lump of ground about 1.5 km across, not a disc.
+At 3,000 and 10,000 kt the charge (530 and 790 m down) lies in the open
+space under the lump, and at 1,000 kt near its lower face. Before, the rays
+crossed that open space nearly free and broke the lump from below; now it
+shields the lump, which is the point, so there is much less work and far
+fewer cracks. The craters are planned from the ground and are the same.
+For a fair look at big blasts in plain rock, `blast_field` (ignored test)
+also runs the 5 km dev planet at 1,000 and 10,000 kt.
+
+Not caused by this, and not fixed: the dev planet's 10,000 kt blast has a
+dearest tick of 43 to 44 ms before and after (the test body's stays under
+about 15 ms). It is still open, to be found and fixed on its own.
+
+### The field's review fixes (27 Nov)
+
+A review of the first pass found four real faults, all fixed:
+
+- **Where the grid fell decided the shadows.** Each node looked at one
+  cell. A 1 m hole a node landed on became a wall a node wide (3.4 m at
+  10 kt), and the same hole a little way off was missed. On the dev planet
+  a thin natural fissure under a 10 kt charge cut the broken zone into
+  spokes along the grid's lines. Now each node looks at its whole square:
+  every cell it overlaps, weighed by how much (up to about 20 kt), or 4 x 4
+  places spread over it (bigger yields). The open space is summed a node
+  at a time along each straight line, so a layer counts as thick as it is
+  wherever the grid falls, and only open space about a node thick or more
+  casts a shadow. Thin cracks and pits do not.
+- **Liquid stopped the shock like a cave.** Water and magma carry a shock
+  well. Now they carry it at what a ray pays in them (0.12 / r a metre),
+  and only vacuum and gas are open space. (The dev planet's "10 kt test
+  spot in open space" was the sea.)
+- **Plain layered rock changed too much.** Some way through mixed layers
+  is always a little cheaper than the straight line, so the broken zone
+  only grew (+5 to 8% loose cells at 10 and 100 kt); and the cracks were
+  measured against the rock round the charge, so where the rock 2 radii out
+  was harder they were cut short by up to half. Now a way must save more
+  than 5% of the straight line before a ray gains by it, and the cracks
+  only ever run further than in even rock, never less far.
+- **A tunneler's own bore shaded its blast.** Only the sapper's shaft was
+  let off. A tunneler goes off 80 m up its own 12 m bore, which the field
+  took for a cave, and the rock beside the bore broke about 40% less. Now
+  the tunneler hands its bore's line to the blast (its shaft from the
+  mouth, run on straight past where it is for the 80 m it backed up), and
+  that bore carries the shock as rock would.
+
+Measured headless, before the field / now. 10 kt on the 3 km test body,
+a level layer 200 m wide whose top is about 12 to 13 m under the charge;
+cells broken in the rock under it, within 3 radii:
+
+| | Before the field | Now |
+|---|---|---|
+| No layer | 2,704 | 2,704 |
+| 1 m hole 13 m under the charge, 4 places across a node | 2,612 at each | 2,612 at each |
+| 1 m vacuum crack, at two depths | 2,792 / 2,697 | 2,789 / 2,693 |
+| 2 m vacuum crack, at two depths | 2,790 / 2,692 | 2,245 / 2,178 |
+| 4 m vacuum gap, at two depths | 2,770 / 2,674 | 24 / 28 |
+| 4 m seam of liquid | 2,675 | 2,946 |
+| 50 kt tunneler blast, rock 6 to 20 m beside its bore (no bore: 3,339) | 3,241 | 3,467 (bore taken for a cave: 2,127) |
+
+(The 2 m crack shades only the rock well off to the side, which the shock
+reaches across it aslant, so through more open space.)
+
+The dev planet, charge in plain layered rock (loose cells / all cracked
+cells):
+
+| Yield, place | Before the field | Now |
+|---|---|---|
+| 10 kt, 20 deg | 9,730 / 6,185 | 9,751 / 6,260 |
+| 10 kt, 45 deg | 10,015 / 6,060 | 10,463 / 5,683 |
+| 100 kt, 20 deg | 34,558 / 28,266 | 34,811 / 30,567 |
+| 100 kt, 45 deg | 36,121 / 28,601 | 36,683 / 30,213 |
+| 1,000 kt, 20 deg | 165,917 / 143,040 | 165,916 / 144,445 |
+| 1,000 kt, 45 deg | 159,692 / 142,047 | 159,641 / 144,479 |
+| 1,000 kt, the top (the `blast_field` spot) | 117,328 / 113,399 | 124,275 / 120,671 |
+
+So loose cells are within 2% at most places and 4.5% to 6% more at two;
+cracks are within 2% at 1,000 kt and up to 8% more at 100 kt (they run on
+along softer layers). At 45 deg, 10 kt, there are 6% fewer cracks: the
+rock there holds pockets 4 to 7 m across, which now shade a little.
+
+A charge under the sea, close over the seabed, now breaks more of the
+seabed than before the field: the shock runs cheaply through the water and
+into the seabed all round (dev planet, 180 deg, 100 kt: 14,850 loose and
+16,635 cracked cells before, 20,182 and 22,190 now; 1,000 kt: 116,211 and
+126,283 loose).
+
+Cost (`blast_field`): the field is now 670,000 to 830,000 work and 32 to
+71 ms, against 160,000 to 190,000 and 5 to 8 ms in the first pass, nearly
+all of it looking at the ground. A look is charged 3 units (measured 130 to
+270 ns each). `blast_timings` (ticks, dearest blast tick, blast work in
+all; before the field / now):
+
+| Yield | Before the field | Now |
+|---|---|---|
+| 10 kt | 15, 20.1 ms, 40 ms | 15, 15.6 ms, 86 ms |
+| 100 kt | 28, 13.7 ms, 114 ms | 28, 17.3 ms, 159 ms |
+| 1,000 kt | 61, 11.3 ms, 424 ms | 57, 16.1 ms, 378 ms |
+| 3,000 kt | 116, 12.1 ms, 889 ms | 88, 15.0 ms, 625 ms |
+| 10,000 kt | 238, 14.1 ms, 1,924 ms | 143, 12.0 ms, 954 ms |
+
+The craters are the same cells; the 1,000 kt crater's middle ended 101 m
+down, against 136 before the field (that charge sits near the test body's
+open underside). A 10 kt blast now does about twice the work in all, most
+of it the field, spread over its first ticks.
+
+(A test, `held_pieces_cut_by_a_shaft_fly_joined_up`, told bodies apart by
+their angle; two bodies that had hardly turned shared one, 0.00012, and it
+failed. It now leaves out bodies turned less than 0.01.)

@@ -112,6 +112,26 @@ pub struct HeatJob {
 
 /// Metres between the points kept of a shaft's line.
 pub(super) const PATH_STEP_M: f64 = 4.0;
+/// How many of those points short of its shaft's bottom an opener with
+/// nothing left to open goes back down to, to go off (80 m: clear of any
+/// cap it left there).
+const SINK_BACK: usize = 20;
+
+/// An opener's bore, as its blast at the end sees it: its shaft's line
+/// from the mouth down to where it is, and on past it as far as it backed
+/// up from the bottom (that part of the line is no longer kept; it is
+/// taken to run on straight).
+fn bore_line(o: &Opener) -> Vec<(f64, f64)> {
+    let mut line = o.path.clone();
+    if line.last() != Some(&o.head) {
+        line.push(o.head);
+    }
+    let n = line.len();
+    let down = if n >= 2 { unit_of((line[n - 1].0 - line[n - 2].0, line[n - 1].1 - line[n - 2].1)) } else { o.heading };
+    let back = SINK_BACK as f64 * PATH_STEP_M;
+    line.push((o.head.0 + down.0 * back, o.head.1 + down.1 * back));
+    line
+}
 
 impl Sim {
     /// What a kilogram of each material is worth to an opener now (Benjamin:
@@ -349,7 +369,7 @@ impl Sim {
             return;
         }
         let spec = self.eco.units.tunneler.clone();
-        let mut blasts: Vec<(f64, f64)> = Vec::new();
+        let mut blasts: Vec<((f64, f64), Vec<(f64, f64)>)> = Vec::new();
         for k in 0..self.units.openers.len() {
             let mut o = self.units.openers[k].clone();
             o.prev = o.head;
@@ -449,7 +469,7 @@ impl Sim {
                                     // Nothing left: back down its shaft, to
                                     // 80 m short of the bottom (clear of any
                                     // cap it left there), to go off.
-                                    let keep = o.path.len().saturating_sub(20).max(1);
+                                    let keep = o.path.len().saturating_sub(SINK_BACK).max(1);
                                     o.path.truncate(keep);
                                     o.state = OpenState::Sink;
                                     o.back_to = 0;
@@ -468,7 +488,7 @@ impl Sim {
                     let clear = 2.6 * r;
                     let near = self.units.openers.iter().any(|p| p.id != o.id && p.state != OpenState::Done && dist2(p.head, o.head) < clear * clear);
                     if o.spoil_kg <= 0.0 && !near && o.idle_s >= 3.0 {
-                        blasts.push(o.head);
+                        blasts.push((o.head, bore_line(&o)));
                         o.idle_s = -1.0;
                     }
                 }
@@ -476,11 +496,11 @@ impl Sim {
             self.units.openers[k] = o;
         }
         self.units.openers.retain(|o| o.idle_s >= 0.0);
-        for at in blasts {
+        for (at, bore) in blasts {
             self.units.tunneler_blasts += 1;
             self.director_log_push("a tunneler has nothing left to open: it goes off where it is".to_string());
             let fissile = spec.fissile_kg;
-            self.unit_blast(at, spec.yield_kt, fissile);
+            self.unit_blast(at, spec.yield_kt, fissile, &bore, spec.bore_m / 2.0);
         }
     }
 
@@ -729,10 +749,12 @@ impl Sim {
     /// A unit's charge going off where it is (a tunneler's end): the
     /// sapper's blast at this yield, with no loosened column to the surface
     /// (Benjamin: depth is irrelevant, only the yield).
-    pub(super) fn unit_blast(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64) {
+    /// `bore`: its own bore's line, reaching `half` m either side of it,
+    /// whose open space carries the blast's shock as the rock round it would.
+    pub(super) fn unit_blast(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64, bore: &[(f64, f64)], half: f64) {
         let keep = self.eco.units.sapper.depth_m_per_cbrt_kt;
         self.eco.units.sapper.depth_m_per_cbrt_kt = 0.0;
-        self.sapper_blast(at, yield_kt, fissile);
+        self.blast_in_hole(at, yield_kt, fissile, bore, half);
         self.eco.units.sapper.depth_m_per_cbrt_kt = keep;
     }
 

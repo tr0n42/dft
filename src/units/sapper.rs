@@ -351,6 +351,55 @@ const WORK_GROUND: u64 = 5_000;
 const WORK_GROUND_NEAR: u64 = 1_500;
 /// Lifting a cell of rubble out into a blast's plume.
 const WORK_PLUME: u64 = 500;
+/// Going on from a node of the shock's field to its 16 neighbours (see
+/// `ShockField`).
+const WORK_FIELD: u64 = 3;
+/// Looking at one place in a node's square: the cell alone, with none of
+/// what a ray does there (measured, 27 Nov: 130 to 270 ns each, against
+/// about 135 ns a unit of work over a blast's dearest tick).
+const WORK_FIELD_LOOK: u64 = 3;
+
+/// The shock's field (see `ShockField`) is worked out on a grid of nodes
+/// this many to a blast radius: 3.4 m apart at 10 kt and 33 m at 10,000 kt,
+/// about 130 across at any yield.
+const FIELD_PER_R: f64 = 9.0;
+/// How many places across (and down) each node's square are looked at, to
+/// find how much of it is open space, where its side spans more than one
+/// cell more than this (from about 20 kt up); a smaller square has every
+/// cell it overlaps looked at. (One place alone made a 1 m hole a node
+/// lands on a wall a node wide, and missed one a little way off: the
+/// shadows came and went with where the grid fell.)
+const FIELD_LOOKS: usize = 4;
+/// How thick open space must lie across the straight line from the charge
+/// (in nodes: a ninth of a blast radius) to cast a shadow at all, and to
+/// cast a whole one. Thinner than that, a fissure or a cutter's pit, the
+/// shock carries on past it (it isn't open all the way across, or its
+/// sides are pressed shut).
+const SHADOW_FROM: f64 = 1.0;
+const SHADOW_FULL: f64 = 1.4;
+/// What the shock loses (energy; a ray starts with 1) where open space lies
+/// across the straight line from the charge: it has to turn a corner to get
+/// there, and a shock that does loses most of its strength (most of it
+/// reflects off the cave's wall, and what bends round spreads thin).
+const SHADOW_TURN: f64 = 1.5;
+/// How many times over the extra cost of the way round open space counts
+/// against the shock as well: behind a big cave, the further round the
+/// shock has to go, the less of it gets there.
+const SHADOW_COST: f64 = 10.0;
+/// The most a shadow takes off the shock's energy (a ray starts with 1).
+const SHADOW_MAX: f64 = 3.0;
+/// A ray that gives out in a shadow deeper than this (energy) leaves no
+/// crack running on into it.
+const SHADOW_CRACK: f64 = 0.2;
+/// Along a soft layer the rock cracked all through runs on further past the
+/// broken rock than CRACK_REACH, by what the shock spends getting there, but
+/// at most this many times as far.
+const CRACK_SOFT: f64 = 1.25;
+/// What the cheapest way to a place must save over the straight line (a
+/// share of the straight line's cost) before a ray there gains by it: in
+/// rock of mixed layers some way is always a little cheaper, and without
+/// this every blast broke 5 to 8% more rock than in even rock.
+const GAIN_SLACK: f64 = 0.05;
 
 /// The cells whose middles lie from `lo` to `hi` m from `at`, into `out`:
 /// each cell round a blast is in exactly one shell, so the column and the
@@ -750,6 +799,420 @@ enum Chunks {
     Done,
 }
 
+/// The steps from a node of the shock's grid to its 16 nearest: across,
+/// down, and how long (in nodes). Every step is as long as the straight line,
+/// so in even rock the cheapest way over the grid is at most 2.7% longer than
+/// the straight line (between the steps' directions; see `grid_len`).
+const SQ5: f64 = 2.236_067_977_499_79;
+const FIELD_STEPS: [(i64, i64, f64); 16] = [
+    (1, 0, 1.0),
+    (-1, 0, 1.0),
+    (0, 1, 1.0),
+    (0, -1, 1.0),
+    (1, 1, std::f64::consts::SQRT_2),
+    (1, -1, std::f64::consts::SQRT_2),
+    (-1, 1, std::f64::consts::SQRT_2),
+    (-1, -1, std::f64::consts::SQRT_2),
+    (2, 1, SQ5),
+    (2, -1, SQ5),
+    (-2, 1, SQ5),
+    (-2, -1, SQ5),
+    (1, 2, SQ5),
+    (1, -2, SQ5),
+    (-1, 2, SQ5),
+    (-1, -2, SQ5),
+];
+
+/// How long the shortest way is over the grid's steps (in nodes) to a node
+/// `a` across and `b` down from where it starts: the two steps whose
+/// directions lie either side of the straight line's.
+fn grid_len(a: i64, b: i64) -> f64 {
+    let (a, b) = (a.abs().max(b.abs()) as f64, a.abs().min(b.abs()) as f64);
+    if 2.0 * b <= a {
+        b * SQ5 + (a - 2.0 * b)
+    } else {
+        (a - b) * SQ5 + (2.0 * b - a) * std::f64::consts::SQRT_2
+    }
+}
+
+/// The places looked at along one side of a node's square, from `lo` to
+/// `lo + g` (m), into `out` as (where, its share of the side): every cell
+/// the side overlaps, by how much it overlaps, while that is no more than
+/// FIELD_LOOKS + 1 cells, and otherwise FIELD_LOOKS places evenly spread.
+/// (Weighed by how much of each cell is in the square, a thin layer of open
+/// space counts the same wherever the grid falls on it.)
+fn field_looks(out: &mut Vec<(f64, f64)>, lo: f64, g: f64) {
+    out.clear();
+    let (a, b) = (lo.floor() as i64, (lo + g).ceil() as i64);
+    if b - a <= FIELD_LOOKS as i64 + 1 {
+        for c in a..b {
+            let w = ((lo + g).min(c as f64 + 1.0) - lo.max(c as f64)) / g;
+            if w > 0.0 {
+                out.push((c as f64 + 0.5, w));
+            }
+        }
+    } else {
+        let each = 1.0 / FIELD_LOOKS as f64;
+        for k in 0..FIELD_LOOKS {
+            out.push((lo + (k as f64 + 0.5) * each * g, each));
+        }
+    }
+}
+
+/// Where the working out of a shock's field has got to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FieldStage {
+    /// Looking at what is at each node.
+    Look,
+    /// Giving open space the cost of the rock round it.
+    Fill,
+    /// The cheapest ways out, open space carried as rock...
+    Free,
+    /// ...and open space stopping the shock.
+    Shut,
+    /// The straight lines out, and what the rays read.
+    Line,
+    Done,
+}
+
+/// What it costs a blast's shock to reach each place round it, worked out
+/// before its rays set off (docs/explosions-research.md: "arrival time with
+/// fast marching"), so that a cave shields the rock behind it and a soft
+/// layer carries the shock along it. On a grid of nodes round the charge
+/// (FIELD_PER_R to a blast radius, out as far as the cracks can reach), each
+/// node's ground costs the shock what it costs a ray, (0.45 + 1.7 x
+/// hardness) / r a metre in rock, rubble 0.3 / r, water or magma 0.12 / r
+/// (a liquid carries a shock well), and how much of each node's square is
+/// open space (vacuum or gas) is looked at in FIELD_LOOKS^2 places. The
+/// cheapest way out to each node over the grid is found (Dijkstra's way)
+/// twice: once with open space carried as if it were the rock round it,
+/// and once with nodes mostly open stopping the shock: it reaches a cave's
+/// wall but doesn't cross the cave (a free surface reflects a shock). The
+/// cost along the straight line to each node is worked out too, nearest the
+/// charge first, and with it how thick the open space is that lies across
+/// that line. A ray then has, at each cell, its own energy left (as it
+/// always had), plus what the cheapest way there saves over the straight
+/// one past GAIN_SLACK (so along a soft layer, and in the rock beside one, a
+/// blast breaks further), less the shadow: SHADOW_TURN where open space
+/// lies across the straight line, and the extra cost of the way round it,
+/// counted SHADOW_COST times over, both in full where the open space is
+/// SHADOW_FULL thick, and not at all under SHADOW_FROM. (The way round alone
+/// is not enough: behind a cave a few nodes across it is only a few per
+/// cent longer, and the shadow came out a faint line.) The cracks read the
+/// same field.
+///
+/// Open space in the charge's own chamber (within the melt radius: the
+/// fireball fills it), up the sapper's own shaft and along a tunneler's own
+/// bore carries the shock as the rock round it would, so such a blast comes
+/// out as it did.
+struct ShockField {
+    at: (f64, f64),
+    /// The nodes' spacing (m), how many across, and the middle one's
+    /// place across (and down) the grid, which is at the charge.
+    g: f64,
+    n: usize,
+    h: i64,
+    /// What it is worked out for: the blast's radius, what the rock round
+    /// the charge costs a metre, and the melt radius.
+    r: f64,
+    k_ref: f64,
+    melt: f64,
+    /// The unit's own hole (the sapper's shaft, a tunneler's bore): the
+    /// nodes it runs through, whose open space carries the shock.
+    hole: Vec<bool>,
+    /// Each node's cost a metre (for open space, the rock round it's),
+    /// whether any of it carries the shock, how much of it is open space
+    /// (0 to 1), and whether it stops the shock (mostly open).
+    k: Vec<f64>,
+    solid: Vec<bool>,
+    open: Vec<f64>,
+    stops: Vec<bool>,
+    /// The cheapest cost out to each node with open space carried, and
+    /// stopped; the cost along the straight line out, and that line's length
+    /// (in nodes) as worked out the same way, to put its errors right.
+    free: Vec<f64>,
+    shut: Vec<f64>,
+    line: Vec<f64>,
+    unit: Vec<f64>,
+    /// How thick the open space is across the straight line out to each
+    /// node, the node itself included (in nodes: the shadow's edge is soft
+    /// over a node or so).
+    thick: Vec<f64>,
+    /// What a ray gains at each node over its own energy (less than nothing
+    /// in a shadow), what the shock spends getting there, and its shadow.
+    gain: Vec<f32>,
+    cost: Vec<f32>,
+    shade: Vec<f32>,
+    /// The nodes nearest the charge first, and the ways still to go on from
+    /// (by cost, then node).
+    order: Vec<u32>,
+    heap: std::collections::BinaryHeap<std::cmp::Reverse<(u64, u32)>>,
+    stage: FieldStage,
+    next: usize,
+    /// The work it took, and how long (s; for the timings).
+    work: u64,
+    secs: f64,
+}
+
+impl ShockField {
+    /// A field round a charge at `at` of blast radius `r`, out to `reach` m;
+    /// `hole` is the unit's own hole (a line of points, and how far either
+    /// side of it the hole reaches).
+    fn new(at: (f64, f64), r: f64, k_ref: f64, melt: f64, hole: (&[(f64, f64)], f64), reach: f64) -> ShockField {
+        let g = (r / FIELD_PER_R).max(1.0);
+        let h = (reach / g).ceil() as i64 + 1;
+        let n = (2 * h + 1) as usize;
+        let nn = n * n;
+        // The nodes within a node of the hole, found along each of its
+        // pieces half a node at a time.
+        let mut mark = vec![false; nn];
+        let wide = hole.1 + g;
+        let span = (wide / g).ceil() as i64;
+        for w in hole.0.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let steps = ((b.0 - a.0).hypot(b.1 - a.1) / (0.5 * g)).ceil().max(1.0) as usize;
+            for s in 0..=steps {
+                let t = s as f64 / steps as f64;
+                let p = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+                let (u, v) = (((p.0 - at.0) / g).round() as i64, ((p.1 - at.1) / g).round() as i64);
+                if u.abs() > h + span || v.abs() > h + span {
+                    continue;
+                }
+                for y in (v - span).max(-h)..=(v + span).min(h) {
+                    for x in (u - span).max(-h)..=(u + span).min(h) {
+                        let q = (at.0 + x as f64 * g, at.1 + y as f64 * g);
+                        if (q.0 - p.0).hypot(q.1 - p.1) <= wide {
+                            mark[((y + h) * n as i64 + x + h) as usize] = true;
+                        }
+                    }
+                }
+            }
+        }
+        ShockField {
+            at,
+            g,
+            n,
+            h,
+            r,
+            k_ref,
+            melt,
+            hole: mark,
+            k: vec![0.0; nn],
+            solid: vec![false; nn],
+            open: vec![0.0; nn],
+            stops: vec![false; nn],
+            free: vec![f64::INFINITY; nn],
+            shut: vec![f64::INFINITY; nn],
+            line: vec![0.0; nn],
+            unit: vec![0.0; nn],
+            thick: vec![0.0; nn],
+            gain: vec![0.0; nn],
+            cost: vec![0.0; nn],
+            shade: vec![0.0; nn],
+            order: Vec::new(),
+            heap: Default::default(),
+            stage: FieldStage::Look,
+            next: 0,
+            work: 0,
+            secs: 0.0,
+        }
+    }
+
+    fn ready(&self) -> bool {
+        self.stage == FieldStage::Done
+    }
+
+    /// Where node `i` is.
+    fn pos(&self, i: usize) -> (f64, f64) {
+        let (x, y) = ((i % self.n) as i64 - self.h, (i / self.n) as i64 - self.h);
+        (self.at.0 + x as f64 * self.g, self.at.1 + y as f64 * self.g)
+    }
+
+    /// At `p`, from the nodes round it: what a ray gains over its own
+    /// energy, what the shock spends getting there, and its shadow (None
+    /// off the grid).
+    fn at(&self, p: (f64, f64)) -> Option<(f64, f64, f64)> {
+        let u = (p.0 - self.at.0) / self.g + self.h as f64;
+        let v = (p.1 - self.at.1) / self.g + self.h as f64;
+        let top = (self.n - 1) as f64;
+        if !(u >= 0.0 && v >= 0.0 && u < top && v < top) {
+            return None;
+        }
+        let (i, j) = (u as usize, v as usize);
+        let (fu, fv) = (u - i as f64, v - j as f64);
+        let ix = j * self.n + i;
+        let ids = [ix, ix + 1, ix + self.n, ix + self.n + 1];
+        let w = [(1.0 - fu) * (1.0 - fv), fu * (1.0 - fv), (1.0 - fu) * fv, fu * fv];
+        let mix = |v: &[f32]| ids.iter().zip(w).map(|(&i, w)| v[i] as f64 * w).sum::<f64>();
+        Some((mix(&self.gain), mix(&self.cost), mix(&self.shade)))
+    }
+
+    /// `v` between the nodes round the point (`x`, `y`) across and down the
+    /// grid.
+    fn mix(&self, v: &[f64], x: f64, y: f64) -> f64 {
+        let (i, j) = (x as usize, y as usize);
+        let (fu, fv) = (x - i as f64, y - j as f64);
+        let ix = j * self.n + i;
+        v[ix] * (1.0 - fu) * (1.0 - fv) + v[ix + 1] * fu * (1.0 - fv) + v[ix + self.n] * (1.0 - fu) * fv + v[ix + self.n + 1] * fu * fv
+    }
+
+    /// Open space at node `i` that carries the shock as the rock round it
+    /// would: the charge's own chamber, and the unit's own hole.
+    fn carries(&self, i: usize) -> bool {
+        let p = self.pos(i);
+        let (dx, dy) = (p.0 - self.at.0, p.1 - self.at.1);
+        (dx * dx + dy * dy).sqrt() <= self.melt.max(1.5 * self.g) || self.hole[i]
+    }
+
+    /// Open space carried as the rock round it: its cost is that rock's
+    /// (the nodes of rock beside it, or the rock round the charge), and the
+    /// nodes that stop the shock (mostly open) are marked. Then the nodes
+    /// are put in order, nearest the charge first, and the first search set
+    /// going. Returns the work done.
+    fn fill(&mut self) -> u64 {
+        let (n, h) = (self.n as i64, self.h);
+        for i in 0..self.n * self.n {
+            if self.open[i] > 0.0 && self.carries(i) {
+                self.open[i] = 0.0;
+            }
+            self.stops[i] = self.open[i] >= 0.5;
+            if self.solid[i] {
+                continue;
+            }
+            let (x, y) = ((i as i64) % n, (i as i64) / n);
+            let (mut sum, mut cnt) = (0.0, 0);
+            for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                let (a, b) = (x + dx, y + dy);
+                if a >= 0 && b >= 0 && a < n && b < n && self.solid[(b * n + a) as usize] {
+                    sum += self.k[(b * n + a) as usize];
+                    cnt += 1;
+                }
+            }
+            self.k[i] = if cnt > 0 { sum / cnt as f64 } else { self.k_ref };
+        }
+        // (By distance squared, in whole nodes: counted, not sorted.)
+        let mut counts = vec![0u32; (2 * h * h + 2) as usize];
+        for i in 0..self.n * self.n {
+            let (x, y) = ((i as i64) % n - h, (i as i64) / n - h);
+            counts[(x * x + y * y) as usize + 1] += 1;
+        }
+        for d in 1..counts.len() {
+            counts[d] += counts[d - 1];
+        }
+        self.order = vec![0; self.n * self.n];
+        for i in 0..self.n * self.n {
+            let (x, y) = ((i as i64) % n - h, (i as i64) / n - h);
+            let d = (x * x + y * y) as usize;
+            self.order[counts[d] as usize] = i as u32;
+            counts[d] += 1;
+        }
+        let c = (h * n + h) as usize;
+        self.free[c] = 0.0;
+        self.heap.push(std::cmp::Reverse((0, c as u32)));
+        (self.n * self.n) as u64 / 2
+    }
+
+    /// The cheapest ways out from the charge, open space carried (`shut`
+    /// false) or stopping the shock (true): it can be reached, but the
+    /// shock goes no further from it, and doesn't slip between two such
+    /// nodes. While `budget` lasts; true once all done.
+    fn march(&mut self, shut: bool, budget: &mut u64) -> bool {
+        let (n, g) = (self.n as i64, self.g);
+        let (k, stops) = (&self.k, &self.stops);
+        let (dist, heap) = (if shut { &mut self.shut } else { &mut self.free }, &mut self.heap);
+        let stop = |x: i64, y: i64| shut && stops[(y * n + x) as usize];
+        while *budget > 0 {
+            let Some(std::cmp::Reverse((bits, i))) = heap.pop() else { return true };
+            *budget = budget.saturating_sub(WORK_FIELD);
+            self.work += WORK_FIELD;
+            let (i, c) = (i as usize, f64::from_bits(bits));
+            let (x, y) = ((i as i64) % n, (i as i64) / n);
+            if c > dist[i] || stop(x, y) {
+                continue;
+            }
+            for &(dx, dy, l) in &FIELD_STEPS {
+                let (a, b) = (x + dx, y + dy);
+                if a < 0 || b < 0 || a >= n || b >= n {
+                    continue;
+                }
+                let j = (b * n + a) as usize;
+                // A long step costs what the two nodes it passes between
+                // do as well; it and a slanting one are closed if both of
+                // the nodes they pass between stop the shock. (Closing a long
+                // step if either did made the shock's way along a cave's
+                // wall or the ground a few per cent dearer than its way
+                // through the rock beside them, a shadow where there is none.)
+                let mut sum = (k[i] + k[j]) * 0.5;
+                if dx.abs() == 2 || dy.abs() == 2 {
+                    let (m1, m2) = if dx.abs() == 2 { ((x + dx / 2, y), (x + dx / 2, b)) } else { ((x, y + dy / 2), (a, y + dy / 2)) };
+                    if stop(m1.0, m1.1) && stop(m2.0, m2.1) {
+                        continue;
+                    }
+                    sum = (sum + (k[(m1.1 * n + m1.0) as usize] + k[(m2.1 * n + m2.0) as usize]) * 0.5) * 0.5;
+                } else if dx != 0 && dy != 0 && stop(a, y) && stop(x, b) {
+                    continue;
+                }
+                let to = c + l * g * sum;
+                if to < dist[j] {
+                    dist[j] = to;
+                    heap.push(std::cmp::Reverse((to.to_bits(), j as u32)));
+                }
+            }
+        }
+        heap.is_empty()
+    }
+
+    /// The straight line out to node `i` (all nodes nearer the charge done
+    /// already), and what the rays and cracks read there.
+    fn line_to(&mut self, i: usize) {
+        let (x, y) = ((i % self.n) as i64 - self.h, (i / self.n) as i64 - self.h);
+        let d2 = x * x + y * y;
+        if d2 == 0 {
+            return;
+        }
+        let d = (d2 as f64).sqrt();
+        let c = (self.h * self.n as i64 + self.h) as usize;
+        // (How thick the open space across the line is short of this node:
+        // open space itself is not in its own shadow, so the rock on the
+        // charge's side of a cave, between this node and the next, is not.)
+        let before = if d2 <= 2 {
+            self.line[i] = self.g * d * (self.k[c] + self.k[i]) * 0.5;
+            self.unit[i] = d;
+            0.0
+        } else {
+            // From the line's point two nodes back towards the charge
+            // (the nodes round it are all nearer the charge than this one),
+            // and the open space there and one node back. (Summed a node at
+            // a time along the line, between the nodes round each point, a
+            // thin layer of open space counts as thick as it is wherever
+            // the grid falls.)
+            let s = 1.0 - 2.0 / d;
+            let (qx, qy) = (self.h as f64 + x as f64 * s, self.h as f64 + y as f64 * s);
+            self.line[i] = self.mix(&self.line, qx, qy) + self.g * (self.k[i] + self.mix(&self.k, qx, qy));
+            self.unit[i] = self.mix(&self.unit, qx, qy) + 2.0;
+            let s1 = 1.0 - 1.0 / d;
+            let (mx, my) = (self.h as f64 + x as f64 * s1, self.h as f64 + y as f64 * s1);
+            self.mix(&self.thick, qx, qy) + self.mix(&self.open, mx, my)
+        };
+        self.thick[i] = before + self.open[i];
+        let f = ((before - SHADOW_FROM) / (SHADOW_FULL - SHADOW_FROM)).clamp(0.0, 1.0);
+        // The grid's errors put right: in even rock, the cheapest ways and
+        // the straight line then cost what the straight line truly does.
+        let fix = d / grid_len(x, y);
+        let free = self.free[i] * fix;
+        // The way round open space counts only where it blocks the straight
+        // line (elsewhere the grid's small turns round a node that stops
+        // the shock are no shadow), and only so far.
+        let extra = (self.shut[i] * fix - free).clamp(0.0, SHADOW_MAX / SHADOW_COST);
+        let shade = (f * (SHADOW_COST * extra + SHADOW_TURN)).min(SHADOW_MAX);
+        let shut = free + f * extra;
+        let line = self.line[i] * d / self.unit[i];
+        self.gain[i] = ((line * (1.0 - GAIN_SLACK) - shut).max(0.0) - shade) as f32;
+        self.cost[i] = (shut + shade) as f32;
+        self.shade[i] = shade as f32;
+    }
+}
+
 /// A sapper's blast going off (Benjamin's idea, 26 Nov: the shock as a
 /// moving front). Its front runs out from the charge FRONT_MPS, and each
 /// tick the rock between last tick's front and this tick's is dealt with:
@@ -800,8 +1263,18 @@ pub(super) struct BlastJob {
     live: Vec<u32>,
     going: usize,
     reach: i64,
-    /// Where each ray stopped breaking rock (m; `reach` if it never did).
+    /// Where each ray stopped breaking rock (m; `reach` if it never did),
+    /// and what the shock had spent getting there by the field, outside any
+    /// shadow, less the energy the ray was short by (not a number if it
+    /// never stopped), which its cracks run on from.
     stop: Vec<f64>,
+    stop_cost: Vec<f64>,
+    /// The shock's field (see `ShockField`), worked out before the rays set
+    /// off; and what the shock spends in the rock round the charge going
+    /// CRACK_REACH radii (how its spending past a ray's end is turned into
+    /// how far into the cracked zone a place is).
+    field: ShockField,
+    crack_cost: f64,
     /// Once all the rays are done: how far out their cracks reach (m).
     ray_end: Option<f64>,
     /// What it broke, with the ray's energy left there and the distance.
@@ -901,15 +1374,33 @@ impl BlastJob {
 
     /// How far into the cracked zone the point `p` lies, from 0 where the
     /// rays stopped breaking rock (or beside the loosened column) to 1
-    /// CRACK_REACH radii further; and the same measured from the rays alone.
+    /// CRACK_REACH radii further; and the same from the rays alone, for the
+    /// far zone (which never reaches further out than it would in even rock).
     fn crack_t(&self, p: (f64, f64)) -> (f64, f64) {
         let (dx, dy) = (p.0 - self.at.0, p.1 - self.at.1);
         let rays = self.stop.len().max(1);
         // Round the charge, past where the rays stopped.
         let d = (dx * dx + dy * dy).sqrt();
         let k = ((dy.atan2(dx) / std::f64::consts::TAU * rays as f64).round() as i64).rem_euclid(rays as i64) as usize;
-        let tr = ((d - self.stop[k]) / (self.r * CRACK_REACH)).max(0.0);
-        let mut t = tr;
+        let td = ((d - self.stop[k]) / (self.r * CRACK_REACH)).max(0.0);
+        // By what the shock spends getting there past the ray's end, as
+        // the field has it: further along a soft layer (up to CRACK_SOFT
+        // times), never less far than in even rock (measured so, a place
+        // where the rock was harder than round the charge had its cracks
+        // cut short, by up to half at 2 radii), and less far into the
+        // shadow of open space. The far zone takes the shadow alone.
+        let (tr, mut t, shade) = match self.field.at(p) {
+            Some((_, cost, raw)) => {
+                let shade = raw / self.crack_cost;
+                if self.stop_cost[k].is_finite() {
+                    let tf = ((cost - raw - self.stop_cost[k]) / self.crack_cost).max(0.0);
+                    (td + shade, td.min(tf.max(td / CRACK_SOFT)) + shade, shade)
+                } else {
+                    (td + shade, td + shade, shade)
+                }
+            }
+            None => (td, td, 0.0),
+        };
         // Either side of the column, more widely near the surface.
         if self.height > 0.0 {
             let along = dx * self.up.0 + dy * self.up.1;
@@ -917,7 +1408,7 @@ impl BlastJob {
                 let f = (along / self.height).clamp(0.0, 1.0);
                 let half = self.r * (1.0 + (self.lt - 1.0) * f);
                 let out = (dx * self.side.0 + dy * self.side.1).abs() - half;
-                t = t.min((out / (self.r * (0.35 + 0.65 * f))).max(0.0));
+                t = t.min((out / (self.r * (0.35 + 0.65 * f))).max(0.0) + shade);
             }
         }
         (t, tr)
@@ -1565,14 +2056,30 @@ impl Sim {
     /// `fissile`: kilograms of uranium in its charge (0: conventional);
     /// what didn't react is partly left in the rubble.
     pub fn sapper_blast(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64) {
+        self.blast_in_hole(at, yield_kt, fissile, &[], 0.0);
+    }
+
+    /// A blast going off in a unit's own hole (a tunneler's bore: a line of
+    /// points, and how far either side of it the bore reaches), whose open
+    /// space carries the shock as the rock round it would (see
+    /// `ShockField`).
+    pub(super) fn blast_in_hole(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64, bore: &[(f64, f64)], half: f64) {
         let q0 = clock();
-        self.blast_start(at, yield_kt, fissile);
+        self.blast_start(at, yield_kt, fissile, bore, half);
         self.prof2[7] += clock() - q0;
+    }
+
+    /// A test: a charge of `kt` going off at `at` with no loosened column,
+    /// in a bore along `bore` reaching `half` m either side of it, as a
+    /// tunneler's end.
+    pub fn test_bore_blast(&mut self, at: (f64, f64), kt: f64, bore: &[(f64, f64)], half: f64) {
+        let fissile = self.fissile_per_charge();
+        self.unit_blast(at, kt, fissile, bore, half);
     }
 
     /// What happens the moment a charge goes off: the flash, the counts, the
     /// drones and sappers caught in it; then its shock front is set going.
-    pub(super) fn blast_start(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64) {
+    pub(super) fn blast_start(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64, bore: &[(f64, f64)], half: f64) {
         let sp = &self.eco.units.sapper;
         let r = sp.radius_m_per_cbrt_kt * yield_kt.max(0.0).cbrt();
         let column = sp.depth_m_per_cbrt_kt > 0.0;
@@ -1671,6 +2178,14 @@ impl Sim {
         let far_blocks = far_sizes.map(|size| Blocks::new(size, blast, (at.0 - out) as i64, (at.1 - out) as i64, (at.0 + out) as i64, (at.1 + out) as i64));
         let plan = (seen && column).then(|| self.crater_plan(at, r, yield_kt, height, blast));
         let column_end = if column { ((height + 1.0).powi(2) + (r * lt).powi(2)).sqrt() + 1.0 } else { 0.0 };
+        // The shock's field, out as far as any crack can reach (the far zone
+        // past the farthest a ray can go, or beside the column).
+        let field_reach = (reach as f64 + r * (CRACK_REACH + CRACK_FAR)).max((height + 2.0).hypot(r * lt + r)) + 2.0;
+        // (Its own hole: the sapper's shaft up to the ground, or the bore
+        // it was given.)
+        let shaft = [at, top];
+        let hole: (&[(f64, f64)], f64) = if column { (&shaft, SHAFT_HALF as f64) } else { (bore, half) };
+        let field = ShockField::new(at, r, (0.45 + 1.7 * h) / r, inner, hole, field_reach);
         self.blast_jobs.push(BlastJob {
             at,
             c0,
@@ -1696,6 +2211,9 @@ impl Sim {
             going: rays,
             reach,
             stop: vec![reach as f64; rays],
+            stop_cost: vec![f64::NAN; rays],
+            field,
+            crack_cost: CRACK_REACH * (0.45 + 1.7 * h),
             ray_end: None,
             broken: CellMap::default(),
             rubble: Vec::new(),
@@ -1850,7 +2368,20 @@ impl Sim {
             j.crater_done = true;
             *budget = budget.saturating_sub(j.crater.len() as u64);
         }
-        while !j.front_done && *budget > 0 && j.shell as f64 * SHELL_M < j.front {
+        // The shock's field is worked out before the rays set off (they
+        // and the cracks read it): its grid is as many nodes across at any
+        // yield, 670,000 to 830,000 work (35 to 70 ms, most of it looking at
+        // the ground all over each node), so it takes a blast's first six
+        // or seven ticks, and the front catches up after.
+        if !j.field.ready() && *budget > 0 {
+            let q0 = clock();
+            self.field_work(&mut j.field, budget);
+            j.field.secs += clock() - q0;
+            if j.field.ready() {
+                self.last_field = (j.field.n * j.field.n, j.field.work, j.field.secs);
+            }
+        }
+        while j.field.ready() && !j.front_done && *budget > 0 && j.shell as f64 * SHELL_M < j.front {
             let lo = j.shell as f64 * SHELL_M;
             let hi = lo + SHELL_M;
             // The rays run a little ahead (3 m) of the column and the
@@ -1989,6 +2520,129 @@ impl Sim {
         }
     }
 
+    /// A blast's shock field (see `ShockField`) worked out while `budget`
+    /// lasts; the rest next tick. What is at each node is looked at in the
+    /// world as it is when the blast goes off, all over the node's square
+    /// (see `field_looks`).
+    fn field_work(&self, f: &mut ShockField, budget: &mut u64) {
+        let nn = f.n * f.n;
+        let space = self.world.planet.max_radius + 1.0;
+        let (mut xs, mut ys) = (Vec::new(), Vec::new());
+        while *budget > 0 && !f.ready() {
+            let before = f.work;
+            match f.stage {
+                FieldStage::Look => {
+                    let end = (f.next + 64).min(nn);
+                    for i in f.next..end {
+                        let (x, y) = ((i % f.n) as i64 - f.h, (i / f.n) as i64 - f.h);
+                        // (The grid's corners, past where any crack can reach,
+                        // are taken to be rock like that round the charge.)
+                        if x * x + y * y > f.h * f.h {
+                            f.solid[i] = true;
+                            f.k[i] = f.k_ref;
+                            f.work += 1;
+                            continue;
+                        }
+                        let p = f.pos(i);
+                        field_looks(&mut xs, p.0 - 0.5 * f.g, f.g);
+                        field_looks(&mut ys, p.1 - 0.5 * f.g, f.g);
+                        let (mut open, mut sum, mut held) = (0.0, 0.0, 0.0);
+                        for &(qx, wx) in &xs {
+                            for &(qy, wy) in &ys {
+                                let (q, w) = ((qx, qy), wx * wy);
+                                // (Out in space there is nothing to ask the
+                                // world.)
+                                if len(q) > space {
+                                    open += w;
+                                    f.work += 1;
+                                    continue;
+                                }
+                                f.work += WORK_FIELD_LOOK;
+                                let c = cell_of(q);
+                                // (As the rays have it: powder is rock, and a
+                                // liquid carries the shock cheaply.)
+                                let m = self.world.material(c.0, c.1);
+                                if m == VACUUM {
+                                    open += w;
+                                    continue;
+                                }
+                                let k = if self.loose.contains(&c) {
+                                    0.3
+                                } else {
+                                    match self.world.planet.mats.get(m).state {
+                                        State::Gas => {
+                                            open += w;
+                                            continue;
+                                        }
+                                        State::Liquid => 0.12,
+                                        _ => 0.45 + 1.7 * blast_hardness(self, m),
+                                    }
+                                };
+                                sum += k * w;
+                                held += w;
+                            }
+                        }
+                        f.open[i] = open;
+                        if held > 0.0 {
+                            f.solid[i] = true;
+                            f.k[i] = sum / held / f.r;
+                        }
+                    }
+                    f.next = end;
+                    if end == nn {
+                        f.stage = FieldStage::Fill;
+                    }
+                }
+                FieldStage::Fill => {
+                    f.work += f.fill();
+                    f.stage = FieldStage::Free;
+                }
+                FieldStage::Free => {
+                    if f.march(false, budget) {
+                        let c = (f.h * f.n as i64 + f.h) as usize;
+                        f.shut[c] = 0.0;
+                        f.heap.push(std::cmp::Reverse((0, c as u32)));
+                        f.stage = FieldStage::Shut;
+                    }
+                    continue;
+                }
+                FieldStage::Shut => {
+                    if f.march(true, budget) {
+                        f.stage = FieldStage::Line;
+                        f.next = 0;
+                    }
+                    continue;
+                }
+                FieldStage::Line => {
+                    let end = (f.next + 1024).min(nn);
+                    for k in f.next..end {
+                        f.line_to(f.order[k] as usize);
+                    }
+                    f.work += (end - f.next) as u64;
+                    f.next = end;
+                    if end == nn {
+                        // (Only what the rays and cracks read is kept.)
+                        f.stage = FieldStage::Done;
+                        f.order = Vec::new();
+                        f.heap = Default::default();
+                        f.hole = Vec::new();
+                        f.k = Vec::new();
+                        f.solid = Vec::new();
+                        f.open = Vec::new();
+                        f.stops = Vec::new();
+                        f.free = Vec::new();
+                        f.shut = Vec::new();
+                        f.line = Vec::new();
+                        f.unit = Vec::new();
+                        f.thick = Vec::new();
+                    }
+                }
+                FieldStage::Done => {}
+            }
+            *budget = budget.saturating_sub(f.work - before);
+        }
+    }
+
     /// The rays of a blast, each stepped on to `limit` (m from the charge)
     /// or until it gives out; the cracks running on past where they gave
     /// out follow, up to the same distance. Once `budget` is spent the rest
@@ -2037,18 +2691,28 @@ impl Sim {
                 }
                 let h = blast_hardness(self, m);
                 ray.e -= (0.45 + 1.7 * h) / r;
-                if ray.e <= 0.0 {
+                // What the shock has here by the field: more where it gets
+                // here more cheaply another way than straight along the ray
+                // (along a soft layer), less in the shadow of open space.
+                let (gain, cost, shade) = j.field.at(mid(c)).unwrap_or((0.0, f64::NAN, 0.0));
+                let e = (ray.e + gain).min(1.0);
+                if e <= 0.0 {
                     ray.stopped = true;
                     j.stop[k] = step as f64;
-                    // A crack may run on, wandering, further in harder rock.
-                    if k % 4 == 0 {
+                    // (Its cracks run on from what the shock spent here
+                    // outside any shadow: in one, they get the shadow's
+                    // whole cost on top.)
+                    j.stop_cost[k] = cost - shade + (e + shade).min(0.0);
+                    // A crack may run on, wandering, further in harder rock
+                    // (not into a shadow).
+                    if k % 4 == 0 && shade < SHADOW_CRACK {
                         ray.crack = Some(Crack { x: c.0 as f64, y: c.1 as f64, a: ray.a, k: 0, len: (r * (0.3 + 0.9 * h)) as i64, h });
                     }
                     break;
                 }
-                j.broken.insert(c, (ray.e, step as f64));
+                j.broken.insert(c, (e, step as f64));
                 self.units.cracked += 1;
-                work += self.blast_broken(j, c, h, ray.e, step as f64);
+                work += self.blast_broken(j, c, h, e, step as f64);
             }
             if ray.step >= j.reach {
                 ray.stopped = true;
@@ -2090,9 +2754,10 @@ impl Sim {
             }
         }
         j.live = keep;
-        // All the rays done: how far out the shock can crack rock.
+        // All the rays done: how far out the shock can crack rock all
+        // through (further along a soft layer: see `crack_t`).
         if j.live.is_empty() && j.ray_end.is_none() {
-            j.ray_end = Some(j.stop.iter().fold(0.0f64, |a, &b| a.max(b)) + j.r * CRACK_REACH + 1.0);
+            j.ray_end = Some(j.stop.iter().fold(0.0f64, |a, &b| a.max(b)) + j.r * CRACK_REACH * CRACK_SOFT + 1.0);
         }
         (work, ready)
     }
@@ -3098,8 +3763,9 @@ impl Sim {
         // dropped, so the front need not run on to where the farthest a ray
         // could have reached would have put them.
         if !j.far_pruned {
-            if let Some(end) = j.ray_end {
-                let out = end - 1.0 + j.r * CRACK_FAR;
+            if j.ray_end.is_some() {
+                // (The far zone reaches no further out than in even rock.)
+                let out = j.stop.iter().fold(0.0f64, |a, &b| a.max(b)) + j.r * (CRACK_REACH + CRACK_FAR);
                 let sizes = [0, 1, 2].map(|b| j.far_blocks[b].size);
                 work += q.len() as u64;
                 q.retain(|f| f.d <= out + 1.42 * sizes[f.b as usize]);

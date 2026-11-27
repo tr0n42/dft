@@ -638,6 +638,9 @@ pub struct Sim {
     /// many it threw out whole as rock bodies, and how many cells those
     /// were (for the timings and tests).
     pub last_chunks: (usize, usize, usize),
+    /// The last blast's shock field (see `sapper::ShockField`): its nodes,
+    /// the work it took and how long (s), for the timings and tests.
+    pub last_field: (usize, u64, f64),
     /// Sappers caught in a blast, going off a moment later: (tick, where).
     chain: Vec<(u64, (f64, f64), f64)>,
     /// Blasts going off, their shock fronts running out over the ticks
@@ -1062,6 +1065,7 @@ impl Sim {
             eject: Default::default(),
             last_crater: (0, 0.0),
             last_chunks: (0, 0, 0),
+            last_field: (0, 0, 0.0),
             chain: Vec::new(),
             blast_jobs: Vec::new(),
             next_tunnel_k: 0,

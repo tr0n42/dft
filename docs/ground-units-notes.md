@@ -114,6 +114,16 @@ first. The agreed behaviour is `docs/design/ground-units.md`.
   sight they now come down along their real path round the body (or leave
   it), at most 120 a tick; drops in flight are saved (save version 17).
   Numbers in docs/explosions-research.md.
+- **27 Nov (the shock's field):** the last item of step 5. Before its rays
+  set off, a blast works out what it costs the shock to reach each place
+  (`ShockField`, a grid about 130 nodes across): caves, tunnels and other
+  open space at least a ninth of a blast radius thick shade the rock behind
+  them (nothing broken and hardly any cracks there; thin cracks and pits
+  don't), soft layers carry the broken zone and the cracks further along
+  them, water and magma carry the shock, and the sapper's own shaft and
+  chamber, and a tunneler's own bore, don't count. 35 to 70 ms at any
+  yield, spread over the first six or seven ticks. Numbers in
+  docs/explosions-research.md.
 - **Depth from yield**: `depth_m_per_cbrt_kt = 46` (79 m at 5 kt). The old
   rays break only about the blast radius (24 m at 5 kt), so a new
   **loosened column** (`sapper_column`) turns every solid cell from the charge

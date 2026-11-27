@@ -292,15 +292,18 @@ fn held_pieces_cut_by_a_shaft_fly_joined_up() {
         t += 1;
         assert!(t < 700, "the blast ran its course within a minute");
         // (A tumbling body's cells all turn with it; slabs and drops don't
-        // turn.)
+        // turn. A body that has hardly turned is left out: its angle, worked
+        // out in single precision from two of its points some 1,450 m from
+        // the planet's middle, comes out in steps of 0.00012, and two such
+        // bodies can share one, as two of them did on 27 Nov.)
         let mut by: std::collections::HashMap<u32, Vec<(i64, i64)>> = Default::default();
         for a in s.bodies.drawn() {
-            if a.angle != 0.0 {
+            if a.angle.abs() > 0.01 {
                 by.entry(a.angle.to_bits()).or_default().push(a.home);
             }
         }
-        for cells in by.values() {
-            assert!(joined(cells), "tick {t}: a body of {} cells in pieces: {cells:?}", cells.len());
+        for (angle, cells) in &by {
+            assert!(joined(cells), "tick {t}: a body of {} cells turned {} in pieces: {cells:?}", cells.len(), f32::from_bits(*angle));
             // (A part of a cut piece is at most 7 m across.)
             let (x0, x1) = cells.iter().fold((i64::MAX, i64::MIN), |a, c| (a.0.min(c.0), a.1.max(c.0)));
             beside += (x1 - x0 < 7) as usize;
@@ -312,6 +315,358 @@ fn held_pieces_cut_by_a_shaft_fly_joined_up() {
     }
     assert!(s.last_chunks.1 > 0, "pieces were thrown out whole");
     assert!(beside > 0, "a part of a cut piece flew");
+}
+
+/// Where `test_blast` puts a sapper's charge of `kt` under the top of the far
+/// side (straight under the ground there, at the depth for its yield), and
+/// its blast radius. Down is +y there, and +x is to one side.
+fn charge_at(s: &Sim, kt: f64) -> ((f64, f64), f64) {
+    let mut y = -(s.world.planet.max_radius + 5.0) as i64;
+    while s.world.material(0, y) == VACUUM {
+        y += 1;
+    }
+    let sp = &s.eco.units.sapper;
+    ((0.5, y as f64 + sp.depth_m_per_cbrt_kt * kt.cbrt()), sp.radius_m_per_cbrt_kt * kt.cbrt())
+}
+
+/// The cells of rock round a charge at `at` within `half` radians of the
+/// direction `dir` (a unit vector), from `d0` to `d1` m out.
+fn wedge(s: &Sim, at: (f64, f64), dir: (f64, f64), half: f64, d0: f64, d1: f64) -> Vec<(i64, i64)> {
+    let k = d1.ceil() as i64 + 1;
+    let (cx, cy) = (at.0.floor() as i64, at.1.floor() as i64);
+    let mut out = Vec::new();
+    for x in cx - k..=cx + k {
+        for y in cy - k..=cy + k {
+            let (dx, dy) = (x as f64 + 0.5 - at.0, y as f64 + 0.5 - at.1);
+            let d = dx.hypot(dy);
+            if d >= d0 && d <= d1 && (dx * dir.0 + dy * dir.1) / d >= half.cos() && s.world.material(x, y) != VACUUM {
+                out.push((x, y));
+            }
+        }
+    }
+    out
+}
+
+/// Of these cells (rock before a blast), how many it broke (left loose, or
+/// threw out) and how many more it cracked.
+fn hit(s: &Sim, cells: &[(i64, i64)]) -> (usize, usize) {
+    let loose: std::collections::HashSet<(i64, i64)> = s.loose_cells().collect();
+    let cracked: std::collections::HashSet<(i64, i64)> = s.cracked_cells().collect();
+    let broken = |c: &(i64, i64)| loose.contains(c) || s.world.material(c.0, c.1) == VACUUM;
+    (cells.iter().filter(|c| broken(c)).count(), cells.iter().filter(|c| !broken(c) && cracked.contains(c)).count())
+}
+
+/// A 10 kt blast with an empty pocket 6 m across dug out (and booked as
+/// mined) 17 m from its charge, 65 degrees below level to one side. Of the
+/// rock in a wedge behind the pocket (as seen from the charge, from just
+/// past it to 3 blast radii out), and of the rock in the same wedge mirrored
+/// to the other side: how many cells the blast broke, and how many more it
+/// cracked. The books are checked as it goes off.
+fn cave_shadow() -> ((usize, usize), (usize, usize)) {
+    let mut s = sim();
+    let initial: f64 = s.world.ledger.initial.iter().sum();
+    let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+    let (at, r) = charge_at(&s, 10.0);
+    let a = 65f64.to_radians();
+    let (dir, mirror) = ((a.cos(), a.sin()), (-a.cos(), a.sin()));
+    let mid = ((at.0 + dir.0 * 17.0).floor() as i64, (at.1 + dir.1 * 17.0).floor() as i64);
+    for x in mid.0 - 3..mid.0 + 3 {
+        for y in mid.1 - 3..mid.1 + 3 {
+            if let Some(m) = s.world.lift_cell(x, y) {
+                s.world.mine_aloft(m);
+            }
+        }
+    }
+    // (The pocket reaches 21 m out at its far corner, and seen from the
+    // charge it is 20 degrees across.)
+    let behind = wedge(&s, at, dir, 8f64.to_radians(), 22.0, 3.0 * r);
+    let other = wedge(&s, at, mirror, 8f64.to_radians(), 22.0, 3.0 * r);
+    s.test_blast((0.5, -(s.world.planet.max_radius + 5.0)), 10.0);
+    let mut t = 0;
+    while s.blasts_pending() > 0 {
+        s.step();
+        t += 1;
+        assert!(t < 600, "the blast ran its course within a minute");
+        if t % 3 == 0 {
+            assert!(off(&s) < 1e-6 * initial, "tick {t}: the books are off by {} kg", off(&s));
+            assert!(air_off(&s) < 1e-6 * initial, "tick {t}: the air is off by {} kg", air_off(&s));
+        }
+    }
+    (hit(&s, &behind), hit(&s, &other))
+}
+
+/// A cave shields the rock behind it from a blast: in the pocket's shadow
+/// far less rock is broken or cracked than in the same place on the other
+/// side, where there is no pocket. (Before the shock's field, rays crossed
+/// the pocket cheaply and broke more behind it: 321 cells broken and 336
+/// cracked, to 287 and 233 on the other side.)
+#[test]
+fn a_cave_shields_the_rock_behind_it_from_a_blast() {
+    let ((bb, bc), (ob, oc)) = cave_shadow();
+    assert!(ob > 50 && oc > 50, "the blast broke {ob} cells and cracked {oc} in the wedge with no pocket");
+    assert!(bb * 3 < ob, "broken behind the pocket: {bb}, on the other side {ob}");
+    assert!(bc * 2 < oc, "cracked behind the pocket: {bc}, on the other side {oc}");
+}
+
+/// A 10 kt blast in hard rock (hardness 8) with a band of soft regolith 6 m
+/// thick laid level through its charge (the rock dug out and booked as
+/// mined, the regolith brought in from outside): how far the broken rock
+/// reaches from the charge sideways (within 10 m of the band's middle, past
+/// the loosened column) and straight down (within 10 m either side, under
+/// the column), and how many cells of the hard rock flanking the band (3 to
+/// 12 m from its middle, from past the column to 4 radii out) the blast broke,
+/// and how many more it cracked. The books are checked as it goes off.
+fn soft_band() -> (f64, f64, (usize, usize)) {
+    let mut s = hard_sim();
+    let initial: f64 = s.world.ledger.initial.iter().sum();
+    let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+    let (at, r) = charge_at(&s, 10.0);
+    let soft = s.world.planet.mats.id("regolith").unwrap();
+    let (cx, cy) = (at.0.floor() as i64, at.1.floor() as i64);
+    for x in cx - 150..=cx + 150 {
+        for y in cy - 3..cy + 3 {
+            if let Some(m) = s.world.lift_cell(x, y) {
+                s.world.mine_aloft(m);
+            }
+            assert!(s.world.deposit_cell(x, y, soft));
+        }
+    }
+    let k = (4.0 * r) as i64 + 2;
+    let mut rock = Vec::new();
+    for x in cx - k..=cx + k {
+        for y in cy - k..=cy + k {
+            if s.world.material(x, y) != VACUUM {
+                rock.push((x, y));
+            }
+        }
+    }
+    s.test_blast((0.5, -(s.world.planet.max_radius + 5.0)), 10.0);
+    let mut t = 0;
+    while s.blasts_pending() > 0 {
+        s.step();
+        t += 1;
+        assert!(t < 600, "the blast ran its course within a minute");
+        if t % 3 == 0 {
+            assert!(off(&s) < 1e-6 * initial, "tick {t}: the books are off by {} kg", off(&s));
+            assert!(air_off(&s) < 1e-6 * initial, "tick {t}: the air is off by {} kg", air_off(&s));
+        }
+    }
+    let loose: std::collections::HashSet<(i64, i64)> = s.loose_cells().collect();
+    let broken: Vec<(f64, f64)> = rock.iter().filter(|c| loose.contains(c) || s.world.material(c.0, c.1) == VACUUM).map(|c| (c.0 as f64 + 0.5 - at.0, c.1 as f64 + 0.5 - at.1)).collect();
+    let far = |f: &dyn Fn(f64, f64) -> bool| broken.iter().filter(|p| f(p.0, p.1)).map(|p| p.0.hypot(p.1)).fold(0.0, f64::max);
+    let side = far(&|dx, dy| dy.abs() <= 10.0 && dx.abs() > 1.15 * r);
+    let down = far(&|dx, dy| dx.abs() <= 10.0 && dy > 0.5 * r + 2.0);
+    let flank: Vec<(i64, i64)> = rock
+        .iter()
+        .copied()
+        .filter(|c| {
+            let (dx, dy) = (c.0 as f64 + 0.5 - at.0, c.1 as f64 + 0.5 - at.1);
+            dy.abs() > 3.0 && dy.abs() <= 12.0 && dx.abs() > 1.15 * r && dx.abs() <= 4.0 * r
+        })
+        .collect();
+    (side, down, hit(&s, &flank))
+}
+
+/// A soft layer channels a blast: in hard rock, a soft band through the
+/// charge lets the broken rock reach clearly further sideways along it than
+/// straight down, and the hard rock either side of the band breaks well
+/// beyond where it would without the band. (Before the shock's field, only
+/// the rays that happened to lie along the band went further: 72 m sideways
+/// to 41 m down, and 136 cells broken in the hard rock flanking the band;
+/// with it, 71 m to 41, and about 410 cells.)
+#[test]
+fn a_soft_layer_channels_a_blast() {
+    let (side, down, (fb, fc)) = soft_band();
+    assert!(side > 1.6 * down, "broken rock reaches {side:.0} m sideways along the band, {down:.0} m down (flanking hard rock: {fb} broken, {fc} cracked)");
+    assert!(fb > 300, "{fb} cells broken in the hard rock flanking the band ({fc} more cracked)");
+}
+
+/// A 10 kt blast on the test body with a level layer `t` cells thick (open
+/// space, or a liquid) dug out (and booked as mined) under its charge, its
+/// top `dy` m down and 200 m across: of the rock under the layer, within 3
+/// blast radii of the charge, how many cells the blast broke, and how many
+/// more it cracked. `t` 0: no layer. The books are checked as it goes off.
+fn layer_case(t: i64, dy: f64, liquid: bool) -> (usize, usize) {
+    let mut s = sim();
+    let initial: f64 = s.world.ledger.initial.iter().sum();
+    let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+    let (at, r) = charge_at(&s, 10.0);
+    let wet = (1..s.world.planet.mats.list.len()).find(|&m| s.world.planet.mats.list[m].state == dft_sim::materials::State::Liquid).unwrap() as dft_sim::materials::MatId;
+    let y0 = (at.1 + dy).floor() as i64;
+    for x in -100..100 {
+        for y in y0..y0 + t {
+            if let Some(m) = s.world.lift_cell(x, y) {
+                s.world.mine_aloft(m);
+            }
+            if liquid {
+                assert!(s.world.deposit_cell(x, y, wet));
+            }
+        }
+    }
+    let k = (3.0 * r) as i64;
+    let (cx, cy) = (at.0.floor() as i64, at.1.floor() as i64);
+    let mut under = Vec::new();
+    for x in cx - k..=cx + k {
+        for y in (y0 + t).max(cy - k)..=cy + k {
+            if s.world.material(x, y) != VACUUM {
+                under.push((x, y));
+            }
+        }
+    }
+    s.test_blast((0.5, -(s.world.planet.max_radius + 5.0)), 10.0);
+    let mut tick = 0;
+    while s.blasts_pending() > 0 {
+        s.step();
+        tick += 1;
+        assert!(tick < 600, "the blast ran its course within a minute");
+        if tick % 3 == 0 {
+            assert!(off(&s) < 1e-6 * initial, "tick {tick}: the books are off by {} kg", off(&s));
+            assert!(air_off(&s) < 1e-6 * initial, "tick {tick}: the air is off by {} kg", air_off(&s));
+        }
+    }
+    hit(&s, &under)
+}
+
+/// Only open space about a ninth of a blast radius thick (a node of the
+/// shock's field: 3.4 m at 10 kt) or more shields the rock behind it: a
+/// crack 1 m wide 13 m under a 10 kt charge barely changes what breaks
+/// under it, wherever the field's grid falls on it, one 2 m wide shades
+/// only the rock off to the side (the shock crosses it aslant), the same
+/// wherever the grid falls, and one 4 m wide shields what lies under it.
+/// (Measured: with no crack 2,704 cells broken under 12.8 m; behind a 1 m
+/// crack 2,693 to 2,789 by where it lies, a 2 m one 2,178 to 2,245, a 4 m
+/// one 24 to 28. Looked at one cell to a node, a 1 m crack a node fell on
+/// shielded all of it, and one 2 m wide all or none by where it lay.)
+#[test]
+fn only_a_thick_gap_shields_the_rock_behind_it_from_a_blast() {
+    let (none, _) = layer_case(0, 12.8, false);
+    let (a, _) = layer_case(1, 12.0, false);
+    let (b, _) = layer_case(1, 12.8, false);
+    assert!(a as f64 > 0.9 * none as f64 && b as f64 > 0.9 * none as f64, "broken under a 1 m crack: {a} and {b}; with none, {none}");
+    let (c, _) = layer_case(2, 12.0, false);
+    let (d, _) = layer_case(2, 12.8, false);
+    assert!(c.abs_diff(d) as f64 <= 0.1 * c.max(d) as f64, "broken under a 2 m crack: {c} and {d}, by where it lies");
+    assert!(c.min(d) as f64 > 0.6 * none as f64, "broken under a 2 m crack: {c} and {d}; with none, {none}");
+    let (e, _) = layer_case(4, 12.8, false);
+    assert!((e as f64) < 0.1 * none as f64, "broken under a 4 m gap: {e}; with none, {none}");
+}
+
+/// A liquid carries a blast's shock (water and magma carry one well): rock
+/// under a seam of liquid 4 m thick breaks about as it would with no seam.
+/// (Measured: 2,946 cells broken under it against 2,704 with none; the shock
+/// runs cheaply along the seam.)
+#[test]
+fn a_liquid_seam_does_not_shield_the_rock_behind_it() {
+    let (none, _) = layer_case(0, 12.8, true);
+    let (wet, _) = layer_case(4, 12.8, true);
+    assert!(wet as f64 > 0.9 * none as f64, "broken under a 4 m seam of liquid: {wet}; with none, {none}");
+}
+
+/// A tunneler's end blast (50 kt, no loosened column) goes off in its own
+/// bore, 12 m wide: the bore carries the shock as rock would, so the rock
+/// beside it (6 to 20 m from the bore's middle, 25 to 90 m from the charge)
+/// breaks at least about as much as with no bore. (Measured: 3,467 cells
+/// broken beside the bore against 3,339 with none; with the bore taken for
+/// a cave, 2,069.) The books are checked as it goes off.
+#[test]
+fn a_tunnelers_own_bore_does_not_shield_its_blast() {
+    let case = |dig: bool| {
+        let mut s = sim();
+        let initial: f64 = s.world.ledger.initial.iter().sum();
+        let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+        let mut y = -(s.world.planet.max_radius + 5.0) as i64;
+        while s.world.material(0, y) == VACUUM {
+            y += 1;
+        }
+        let at = (0.5, y as f64 + 100.0);
+        let bottom = at.1 + 80.0;
+        if dig {
+            for x in -6..6 {
+                for yy in y - 5..bottom as i64 {
+                    if let Some(m) = s.world.lift_cell(x, yy) {
+                        s.world.mine_aloft(m);
+                    }
+                }
+            }
+        }
+        let mut beside = Vec::new();
+        for x in -21..=21i64 {
+            for yy in (at.1 - 91.0) as i64..=(at.1 + 91.0) as i64 {
+                let (dx, dy) = (x as f64 + 0.5 - at.0, yy as f64 + 0.5 - at.1);
+                let d = dx.hypot(dy);
+                if (6.0..=20.0).contains(&(x as f64 + 0.5).abs()) && (25.0..=90.0).contains(&d) && s.world.material(x, yy) != VACUUM {
+                    beside.push((x, yy));
+                }
+            }
+        }
+        let line = [(0.5, y as f64 - 5.0), at, (0.5, bottom)];
+        s.test_bore_blast(at, 50.0, if dig { &line } else { &[] }, 6.0);
+        let mut tick = 0;
+        while s.blasts_pending() > 0 {
+            s.step();
+            tick += 1;
+            assert!(tick < 1200, "the blast ran its course within two minutes");
+            if tick % 3 == 0 {
+                assert!(off(&s) < 1e-6 * initial, "tick {tick}: the books are off by {} kg", off(&s));
+                assert!(air_off(&s) < 1e-6 * initial, "tick {tick}: the air is off by {} kg", air_off(&s));
+            }
+        }
+        hit(&s, &beside).0
+    };
+    let (none, bore) = (case(false), case(true));
+    assert!(bore as f64 > 0.9 * none as f64, "broken beside the bore: {bore}; with no bore, {none}");
+}
+
+/// The 5 km dev planet, a whole disc of rock under its sediments: on the 3 km
+/// test body a big blast's charge (530 m down at 3,000 kt, 790 m at 10,000)
+/// lies in the open space under a lump of ground the body's great impact
+/// basins left, and from 1,000 kt up it is not a blast in plain rock.
+fn dev_sim() -> Sim {
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let base = dft_sim::load_body(&data, "dev-planet").unwrap();
+    let p = dft_sim::planet::Planet::new(base.spec.clone(), base.mats.clone()).unwrap();
+    let eco = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
+    let mut s = Sim::new(World::new(p), eco);
+    s.free_drones = Some(0);
+    s
+}
+
+/// The shock's field, as the yield grows (run by hand: cargo test --release
+/// --test sapper_blast -- --ignored --nocapture blast_field): its nodes, the
+/// work it took and how long, how many ticks the blast took to run its
+/// course, its work in all and in its dearest tick; on the dev planet, where
+/// the bigger charges lie in plain rock, also how many cells were left loose
+/// and how many cracked. Then the counts of the two tests above: the rock
+/// behind a cave and on the other side, and the soft band's reach.
+#[test]
+#[ignore]
+fn blast_field() {
+    for (dev, kt) in [(false, 10.0), (false, 1000.0), (false, 10000.0), (true, 1000.0), (true, 10000.0)] {
+        let mut s = if dev { dev_sim() } else { sim() };
+        s.test_blast((0.5, -(s.world.planet.max_radius + 5.0)), kt);
+        let (mut ticks, mut most) = (0, 0.0f64);
+        while s.blasts_pending() > 0 {
+            let b = s.prof2[7];
+            s.step();
+            most = most.max(s.prof2[7] - b);
+            ticks += 1;
+        }
+        let (nodes, work, secs) = s.last_field;
+        eprintln!(
+            "{}{kt} kt: field of {nodes} nodes, {work} work, {:.1} ms; {ticks} ticks ({:.1} game s), blast work {:.0} ms in all, at most {:.1} ms a tick; {} cells loose, {} cracked",
+            if dev { "dev planet, " } else { "" },
+            secs * 1000.0,
+            ticks as f64 * s.eco.tick_s,
+            s.prof2[7] * 1000.0,
+            most * 1000.0,
+            s.loose_cells().count(),
+            s.cracked_cells().count(),
+        );
+    }
+    let ((bb, bc), (ob, oc)) = cave_shadow();
+    eprintln!("10 kt by a cave: behind it {bb} cells broken, {bc} cracked; on the other side {ob} broken, {oc} cracked");
+    let (side, down, (fb, fc)) = soft_band();
+    eprintln!("10 kt in hard rock with a soft band: broken {side:.0} m sideways, {down:.0} m down; in the hard rock flanking the band {fb} broken, {fc} cracked");
 }
 
 /// A buried charge with no loosened column (as a tunneler's end, or the old
@@ -698,3 +1053,4 @@ fn blast_crack_profile() {
         }
     }
 }
+
