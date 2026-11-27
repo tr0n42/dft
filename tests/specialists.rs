@@ -100,6 +100,7 @@ fn specialists_survive_a_save() {
     let planet = std::sync::Arc::new(dft_sim::load_body(&data(), "tutorial-1-2km").unwrap());
     let mut s = Sim::new(World::shared(planet.clone()), eco());
     s.run(600.0);
+    s.finish_blasts();
     let mut w = dft_sim::save::W::default();
     s.write_save(&mut w);
     let l = Sim::read_save(&mut dft_sim::save::R(&w.0, 0), planet, eco()).unwrap();
@@ -133,6 +134,7 @@ fn the_fuser_keeps_sappers_coming() {
     assert!(doped > 0.0, "uranium left in the rubble");
     // And it survives a save.
     let mut w = dft_sim::save::W::default();
+    s.finish_blasts();
     s.write_save(&mut w);
     let planet = s.world.planet.clone();
     let l = Sim::read_save(&mut dft_sim::save::R(&w.0, 0), planet, eco()).unwrap();

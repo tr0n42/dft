@@ -619,7 +619,7 @@ pub struct Sim {
     /// Loose rubble and melt that may still move: it falls, slides down
     /// slopes, and melt runs sideways into cracks (the proving ground's
     /// settling), a cell or two a tick.
-    settling: CellSet,
+    settling: sapper::Settling,
     /// Loose cells out of sight that would settle: they wait, and settle
     /// once the view comes over them (as sand does).
     settle_wait: CellSet,
@@ -633,6 +633,9 @@ pub struct Sim {
     pub(super) eject: std::collections::VecDeque<(u64, (i64, i64), (f64, f64), (f64, f64))>,
     /// Sappers caught in a blast, going off a moment later: (tick, where).
     chain: Vec<(u64, (f64, f64), f64)>,
+    /// Blasts going off, their shock fronts running out over the ticks
+    /// (see `sapper::BlastJob`). Not saved: `finish_blasts` before a save.
+    blast_jobs: Vec<sapper::BlastJob>,
     next_tunnel_k: usize,
     /// Metres of shaft bored, shafts finished, and kg the drills cut.
     pub tunnel_m: u64,
@@ -1046,11 +1049,12 @@ impl Sim {
             loose: CellSet::default(),
             loose_mat,
             melt: Default::default(),
-            settling: CellSet::default(),
+            settling: Default::default(),
             settle_wait: CellSet::default(),
             plume_out: Default::default(),
             eject: Default::default(),
             chain: Vec::new(),
+            blast_jobs: Vec::new(),
             next_tunnel_k: 0,
             tunnel_m: 0,
             tunnels_done: 0,
@@ -4352,7 +4356,10 @@ impl Sim {
     /// - the sandbox's cells are all woken on loading, and heat banked
     ///   toward a phase change is kept, as are temperatures;
     /// - histories (samples) and profiling start over.
+    /// Blasts going off are not kept: call `finish_blasts` first, so none is
+    /// saved half done.
     pub fn write_save(&self, o: &mut crate::save::W) {
+        debug_assert!(self.blast_jobs.is_empty(), "finish_blasts before write_save");
         crate::save::write_world(o, &self.world);
         o.u32(SIM_VERSION);
         o.u64(self.tick);

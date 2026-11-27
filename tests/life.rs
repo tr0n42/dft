@@ -107,6 +107,7 @@ fn a_cut_forest_grows_back_and_the_felled_wood_rots() {
 
     // A save keeps the life cycle.
     let mut w = dft_sim::save::W::default();
+    s.finish_blasts();
     s.write_save(&mut w);
     let l = Sim::read_save(&mut dft_sim::save::R(&w.0, 0), planet, eco()).unwrap();
     assert_eq!(l.life.as_ref().unwrap().counts(), s.life.as_ref().unwrap().counts());

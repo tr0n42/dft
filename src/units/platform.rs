@@ -926,7 +926,7 @@ impl Sim {
 
     /// After loading: loose rubble may move again.
     pub(super) fn resettle(&mut self) {
-        self.settling = self.loose.clone();
+        self.settling = super::sapper::Settling::of(&self.loose);
     }
 
     pub(super) fn read_units_12(&mut self, r: &mut crate::save::R) -> Result<(), String> {

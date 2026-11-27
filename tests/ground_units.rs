@@ -99,6 +99,7 @@ fn tunnelers_and_heat_sinks_open_the_magma_layer() {
         if t == 1200 {
             // A save in the middle of it all.
             let mut w = dft_sim::save::W::default();
+            s.finish_blasts();
             s.write_save(&mut w);
             let l = Sim::read_save(&mut dft_sim::save::R(&w.0, 0), s.world.planet.clone(), s.eco.clone()).unwrap();
             assert_eq!(l.ground_report(), s.ground_report(), "the ground units survive a save");
@@ -132,6 +133,7 @@ fn walkers_fly_out_and_work() {
     assert!(caught > 0, "abductors caught animals alive");
     assert!(lines.contains("burst by lasers") && !lines.contains(" 0 burst by lasers"), "abductors burst some");
     assert!(lines.contains("plant cells burned as math") && !lines.contains("(0 plant cells burned as math)"), "fires burned out of sight");
+    s.finish_blasts();
     let mut w = dft_sim::save::W::default();
     s.write_save(&mut w);
     let l = Sim::read_save(&mut dft_sim::save::R(&w.0, 0), s.world.planet.clone(), s.eco.clone()).unwrap();

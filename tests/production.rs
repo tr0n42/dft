@@ -56,6 +56,7 @@ fn production_survives_a_save() {
     let planet = std::sync::Arc::new(dft_sim::load_body(&data(), "tutorial-1-2km").unwrap());
     let mut s = Sim::new(World::shared(planet.clone()), eco());
     s.run(90.0);
+    s.finish_blasts();
     let mut w = dft_sim::save::W::default();
     s.write_save(&mut w);
     let l = Sim::read_save(&mut dft_sim::save::R(&w.0, 0), planet, eco()).unwrap();

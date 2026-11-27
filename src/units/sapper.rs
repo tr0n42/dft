@@ -1,9 +1,10 @@
 //! Sappers: carry a charge (10 kt) to where the going is hardest, hover
 //! along to a way down (cracks and caves) or bore one, until deep enough,
-//! and go off. The blast (rays, cracks, held
-//! chunks, a molten heart, rubble, thrown rock and a plume), rubble
-//! settling, chain blasts, and the charges themselves (nuclear, fused
-//! uranium, or conventional; uranium left in rubble).
+//! and go off. The blast (a shock front running out from the charge over
+//! the ticks: rays, cracks, held chunks, a molten heart, rubble, thrown
+//! rock, the loosened column, the crater and a plume), rubble settling,
+//! chain blasts, and the charges themselves (nuclear, fused uranium, or
+//! conventional; uranium left in rubble).
 //!
 //! Unit file: the sapper's own behaviour; the platform calls `sappers_work`
 //! once a game second and `blast_tick` every tick.
@@ -83,8 +84,46 @@ pub(super) const SHAFT_HALF: i64 = 3;
 /// How far past the broken rock the shock cracks it, in blast radii.
 pub(super) const CRACK_REACH: f64 = 1.2;
 
-/// Rubble cells moved per tick, at most.
+/// Rubble cells moved per tick, at most...
 pub(super) const SETTLE_PER_TICK: usize = 20_000;
+/// ...and looked at, at most (the nearest the centre first). Every cell
+/// waiting was once gone through each tick, so a big blast's few hundred
+/// thousand cells of rubble cost tens of milliseconds a tick for a minute.
+const SETTLE_LOOK: usize = 3 * SETTLE_PER_TICK;
+
+/// Loose cells that may settle, kept nearest the centre first (as `settle`
+/// goes through them), so a tick takes the nearest few without sorting or
+/// going through all the rest.
+#[derive(Default)]
+pub(super) struct Settling(std::collections::BTreeSet<(i64, i64, i64)>);
+
+impl Settling {
+    pub(super) fn of(cells: &CellSet) -> Settling {
+        Settling(cells.iter().map(|c| (c.0 * c.0 + c.1 * c.1, c.0, c.1)).collect())
+    }
+
+    pub(super) fn insert(&mut self, c: (i64, i64)) {
+        self.0.insert((c.0 * c.0 + c.1 * c.1, c.0, c.1));
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The nearest `n` (at most) taken out, nearest first.
+    fn take_nearest(&mut self, n: usize) -> Vec<(i64, i64)> {
+        let mut out = Vec::with_capacity(n.min(self.0.len()));
+        while out.len() < n {
+            let Some((_, x, y)) = self.0.pop_first() else { break };
+            out.push((x, y));
+        }
+        out
+    }
+}
 
 /// The heart of a sapper's blast is heated to this (K): it melts, and cools
 /// to glass after about this long (s; it was 25, and Benjamin, 26 Nov: the
@@ -96,66 +135,32 @@ pub(super) const MELT_COOL_S: f64 = 6.0;
 /// Ground this hot next to a sapper (a blast's heat) destroys it, and so sets it off.
 pub(super) const SAPPER_COOK_K: f64 = 800.0;
 
-/// The cells a walk over a box round a blast has met: a bit per cell of
-/// the box. The column and the cracks step through the box at 0.7 m, so
-/// they meet most cells twice; a hash set to tell took most of their time
-/// at big yields. (A cell outside the box, which rounding could give, is
-/// kept in an ordinary set.)
-struct Met {
-    x0: i64,
-    y0: i64,
-    w: i64,
-    h: i64,
-    bits: Vec<u64>,
-    out: CellSet,
-}
-
-impl Met {
-    /// For the box from `at`, `h0` to `h1` along `up` and `s` either side
-    /// along `side`.
-    fn new(at: (f64, f64), up: (f64, f64), side: (f64, f64), h0: f64, h1: f64, s: f64) -> Met {
-        let corners = [(h0, -s), (h0, s), (h1, -s), (h1, s)].map(|(h, s)| (at.0 + up.0 * h + side.0 * s, at.1 + up.1 * h + side.1 * s));
-        let lo = |f: fn(&(f64, f64)) -> f64| corners.iter().map(f).fold(f64::MAX, f64::min).floor() as i64 - 1;
-        let hi = |f: fn(&(f64, f64)) -> f64| corners.iter().map(f).fold(f64::MIN, f64::max).floor() as i64 + 1;
-        let (x0, y0) = (lo(|p| p.0), lo(|p| p.1));
-        let (w, h) = (hi(|p| p.0) - x0 + 1, hi(|p| p.1) - y0 + 1);
-        Met { x0, y0, w, h, bits: vec![0; ((w * h + 63) / 64) as usize], out: CellSet::default() }
-    }
-
-    /// Whether `c` is new (and now met).
-    fn insert(&mut self, c: (i64, i64)) -> bool {
-        let (dx, dy) = (c.0 - self.x0, c.1 - self.y0);
-        if dx < 0 || dy < 0 || dx >= self.w || dy >= self.h {
-            return self.out.insert(c);
-        }
-        let i = (dy * self.w + dx) as usize;
-        let (word, bit) = (i / 64, 1u64 << (i % 64));
-        let new = self.bits[word] & bit == 0;
-        self.bits[word] |= bit;
-        new
-    }
-}
-
 /// The blocks a blast's shock cracks rock into, of one size: a Voronoi
 /// pattern, each block round a site jittered in its square of the grid.
-/// Each site (and its block's roll of the dice) is worked out once over
-/// the box `x0..x1`, `y0..y1`, not nine times for every cell looked at.
+/// Each site (and its block's roll of the dice) is worked out once, not
+/// nine times for every cell looked at, and kept in tiles of 32 x 32 sites
+/// over the box `x0..x1`, `y0..y1`, each made when first needed (made all
+/// at once, a big blast's box took milliseconds to fill).
 struct Blocks {
     size: f64,
     blast: u64,
+    /// The first tile's first site, and how many tiles across and down.
     i0: i64,
     j0: i64,
     ni: i64,
     nj: i64,
-    /// Each site's place and its block's roll (NaN: not worked out yet).
-    sites: Vec<[f64; 3]>,
+    /// Each site's place and its block's roll.
+    tiles: Vec<Option<Box<[[f64; 3]]>>>,
 }
+
+/// Sites along a side of a tile of blocks.
+const TILE: i64 = 32;
 
 impl Blocks {
     fn new(size: f64, blast: u64, x0: i64, y0: i64, x1: i64, y1: i64) -> Blocks {
         let (i0, j0) = ((x0 as f64 / size).floor() as i64 - 2, (y0 as f64 / size).floor() as i64 - 2);
-        let (ni, nj) = ((x1 as f64 / size).floor() as i64 + 3 - i0, (y1 as f64 / size).floor() as i64 + 3 - j0);
-        Blocks { size, blast, i0, j0, ni, nj, sites: vec![[f64::NAN; 3]; (ni * nj) as usize] }
+        let (ni, nj) = (((x1 as f64 / size).floor() as i64 + 3 - i0 + TILE - 1) / TILE, ((y1 as f64 / size).floor() as i64 + 3 - j0 + TILE - 1) / TILE);
+        Blocks { size, blast, i0, j0, ni, nj, tiles: (0..ni * nj).map(|_| None).collect() }
     }
 
     fn work_out(&self, i: i64, j: i64) -> [f64; 3] {
@@ -168,14 +173,17 @@ impl Blocks {
 
     fn site(&mut self, i: i64, j: i64) -> [f64; 3] {
         let (a, b) = (i - self.i0, j - self.j0);
-        if a < 0 || b < 0 || a >= self.ni || b >= self.nj {
+        let (ta, tb) = (a.div_euclid(TILE), b.div_euclid(TILE));
+        if ta < 0 || tb < 0 || ta >= self.ni || tb >= self.nj {
             return self.work_out(i, j);
         }
-        let k = (b * self.ni + a) as usize;
-        if self.sites[k][0].is_nan() {
-            self.sites[k] = self.work_out(i, j);
+        let k = (tb * self.ni + ta) as usize;
+        if self.tiles[k].is_none() {
+            let (fi, fj) = (self.i0 + ta * TILE, self.j0 + tb * TILE);
+            self.tiles[k] = Some((0..TILE * TILE).map(|n| self.work_out(fi + n % TILE, fj + n / TILE)).collect());
         }
-        self.sites[k]
+        let tile = self.tiles[k].as_ref().unwrap();
+        tile[((b - tb * TILE) * TILE + (a - ta * TILE)) as usize]
     }
 
     /// The block cell (x, y) is in (its site's square), and its roll.
@@ -195,6 +203,345 @@ impl Blocks {
             }
         }
         (id, roll)
+    }
+}
+
+/// How fast a blast's shock front runs out through the rock (m a game
+/// second). Real shocks in rock run at kilometres a second; this is slow
+/// enough to see the broken ground and the cracks race out from the charge
+/// (the 110 m of a 10 kt blast in about half a second, where BLAST_BUDGET
+/// keeps up), about as fast as the shock ring the game draws.
+pub(super) const FRONT_MPS: f64 = 200.0;
+
+/// The shock front is worked out in shells this thick (m).
+const SHELL_M: f64 = 0.5;
+
+/// The most blast work done in a tick, shared by all the blasts going off
+/// (see `blasts_advance`): about 8 to 12 ms in a release build, of the 100 ms
+/// a tick has at normal speed (at a quarter of that, 1000 kt took 23 game
+/// seconds to work through; 27 Nov). Counted in work
+/// (a ray's step, a cell of the column or the cracked zone looked at, a
+/// cell of rubble gone through at the end), not clock time, so a run comes
+/// out the same every time. When it runs out, a front lags behind FRONT_MPS
+/// and catches up later: a big blast's front crawls (about 2 s of work at
+/// 10,000 kt takes some 20 game seconds), but no tick stalls.
+pub(super) const BLAST_BUDGET: u64 = 120_000;
+
+/// The work of generating a leaf of the world cell by cell (4,096 cells:
+/// a fraction of a millisecond deep down, a few near the surface, more for
+/// the first in a part of the world nothing has touched), which the first
+/// change in it does: a blast throwing rock out of fresh ground pays it.
+const FRESH_LEAF: u64 = 20_000;
+
+/// The work of asking the world what is in a cell (in ground nothing has
+/// changed yet, the generator works it out: dearer near the surface), and
+/// of changing a cell (loosening or cracking it), against a cell looked at;
+/// and how many cells of a shell can be passed over (outside the column, or
+/// over the ground) for the work of looking at one.
+const WORK_LOOK: u64 = 4;
+const WORK_CHANGE: u64 = 3;
+const WORK_PASS: u64 = 8;
+
+/// The cells whose middles lie from `lo` to `hi` m from `at`, into `out`:
+/// each cell round a blast is in exactly one shell, so the column and the
+/// cracks deal with it once. With `wedge` (two edges' inward normals),
+/// only the cells in the wedge between them (and a metre either side) are
+/// wanted: the rest of each row is not walked at all.
+fn shell_cells(out: &mut Vec<(i64, i64)>, at: (f64, f64), lo: f64, hi: f64, wedge: Option<[(f64, f64); 2]>) {
+    out.clear();
+    if hi <= 0.0 {
+        return;
+    }
+    let (lo2, hi2) = (lo.max(0.0).powi(2), hi * hi);
+    let mut push = |x: i64, y: i64, dy2: f64| {
+        let dx = x as f64 + 0.5 - at.0;
+        let d2 = dx * dx + dy2;
+        if d2 >= lo2 && d2 < hi2 {
+            out.push((x, y));
+        }
+    };
+    let cx = at.0 - 0.5;
+    for y in (at.1 - 0.5 - hi).floor() as i64..=(at.1 - 0.5 + hi).ceil() as i64 {
+        let dy = y as f64 + 0.5 - at.1;
+        let dy2 = dy * dy;
+        if dy2 >= hi2 {
+            continue;
+        }
+        let xmax = (hi2 - dy2).sqrt();
+        let xmin = if lo2 > dy2 { (lo2 - dy2).sqrt() } else { 0.0 };
+        // The part of the row in the wedge: n.0 * dx + n.1 * dy >= -1 for
+        // both edges bounds dx from one side each.
+        let (mut wlo, mut whi) = (i64::MIN, i64::MAX);
+        if let Some(ns) = wedge {
+            let mut none = false;
+            for n in ns {
+                let c = -1.0 - n.1 * dy;
+                if n.0.abs() < 1e-9 {
+                    none |= c > 0.0;
+                } else if n.0 > 0.0 {
+                    wlo = wlo.max((c / n.0 + cx).floor() as i64);
+                } else {
+                    whi = whi.min((c / n.0 + cx).ceil() as i64);
+                }
+            }
+            if none || wlo > whi {
+                continue;
+            }
+        }
+        // Left of the middle and right of it (one run where they meet).
+        let (l0, l1) = ((cx - xmax).floor() as i64, (cx - xmin).ceil() as i64);
+        let (r0, r1) = ((cx + xmin).floor() as i64, (cx + xmax).ceil() as i64);
+        if l1 >= r0 {
+            for x in l0.max(wlo)..=r1.min(whi) {
+                push(x, y, dy2);
+            }
+        } else {
+            for x in l0.max(wlo)..=l1.min(whi) {
+                push(x, y, dy2);
+            }
+            for x in r0.max(wlo)..=r1.min(whi) {
+                push(x, y, dy2);
+            }
+        }
+    }
+}
+
+/// How hard a material is for a blast's rays (0.05 to 0.95).
+fn blast_hardness(s: &Sim, m: MatId) -> f64 {
+    (s.world.planet.mats.get(m).hardness as f64 / 10.0).clamp(0.05, 0.95)
+}
+
+/// The big piece cell (x, y) is in, for hard rock held together by a blast:
+/// a Voronoi pattern of pieces about `size` across.
+fn blast_piece(x: i64, y: i64, size: f64) -> u64 {
+    let (i0, j0) = ((x as f64 / size).floor() as i64, (y as f64 / size).floor() as i64);
+    let (mut best, mut id) = (f64::INFINITY, 0u64);
+    for i in i0 - 1..=i0 + 1 {
+        for j in j0 - 1..=j0 + 1 {
+            let px = (i as f64 + crate::noise::unit(hash(41, i, j, 0))) * size;
+            let py = (j as f64 + crate::noise::unit(hash(43, j, i, 0))) * size;
+            let d = (px - x as f64).powi(2) + (py - y as f64).powi(2);
+            if d < best {
+                best = d;
+                id = hash(0x91EC, i, j, 0);
+            }
+        }
+    }
+    id
+}
+
+/// One ray out from a charge: its direction, the energy it has left, the
+/// next step (m) it takes, and the crack running on past where it gave out.
+#[derive(Clone, Copy)]
+struct Ray {
+    a: f64,
+    ca: f64,
+    sa: f64,
+    e: f64,
+    step: i64,
+    stopped: bool,
+    crack: Option<Crack>,
+}
+
+/// A crack wandering on from where a ray gave out: where it has got to, its
+/// heading, steps taken and to take, and the hardness of the rock it began in.
+#[derive(Clone, Copy)]
+struct Crack {
+    x: f64,
+    y: f64,
+    a: f64,
+    k: i64,
+    len: i64,
+    h: f64,
+}
+
+/// Where a crater being worked out has got to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CraterStage {
+    /// Looking up the ground along it.
+    Ground,
+    /// Finding the cells to throw.
+    Scan,
+    /// Working out where and how fast each flies.
+    Throw,
+    /// Waiting for the front to reach the ground.
+    Ready,
+}
+
+/// A blast's crater (see `crater_plan`), worked out a budget's worth at a
+/// time ahead of the shock front (it looks only at the ground over the
+/// blast, which the front leaves as it was until it gets there), and
+/// thrown when the front reaches the ground.
+pub(super) struct Crater {
+    blast: u64,
+    /// Its middle's angle round the body and its ground's distance from the
+    /// centre; how far it reaches either side and how deep it is.
+    a0: f64,
+    g0: f64,
+    wl: f64,
+    wr: f64,
+    dmax: f64,
+    /// How far across its depth wanders, how hard it throws, and the
+    /// ground's slope.
+    period: f64,
+    pw: f64,
+    slope: f64,
+    /// The ground looked up so far (where the next look starts, and the
+    /// next place across), and along it: (across, ground, depth).
+    near: f64,
+    x: f64,
+    cols: Vec<(f64, f64, f64)>,
+    /// How many places to look through, and the share of its depth that
+    /// gives about that many.
+    want: f64,
+    share: f64,
+    /// The next column (or cell) to go through.
+    i: usize,
+    /// (cell, offset across, depth share, depth m)
+    take: Vec<((i64, i64), f64, f64, f64)>,
+    seen: CellSet,
+    /// The highest of the cells, how far they reach down, and the highest
+    /// of each column.
+    top: f64,
+    span: f64,
+    col_top: HashMap<i64, f64>,
+    /// What is thrown: (ticks after it goes, cell, where it flies from,
+    /// velocity), and the cells.
+    out: Vec<(u64, (i64, i64), (f64, f64), (f64, f64))>,
+    cells: CellSet,
+    stage: CraterStage,
+}
+
+impl Crater {
+    /// The depth wandering across it (smooth noise).
+    fn wander(&self, s: f64) -> f64 {
+        let un = |k: i64| crate::noise::unit(hash(self.blast, k, 0, 0xC2));
+        let t = s / self.period;
+        let i = t.floor();
+        let f = t - i;
+        let f = f * f * (3.0 - 2.0 * f);
+        un(i as i64) * (1.0 - f) + un(i as i64 + 1) * f
+    }
+
+    /// Only the top layers of a big bowl are thrown (CRATER_MAX cells), so
+    /// only the share of its depth with about `want` places in it is looked
+    /// through (each cell is met about twice): a big crater's whole bowl was
+    /// ten times as many cells, and looking at each was most of its time.
+    fn share_for(&self) -> f64 {
+        let places = |q: f64| self.cols.iter().map(|c| ((q * c.2.max(1.0)).min(c.2) / 0.7).floor() + 1.0).sum::<f64>();
+        if places(1.0) <= self.want {
+            return 1.0;
+        }
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..30 {
+            let q = (lo + hi) / 2.0;
+            if places(q) < self.want {
+                lo = q;
+            } else {
+                hi = q;
+            }
+        }
+        hi
+    }
+}
+
+/// What a blast still has to do once all its rubble is made (its rays
+/// have all given out, the column is loosened and the crater thrown), while
+/// the shock's cracks may still be running out.
+#[derive(Clone, Copy)]
+enum Fin {
+    /// Rubble is still being made.
+    Rubble,
+    /// The plume is next.
+    Plume,
+    /// Finding the rubble still here (cells gone through).
+    Count(usize),
+    /// Doping it with the unreacted uranium (cells gone through, kg each).
+    Dope(usize, f64),
+    Done,
+}
+
+/// A sapper's blast going off (Benjamin's idea, 26 Nov: the shock as a
+/// moving front). Its front runs out from the charge FRONT_MPS, and each
+/// tick the rock between last tick's front and this tick's is dealt with:
+/// the rays step on to it, and each cell they break is held, melted, thrown
+/// or left as rubble right then; the column is loosened and the rock round
+/// it cracked, shell by shell by distance from the charge; the crater is
+/// thrown out once the front reaches the ground over it. Once all the
+/// rubble is made, the plume and the uranium left in the rubble follow,
+/// while the shock's cracks may still be running out. The work is capped
+/// per tick (BLAST_BUDGET), so a blast of any yield costs little a tick.
+/// Not saved: `finish_blasts` before a save.
+pub(super) struct BlastJob {
+    at: (f64, f64),
+    c0: (i64, i64),
+    /// Its radius (m), and the column's half-width at the top in radii.
+    r: f64,
+    lt: f64,
+    yield_kt: f64,
+    /// Kg of unreacted uranium still to leave through the rubble.
+    unreacted: f64,
+    /// Its roll of the dice.
+    blast: u64,
+    /// Whether it is on screen when it goes off (out of sight it is
+    /// approximated: nothing thrown, the heart straight to glass).
+    seen: bool,
+    up: (f64, f64),
+    side: (f64, f64),
+    /// How far the ground is over the charge (0: no column), and the
+    /// ground there.
+    height: f64,
+    top: (f64, f64),
+    /// Whether the cutters in the column have been caught a second time,
+    /// once the front reached the ground.
+    harmed: bool,
+    /// How hard it throws; the share of what could be thrown that is; how
+    /// many cells are likely to be able to be thrown, and have been so far;
+    /// and how many have been.
+    power: f64,
+    throw_share: f64,
+    likely: f64,
+    cand: u64,
+    thrown: usize,
+    rays: Vec<Ray>,
+    /// The rays still going (or whose cracks are), how many have not given
+    /// out yet, and how far they can go.
+    live: Vec<u32>,
+    going: usize,
+    reach: i64,
+    /// Where each ray stopped breaking rock (m; `reach` if it never did).
+    stop: Vec<f64>,
+    /// Once all the rays are done: how far out their cracks reach (m).
+    ray_end: Option<f64>,
+    /// What it broke, with the ray's energy left there and the distance.
+    broken: CellMap<(f64, f64)>,
+    /// What it left as rubble where it was, and of that what is still
+    /// there once the rubble is all made (to dope).
+    rubble: Vec<(i64, i64)>,
+    here: Vec<(i64, i64)>,
+    /// How far the front has run (m), the shells done, and whether it has
+    /// run its course (past the column and every crack).
+    front: f64,
+    shell: u64,
+    front_done: bool,
+    /// The farthest the column reaches from the charge (m).
+    column_end: f64,
+    blocks: [Blocks; 4],
+    /// Its crater, worked out ahead of the front (on screen, with a
+    /// column), and the cells thrown out once the front reaches the ground.
+    plan: Option<Crater>,
+    crater: CellSet,
+    crater_done: bool,
+    cratered: bool,
+    /// (The cells of a shell, kept to save allocating them every shell.)
+    cells: Vec<(i64, i64)>,
+    fin: Fin,
+}
+
+impl BlastJob {
+    /// Whether it has run its course: its front, and all it does after.
+    fn done(&self) -> bool {
+        self.front_done && matches!(self.fin, Fin::Done)
     }
 }
 
@@ -592,7 +939,8 @@ impl Sim {
     }
 
     /// The blasts' moving parts, every tick: sappers caught in a blast going
-    /// off, broken rock pouring out of a plume, and loose rubble and melt
+    /// off, the shock fronts of blasts going off, the crater's ground thrown
+    /// out, broken rock pouring out of a plume, and loose rubble and melt
     /// settling.
     pub(super) fn blast_tick(&mut self) {
         if !self.chain.is_empty() {
@@ -604,6 +952,7 @@ impl Sim {
                 self.sapper_blast(at, y, fissile);
             }
         }
+        self.blasts_advance();
         // The crater's ground due now: all of it lifted first, then thrown
         // (thrown one by one, a piece could fly into a neighbour due the
         // same tick but not yet lifted, and fall back in).
@@ -650,12 +999,11 @@ impl Sim {
     /// Loose rubble settles, as in the proving ground: down, or down a
     /// slope (both cells beside it open); melt runs sideways too, into the
     /// cracks. Bottom first. Cells that can't move stop being looked at
-    /// until something beside them opens.
+    /// until something beside them opens. At most SETTLE_LOOK cells are
+    /// looked at a tick and SETTLE_PER_TICK moved; the rest wait their turn.
     pub(super) fn settle(&mut self) {
-        let mut cells: Vec<(i64, i64)> = self.settling.iter().copied().collect();
         // Nearest the centre first (the proving ground goes bottom up).
-        cells.sort_unstable_by_key(|c| (c.0 * c.0 + c.1 * c.1, c.0, c.1));
-        self.settling = CellSet::default();
+        let cells = self.settling.take_nearest(SETTLE_LOOK);
         let mut moves = 0usize;
         for c in cells {
             if moves >= SETTLE_PER_TICK {
@@ -747,8 +1095,9 @@ impl Sim {
         }
     }
 
-    /// A sapper goes off at `at`, exactly as the sapper proving ground
-    /// (mockups/sapper-proving-ground.html) has it:
+    /// A sapper goes off at `at`, as the sapper proving ground
+    /// (mockups/sapper-proving-ground.html) has it, as a shock front running
+    /// out from the charge over the next ticks (see `BlastJob`):
     /// - rays out from the charge, each spending its energy on what it passes
     ///   through (little in open passages and rubble, far more in hard rock);
     ///   everything a ray gets through is broken; where one gives out in
@@ -758,6 +1107,8 @@ impl Sim {
     /// - the heart of it melts; of the rest, what the blast still had plenty
     ///   of energy for is thrown clear (softer rock harder), the rest left
     ///   loose where it was, as rubble;
+    /// - the loosened column up to the surface, the crater thrown out over
+    ///   it once the front reaches the ground, and the shock's cracks round it;
     /// - a plume: if there is an open way from the blast up to the surface
     ///   (cracks, caves, its drill hole, through the rubble), most blasts
     ///   drive a share of the rubble up it and out of the top;
@@ -767,13 +1118,18 @@ impl Sim {
     /// what didn't react is partly left in the rubble.
     pub fn sapper_blast(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64) {
         let q0 = clock();
-        self.sapper_blast_inner(at, yield_kt, fissile);
+        self.blast_start(at, yield_kt, fissile);
         self.prof2[7] += clock() - q0;
     }
 
-    pub(super) fn sapper_blast_inner(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64) {
+    /// What happens the moment a charge goes off: the flash, the counts, the
+    /// drones and sappers caught in it; then its shock front is set going.
+    pub(super) fn blast_start(&mut self, at: (f64, f64), yield_kt: f64, fissile: f64) {
         let sp = &self.eco.units.sapper;
         let r = sp.radius_m_per_cbrt_kt * yield_kt.max(0.0).cbrt();
+        let column = sp.depth_m_per_cbrt_kt > 0.0;
+        let lt = sp.loosen_top.max(1.0);
+        let unreacted = (fissile - yield_kt / sp.kt_per_kg_fissioned.max(1e-9)).max(0.0) * sp.unreacted_doped.clamp(0.0, 1.0);
         self.booms.push(Boom { x: at.0, y: at.1, size_m: (2.2 * r) as f32, buried: true });
         self.explosions += 1;
         self.units.blasts += 1;
@@ -788,301 +1144,546 @@ impl Sim {
             [(0, 0), (k, k), (k, -k), (-k, k), (-k, -k), (k, 0), (-k, 0), (0, k), (0, -k)].iter().any(|d| self.sandbox.sees((c0.0 + d.0, c0.1 + d.1)))
         };
         let up = unit_of(at);
-        let hard = |s: &Self, m: MatId| (s.world.planet.mats.get(m).hardness as f64 / 10.0).clamp(0.05, 0.95);
-        // The rays.
+        let side = (-up.1, up.0);
+        // The surface over it, looked at either side of its own shaft
+        // (straight down the shaft, the first solid cell is the bottom of the
+        // hole): the loosened column runs up to it (Benjamin, 25 Nov: the
+        // yield sets the depth, deep enough that the ground over it is
+        // loosened for the cutters to scoop up).
+        let (top, height) = if column {
+            let ground = self.ground_beside(at, r);
+            let a = at.1.atan2(at.0);
+            ((a.cos() * ground, a.sin() * ground), (ground - len(at)).max(1.0))
+        } else {
+            (at, 0.0)
+        };
         let rays = ((r * 10.0).round() as usize).clamp(360, 5000);
         let reach = (r * 2.4).min(1500.0) as i64;
-        let mut broken: CellMap<(f64, f64)> = CellMap::default();
-        let mut order: Vec<(i64, i64)> = Vec::new();
-        let mut cracked = 0u64;
-        // Where each ray stopped breaking rock (the shock cracks it further).
-        let mut stop = vec![reach as f64; rays];
-        for ray in 0..rays {
-            let a = ray as f64 / rays as f64 * std::f64::consts::TAU + (crate::noise::unit(hash(blast, ray as i64, 0, 5)) - 0.5) * 0.01;
-            let (ca, sa) = crate::noise::cos_sin(a);
-            let mut e = 1.0;
-            for step in 0..reach {
-                let c = ((at.0 + ca * step as f64).round() as i64, (at.1 + sa * step as f64).round() as i64);
-                let m = self.world.material(c.0, c.1);
-                if m == VACUUM {
-                    e -= 0.12 / r;
+        let ray_list: Vec<Ray> = (0..rays)
+            .map(|k| {
+                let a = k as f64 / rays as f64 * std::f64::consts::TAU + (crate::noise::unit(hash(blast, k as i64, 0, 5)) - 0.5) * 0.01;
+                let (ca, sa) = crate::noise::cos_sin(a);
+                Ray { a, ca, sa, e: 1.0, step: 0, stopped: false, crack: None }
+            })
+            .collect();
+        // How much of what could be thrown flies: THROW_MAX over how many
+        // cells are likely to be thrown, worked out up front so each cell
+        // can be decided the moment it breaks. In rock as hard as round the
+        // charge, one ray alone has energy enough to throw a cell between
+        // where the heart's melt ends and where its energy falls under the
+        // throw's bar; but near the charge the rays cross each other's
+        // broken rock, which costs them little, and carry on further, so
+        // measured (10 to 10,000 kt) about 4.5 times that ring's area could
+        // fly. Aimed a little under THROW_MAX, and put right as the front
+        // goes should more turn up than that (see `blast_work`), so the cap
+        // seldom cuts off the outer part of the throw.
+        let (mut sum, mut n) = (0.0, 0);
+        for k in 0..16 {
+            let (ca, sa) = crate::noise::cos_sin(k as f64 / 16.0 * std::f64::consts::TAU);
+            let c = cell_of((at.0 + ca * r * 0.33, at.1 + sa * r * 0.33));
+            let m = self.world.material(c.0, c.1);
+            if m != VACUUM && self.world.planet.mats.get(m).state == State::Solid {
+                sum += blast_hardness(self, m);
+                n += 1;
+            }
+        }
+        let h = if n > 0 { sum / n as f64 } else { 0.5 };
+        let outer = r * (0.65 - 0.35 * h) / (0.45 + 1.7 * h);
+        let inner = r * 0.3 * (1.15 - 0.4 * h);
+        let likely = 4.5 * std::f64::consts::PI * (outer * outer - inner * inner).max(0.0);
+        let throw_share = (THROW_MAX as f64 / likely.max(1.0)).min(1.0);
+        // The box the cracks' blocks are kept over: as far as the cracks can
+        // reach (CRACK_REACH past the farthest a ray can go, or beside the
+        // column).
+        let far = reach as f64 + r * CRACK_REACH;
+        let reach_all = far.max((height + 2.0).hypot(r * lt + r)) + 2.0;
+        let (x0, y0, x1, y1) = ((at.0 - reach_all) as i64, (at.1 - reach_all) as i64, (at.0 + reach_all) as i64, (at.1 + reach_all) as i64);
+        let blocks = [3.5, 5.0, 7.0, 10.0].map(|size| Blocks::new(size, blast, x0, y0, x1, y1));
+        let plan = (seen && column).then(|| self.crater_plan(at, r, yield_kt, height, blast));
+        let column_end = if column { ((height + 1.0).powi(2) + (r * lt).powi(2)).sqrt() + 1.0 } else { 0.0 };
+        self.blast_jobs.push(BlastJob {
+            at,
+            c0,
+            r,
+            lt,
+            yield_kt,
+            unreacted,
+            blast,
+            seen,
+            up,
+            side,
+            height,
+            top,
+            harmed: false,
+            power: (0.6 + yield_kt.max(0.0).cbrt() * 0.4).min(3.0),
+            throw_share,
+            likely,
+            cand: 0,
+            thrown: 0,
+            rays: ray_list,
+            live: (0..rays as u32).collect(),
+            going: rays,
+            reach,
+            stop: vec![reach as f64; rays],
+            ray_end: None,
+            broken: CellMap::default(),
+            rubble: Vec::new(),
+            here: Vec::new(),
+            front: 0.0,
+            shell: 0,
+            front_done: false,
+            column_end,
+            blocks,
+            crater_done: plan.is_none(),
+            plan,
+            crater: CellSet::default(),
+            cratered: false,
+            cells: Vec::new(),
+            fin: Fin::Rubble,
+        });
+        // Sappers caught in it go off too, a moment later.
+        self.sappers_caught(at, r * 0.9);
+        // Drones caught in it: the director never pulls them back.
+        self.blast_harm(at, top, r, true);
+    }
+
+    /// Blasts going off, every tick: each one's shock front moves on
+    /// FRONT_MPS, and the rock it has passed is broken, loosened and cracked
+    /// up to it, within BLAST_BUDGET between them (past that, a front lags
+    /// and catches up later). Each blast gets an even share first, so one
+    /// going off later (a chain blast, a second sapper) breaks its ground
+    /// at once and doesn't wait for a big one before it; what a blast leaves
+    /// of its share goes to the others, those on screen first, then the
+    /// oldest first.
+    pub(super) fn blasts_advance(&mut self) {
+        if self.blast_jobs.is_empty() {
+            return;
+        }
+        let q0 = clock();
+        let mut jobs = std::mem::take(&mut self.blast_jobs);
+        // (A stable sort: otherwise the oldest first, the same every run.)
+        jobs.sort_by_key(|j| !j.seen);
+        let run = FRONT_MPS * self.eco.tick_s;
+        for j in jobs.iter_mut() {
+            j.front += run;
+        }
+        let share = BLAST_BUDGET / jobs.len() as u64;
+        let mut left = BLAST_BUDGET;
+        for j in jobs.iter_mut() {
+            let mut b = share;
+            self.blast_work(j, &mut b);
+            left -= share - b;
+        }
+        for j in jobs.iter_mut() {
+            if left == 0 {
+                break;
+            }
+            if !j.done() {
+                self.blast_work(j, &mut left);
+            }
+        }
+        jobs.retain(|j| !j.done());
+        jobs.append(&mut self.blast_jobs);
+        self.blast_jobs = jobs;
+        self.prof2[7] += clock() - q0;
+    }
+
+    /// Every blast going off is finished at once, and the sappers caught in
+    /// one go off now rather than a moment later (a save keeps no blast half
+    /// done, and doesn't keep those: call this before `write_save`).
+    pub fn finish_blasts(&mut self) {
+        while !self.chain.is_empty() {
+            let y = self.eco.units.sapper.yield_kt;
+            for (_, at, fissile) in std::mem::take(&mut self.chain) {
+                self.sapper_blast(at, y, fissile);
+            }
+        }
+        let mut jobs = std::mem::take(&mut self.blast_jobs);
+        for j in jobs.iter_mut() {
+            j.front = f64::INFINITY;
+            let mut budget = u64::MAX;
+            self.blast_work(j, &mut budget);
+        }
+        jobs.retain(|j| !j.done());
+        jobs.append(&mut self.blast_jobs);
+        self.blast_jobs = jobs;
+    }
+
+    /// How many blasts are still going off (their fronts still running, or
+    /// their rubble still being gone through).
+    pub fn blasts_pending(&self) -> usize {
+        self.blast_jobs.len()
+    }
+
+    /// One blast's work, shell by shell out to its front while the budget
+    /// lasts, and what is done once its rubble is all made.
+    fn blast_work(&mut self, j: &mut BlastJob, budget: &mut u64) {
+        self.blast_fin(j, budget);
+        // The crater is worked out first, with up to half the budget, so
+        // that it is ready when the front reaches the ground.
+        if let Some(cr) = j.plan.as_mut().filter(|cr| cr.stage != CraterStage::Ready) {
+            let mut half = *budget / 2;
+            let had = half;
+            self.crater_work(cr, &mut half);
+            *budget -= had - half;
+        }
+        // The ground right over it thrown out, leaving a crater (in sight),
+        // once the shock reaches it: by the clock, not by how far the
+        // budget has got through the rock (a big blast's cracks take a
+        // while to work out, and its crater sat still for some 15 s
+        // waiting for them; 27 Nov). What it throws is planned on the
+        // ground as it was; the rays and column then meet open air there.
+        // (Should it not be worked out yet, it goes a little late.)
+        if !j.crater_done && j.height > 0.0 && j.front >= j.height && j.plan.as_ref().is_some_and(|cr| cr.stage == CraterStage::Ready) {
+            if let Some(cr) = j.plan.take() {
+                j.crater = self.crater_throw(cr);
+            }
+            j.cratered = !j.crater.is_empty();
+            j.crater_done = true;
+            *budget = budget.saturating_sub(j.crater.len() as u64);
+        }
+        while !j.front_done && *budget > 0 && j.shell as f64 * SHELL_M < j.front {
+            let lo = j.shell as f64 * SHELL_M;
+            let hi = lo + SHELL_M;
+            // The rays run a little ahead (3 m) of the column and the
+            // cracks, so that no cell is loosened or cracked that a ray would
+            // yet break (a ray's step can fall in a cell a metre or so nearer
+            // or farther); in each shell the column goes first, and the
+            // cracks leave what it loosened.
+            let (mut work, ready) = self.blast_rays(j, hi + 3.0, *budget);
+            if !ready {
+                // (The budget ran out with rays still short of the shell:
+                // they go on from there next tick.)
+                *budget = budget.saturating_sub(work.max(1));
+                continue;
+            }
+            if j.height > 0.0 {
+                // (Past its top corners the column has nothing left to loosen.)
+                if lo <= j.column_end {
+                    work += self.blast_column(j, lo, hi);
+                }
+                // The column is loosened up to the ground now: cutters sent
+                // into it since the charge went off are caught too (haulers
+                // were hurt once already, when it went off).
+                if !j.harmed && lo >= j.height {
+                    j.harmed = true;
+                    self.blast_harm(j.at, j.top, j.r, false);
+                }
+            }
+            work += self.blast_cracks(j, lo, hi);
+            j.shell += 1;
+            *budget = budget.saturating_sub(work.max(1));
+            // More could be thrown than was reckoned: the share is cut so
+            // that what is left of THROW_MAX is spread over the rest (taking
+            // that the count so far is 80% of all), and not used up before
+            // the front gets to the outer part.
+            if j.seen && j.cand as f64 > 0.8 * j.likely {
+                j.likely = j.cand as f64 / 0.8;
+                j.throw_share = (THROW_MAX.saturating_sub(j.thrown) as f64 / (j.likely - j.cand as f64).max(1.0)).clamp(0.0, 1.0);
+            }
+            // All the rubble made: the plume and the uranium can follow,
+            // while the shock's cracks still run out.
+            if matches!(j.fin, Fin::Rubble) && j.going == 0 && j.crater_done && (j.height <= 0.0 || lo > j.column_end) {
+                j.fin = Fin::Plume;
+            }
+            let crack_end = j.ray_end.unwrap_or(f64::INFINITY).max(if j.height > 0.0 { ((j.height + 2.0).powi(2) + (j.r * j.lt + j.r).powi(2)).sqrt() } else { 0.0 });
+            if j.live.is_empty() && j.crater_done && lo > j.column_end && lo > crack_end {
+                j.front_done = true;
+            }
+        }
+        self.blast_fin(j, budget);
+    }
+
+    /// What a blast does once all its rubble is made, while the budget
+    /// lasts: the plume, then the unreacted uranium left through the rubble.
+    fn blast_fin(&mut self, j: &mut BlastJob, budget: &mut u64) {
+        loop {
+            match j.fin {
+                Fin::Rubble | Fin::Done => return,
+                Fin::Plume => {
+                    let work = self.blast_plume(j);
+                    *budget = budget.saturating_sub(work);
+                    j.fin = if j.unreacted > 0.0 && !j.rubble.is_empty() { Fin::Count(0) } else { Fin::Done };
+                }
+                // Unreacted uranium: a share is left through the rubble still
+                // here (not thrown out of the crater or the plume), gone
+                // through a budget's worth at a time: found, then doped.
+                Fin::Count(i) => {
+                    if *budget == 0 {
+                        return;
+                    }
+                    let end = (i as u64).saturating_add(*budget).min(j.rubble.len() as u64) as usize;
+                    for &c in &j.rubble[i..end] {
+                        if self.loose.contains(&c) && !j.crater.contains(&c) {
+                            j.here.push(c);
+                        }
+                    }
+                    *budget -= (end - i) as u64;
+                    j.fin = if end < j.rubble.len() {
+                        Fin::Count(end)
+                    } else if !j.here.is_empty() {
+                        Fin::Dope(0, j.unreacted / j.here.len() as f64)
+                    } else {
+                        Fin::Done
+                    };
+                }
+                // (What has gone since it was found gets none, and the kg
+                // left never runs over what didn't react: rubble that
+                // settled into a place found empty would otherwise make
+                // uranium out of nothing.)
+                Fin::Dope(i, each) => {
+                    if *budget == 0 {
+                        return;
+                    }
+                    let end = (i as u64).saturating_add(*budget).min(j.here.len() as u64) as usize;
+                    for &c in &j.here[i..end] {
+                        let kg = each.min(j.unreacted);
+                        if kg > 0.0 && self.loose.contains(&c) {
+                            *self.units.dope.entry(c).or_insert(0.0) += kg;
+                            self.units.doped_kg += kg;
+                            j.unreacted -= kg;
+                        }
+                    }
+                    *budget -= (end - i) as u64;
+                    j.fin = if end < j.here.len() { Fin::Dope(end, each) } else { Fin::Done };
+                }
+            }
+        }
+    }
+
+    /// The rays of a blast, each stepped on to `limit` (m from the charge)
+    /// or until it gives out; the cracks running on past where they gave
+    /// out follow, up to the same distance. Once `budget` is spent the rest
+    /// of the rays wait for the next call. Returns the work done, and
+    /// whether every ray got there.
+    fn blast_rays(&mut self, j: &mut BlastJob, limit: f64, budget: u64) -> (u64, bool) {
+        let lim = (limit.ceil() as i64).min(j.reach);
+        let r = j.r;
+        let mut work = 0u64;
+        let live = std::mem::take(&mut j.live);
+        let mut keep = Vec::with_capacity(live.len());
+        let mut ready = true;
+        for (n, &i) in live.iter().enumerate() {
+            if work >= budget {
+                keep.extend_from_slice(&live[n..]);
+                ready = false;
+                break;
+            }
+            let k = i as usize;
+            let mut ray = j.rays[k];
+            let was = ray.stopped;
+            while !ray.stopped && ray.step < lim {
+                let step = ray.step;
+                ray.step += 1;
+                work += 2;
+                let c = ((j.at.0 + ray.ca * step as f64).round() as i64, (j.at.1 + ray.sa * step as f64).round() as i64);
+                // (Broken by another ray already: rubble to pass through,
+                // even where it has since been thrown out.)
+                if j.broken.contains_key(&c) {
+                    ray.e -= 0.3 / r;
                     continue;
                 }
-                if self.loose.contains(&c) || broken.contains_key(&c) {
-                    e -= 0.3 / r;
+                let m = self.world.material(c.0, c.1);
+                if m == VACUUM {
+                    ray.e -= 0.12 / r;
+                    continue;
+                }
+                if self.loose.contains(&c) {
+                    ray.e -= 0.3 / r;
                     continue;
                 }
                 let st = self.world.planet.mats.get(m).state;
                 if st == State::Liquid || st == State::Gas {
-                    e -= 0.12 / r;
+                    ray.e -= 0.12 / r;
                     continue;
                 }
-                let h = hard(self, m);
-                e -= (0.45 + 1.7 * h) / r;
-                if e <= 0.0 {
-                    stop[ray] = step as f64;
+                let h = blast_hardness(self, m);
+                ray.e -= (0.45 + 1.7 * h) / r;
+                if ray.e <= 0.0 {
+                    ray.stopped = true;
+                    j.stop[k] = step as f64;
                     // A crack may run on, wandering, further in harder rock.
-                    if ray % 4 == 0 {
-                        let (mut ax, mut ay, mut aa) = (c.0 as f64, c.1 as f64, a);
-                        let len = (r * (0.3 + 0.9 * h)) as i64;
-                        for k in 0..len {
-                            aa += (crate::noise::unit(hash(blast, ray as i64, k, 9)) - 0.5) * (1.2 - h);
-                            let (cc, ss) = crate::noise::cos_sin(aa);
-                            ax += cc;
-                            ay += ss;
-                            let q = (ax.round() as i64, ay.round() as i64);
-                            if self.world.material(q.0, q.1) == VACUUM {
-                                break;
-                            }
-                            if self.fractured.insert(q) {
-                                cracked += 1;
-                            }
-                            self.world.set_look(q.0, q.1, Look::CRACKED);
-                        }
+                    if k % 4 == 0 {
+                        ray.crack = Some(Crack { x: c.0 as f64, y: c.1 as f64, a: ray.a, k: 0, len: (r * (0.3 + 0.9 * h)) as i64, h });
                     }
                     break;
                 }
-                broken.insert(c, (e, step as f64));
-                order.push(c);
+                j.broken.insert(c, (ray.e, step as f64));
+                self.units.cracked += 1;
+                work += self.blast_broken(j, c, h, ray.e, step as f64);
             }
-        }
-        // What was broken: held in big pieces, melted, thrown clear, or left
-        // loose as rubble.
-        let piece = |x: i64, y: i64, size: f64| -> u64 {
-            let (i0, j0) = ((x as f64 / size).floor() as i64, (y as f64 / size).floor() as i64);
-            let (mut best, mut id) = (f64::INFINITY, 0u64);
-            for i in i0 - 1..=i0 + 1 {
-                for j in j0 - 1..=j0 + 1 {
-                    let px = (i as f64 + crate::noise::unit(hash(41, i, j, 0))) * size;
-                    let py = (j as f64 + crate::noise::unit(hash(43, j, i, 0))) * size;
-                    let d = (px - x as f64).powi(2) + (py - y as f64).powi(2);
-                    if d < best {
-                        best = d;
-                        id = hash(0x91EC, i, j, 0);
+            if ray.step >= j.reach {
+                ray.stopped = true;
+            }
+            if ray.stopped && !was {
+                j.going -= 1;
+            }
+            if let Some(mut cr) = ray.crack {
+                let mut ended = false;
+                while cr.k < cr.len {
+                    let aa = cr.a + (crate::noise::unit(hash(j.blast, k as i64, cr.k, 9)) - 0.5) * (1.2 - cr.h);
+                    let (cc, ss) = crate::noise::cos_sin(aa);
+                    let (x, y) = (cr.x + cc, cr.y + ss);
+                    // (It runs no faster than the front.)
+                    if (x - j.at.0).hypot(y - j.at.1) >= limit {
+                        break;
                     }
-                }
-            }
-            id
-        };
-        let mut rubble: Vec<(i64, i64)> = Vec::new();
-        let mut thrown = 0u64;
-        let mut fling: Vec<((i64, i64), f64, f64)> = Vec::new();
-        let power = (0.6 + yield_kt.max(0.0).cbrt() * 0.4).min(3.0);
-        for &c in &order {
-            let Some(&(e, d)) = broken.get(&c) else { continue };
-            let m = self.world.material(c.0, c.1);
-            if m == VACUUM {
-                continue;
-            }
-            let h = hard(self, m);
-            if h > 0.6 && e < 0.85 && d > r * 0.3 {
-                let size = 5.0 + 9.0 * h;
-                let id = piece(c.0, c.1, size);
-                if crate::noise::unit(hash(id, blast as i64, 0, 61)) < (h - 0.5) * 1.3 {
-                    let edge = piece(c.0 + 1, c.1, size) != id || piece(c.0 - 1, c.1, size) != id || piece(c.0, c.1 + 1, size) != id || piece(c.0, c.1 - 1, size) != id;
-                    if !edge {
-                        // Held together, cracked through, hot.
-                        if self.fractured.insert(c) {
-                            cracked += 1;
-                        }
-                        self.world.set_look(c.0, c.1, Look::HELD);
+                    cr = Crack { x, y, a: aa, k: cr.k + 1, ..cr };
+                    work += 1;
+                    let q = (x.round() as i64, y.round() as i64);
+                    if self.world.material(q.0, q.1) == VACUUM {
+                        ended = true;
+                        break;
+                    }
+                    // (Rock this blast broke, and rubble, keep their look.)
+                    if j.broken.contains_key(&q) || self.loose.contains(&q) {
                         continue;
                     }
+                    if self.fractured.insert(q) {
+                        self.units.cracked += 1;
+                    }
+                    self.world.set_look(q.0, q.1, Look::CRACKED);
                 }
+                ray.crack = if ended || cr.k >= cr.len { None } else { Some(cr) };
             }
-            // The heart melts.
-            if d < r * 0.3 * (1.15 - 0.4 * h) {
-                if !seen {
-                    // (Out of sight: cooled to glass already.)
-                    self.loose.insert(c);
-                    self.world.set_look(c.0, c.1, Look::GLASS);
-                    continue;
-                }
-                self.sandbox.heat_cell(&self.world, c, MELT_K);
-                self.loose.insert(c);
-                self.settling.insert(c);
-                self.world.set_look(c.0, c.1, Look::MELT);
-                let cool = self.ticks(MELT_COOL_S * (0.7 + 0.6 * crate::noise::unit(hash(blast, c.0, c.1, 21))));
-                self.melt.push_back((self.tick + cool, c));
-                continue;
-            }
-            if seen && e > 0.35 + 0.35 * h {
-                fling.push((c, e, h));
-            } else {
-                // Left loose where it was: baked near the heart.
-                self.loose.insert(c);
-                self.settling.insert(c);
-                self.world.set_look(c.0, c.1, if d < r * 0.6 { Look::BAKED } else { Look::RUBBLE });
-                rubble.push(c);
+            j.rays[k] = ray;
+            if !ray.stopped || ray.crack.is_some() {
+                keep.push(i);
             }
         }
-        // Thrown clear, out from the blast: at most THROW_MAX cells fly as
-        // pieces (a random share, the same every run); the rest of what
-        // would have flown stays as rubble, so a blast on screen never
-        // stalls the sim flying thousands of pieces.
-        if fling.len() > THROW_MAX {
-            fling.sort_unstable_by_key(|&(c, _, _)| hash(blast, c.0, c.1, 0x7E40));
-            for &(c, e, _) in &fling[THROW_MAX..] {
-                let d = broken.get(&c).map(|b| b.1).unwrap_or(r);
-                let _ = e;
-                self.loose.insert(c);
-                self.settling.insert(c);
-                self.world.set_look(c.0, c.1, if d < r * 0.6 { Look::BAKED } else { Look::RUBBLE });
-                rubble.push(c);
-            }
-            fling.truncate(THROW_MAX);
+        j.live = keep;
+        // All the rays done: how far out the shock can crack rock.
+        if j.live.is_empty() && j.ray_end.is_none() {
+            j.ray_end = Some(j.stop.iter().fold(0.0f64, |a, &b| a.max(b)) + j.r * CRACK_REACH + 1.0);
         }
-        for (c, e, h) in fling {
-            {
-                let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
+        (work, ready)
+    }
+
+    /// A cell a blast's ray has just broken (`e`: the ray's energy left,
+    /// `d`: m from the charge): held in a big piece, melted, thrown clear, or
+    /// left loose as rubble. Returns the work done (deciding and changing a
+    /// cell costs about as much as five of a ray's steps, throwing one
+    /// twenty, and more where that is the first change in its leaf).
+    fn blast_broken(&mut self, j: &mut BlastJob, c: (i64, i64), h: f64, e: f64, d: f64) -> u64 {
+        let (r, blast) = (j.r, j.blast);
+        if h > 0.6 && e < 0.85 && d > r * 0.3 {
+            let size = 5.0 + 9.0 * h;
+            let id = blast_piece(c.0, c.1, size);
+            if crate::noise::unit(hash(id, blast as i64, 0, 61)) < (h - 0.5) * 1.3 {
+                let edge = blast_piece(c.0 + 1, c.1, size) != id || blast_piece(c.0 - 1, c.1, size) != id || blast_piece(c.0, c.1 + 1, size) != id || blast_piece(c.0, c.1 - 1, size) != id;
+                if !edge {
+                    // Held together, cracked through, hot.
+                    if self.fractured.insert(c) {
+                        self.units.cracked += 1;
+                    }
+                    self.world.set_look(c.0, c.1, Look::HELD);
+                    return 10;
+                }
+            }
+        }
+        // The heart melts.
+        if d < r * 0.3 * (1.15 - 0.4 * h) {
+            if !j.seen {
+                // (Out of sight: cooled to glass already.)
+                self.loose.insert(c);
+                self.world.set_look(c.0, c.1, Look::GLASS);
+                return 10;
+            }
+            self.sandbox.heat_cell(&self.world, c, MELT_K);
+            self.loose.insert(c);
+            self.settling.insert(c);
+            self.world.set_look(c.0, c.1, Look::MELT);
+            let cool = self.ticks(MELT_COOL_S * (0.7 + 0.6 * crate::noise::unit(hash(blast, c.0, c.1, 21))));
+            self.melt.push_back((self.tick + cool, c));
+            return 10;
+        }
+        // Thrown clear, out from the blast: a random share of what could be
+        // (the same every run, and at most THROW_MAX), so a blast on screen
+        // never stalls the sim flying thousands of pieces.
+        let can = j.seen && e > 0.35 + 0.35 * h;
+        j.cand += can as u64;
+        if can && j.thrown < THROW_MAX && crate::noise::unit(hash(blast, c.0, c.1, 0x7E40)) < j.throw_share {
+            let fresh = if self.world.dense_leaf(c.0, c.1).is_none() { FRESH_LEAF } else { 0 };
+            if let Some(m) = self.world.lift_cell(c.0, c.1) {
                 self.progress.remove(&c);
                 self.reserved.remove(&c);
                 self.open_cell(c);
                 let p = mid(c);
-                let dd = ((p.0 - at.0).powi(2) + (p.1 - at.1).powi(2)).sqrt().max(1e-6);
-                let (ox, oy) = ((p.0 - at.0) / dd, (p.1 - at.1) / dd);
-                let sp = (18.0 + 70.0 * e * (1.0 - 0.6 * h)) * (0.7 + 0.6 * crate::noise::unit(hash(blast, c.0, c.1, 12))) * power;
-                let vel = (ox * sp + up.0 * 6.0, oy * sp + up.1 * 6.0);
-                thrown += 1;
+                let dd = ((p.0 - j.at.0).powi(2) + (p.1 - j.at.1).powi(2)).sqrt().max(1e-6);
+                let (ox, oy) = ((p.0 - j.at.0) / dd, (p.1 - j.at.1) / dd);
+                let sp = (18.0 + 70.0 * e * (1.0 - 0.6 * h)) * (0.7 + 0.6 * crate::noise::unit(hash(blast, c.0, c.1, 12))) * j.power;
+                let vel = (ox * sp + j.up.0 * 6.0, oy * sp + j.up.1 * 6.0);
+                j.thrown += 1;
                 if let Some(t) = self.bodies.throw(&mut self.world, p, m, vel) {
                     self.loose.insert(t);
                     self.world.set_look(t.0, t.1, Look::RUBBLE);
                     self.settling.insert(t);
                     self.scrap_landed(t);
                 }
+                return 40 + fresh;
             }
         }
-        let _ = thrown;
-        // The loosened column over it, up to the surface (Benjamin, 25 Nov:
-        // the yield sets the depth, deep enough that the ground over it is
-        // loosened for the cutters to scoop up).
-        let top = if self.eco.units.sapper.depth_m_per_cbrt_kt > 0.0 { self.sapper_column(at, r, blast, &broken, &mut rubble) } else { at };
-        // The ground right over it thrown out, leaving a crater (in sight).
-        let mut cratered = false;
-        if seen && self.eco.units.sapper.depth_m_per_cbrt_kt > 0.0 {
-            let height = (len(top) - len(at)).max(1.0);
-            let thrown = self.sapper_crater(at, r, yield_kt, height, blast);
-            cratered = !thrown.is_empty();
-            rubble.retain(|c| !thrown.contains(c));
-        }
-        // The rock round it cracked by the shock.
-        let height = if self.eco.units.sapper.depth_m_per_cbrt_kt > 0.0 { (len(top) - len(at)).max(1.0) } else { 0.0 };
-        cracked += self.sapper_fracture(at, r, blast, &stop, height, &broken);
-        self.units.cracked += cracked + broken.len() as u64;
-        // The plume: most blasts find a way up. (Not where the ground over
-        // it was thrown out as a crater: a jet out of one hole beside the
-        // crater's even fan looked lopsided; Benjamin, 26 Nov.)
-        if seen && !cratered && crate::noise::unit(hash(blast, 0, 0, 77)) < 0.9 && !rubble.is_empty() {
-            if let Some(mouth) = self.way_up(c0, r) {
-                let share = 0.35 + 0.25 * crate::noise::unit(hash(blast, 0, 0, 7));
-                let take = ((rubble.len() as f64 * share).round() as usize).min(rubble.len()).min(PLUME_MAX);
-                // A random share of the rubble, the same every run.
-                let mut pick: Vec<(u64, (i64, i64))> = rubble.iter().map(|&c| (hash(blast, c.0, c.1, 13), c)).collect();
-                pick.sort_unstable();
-                let pw = (0.8 + yield_kt.max(0.0).cbrt() * 0.35).min(4.0);
-                // How long it pours out (the proving ground's plume).
-                let dur = 0.6 + 0.35 * (yield_kt * 10.0 + 1.0).log10();
-                if self.plumes.len() < 100 {
-                    let m = mid(mouth);
-                    self.plumes.push((m.0, m.1, pw as f32));
-                }
-                let mu = unit_of(mid(mouth));
-                let side = (-mu.1, mu.0);
-                for (k, &(h, c)) in pick.iter().take(take).enumerate() {
-                    let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
-                    self.loose.remove(&c);
-                    self.progress.remove(&c);
-                    self.reserved.remove(&c);
-                    self.open_cell(c);
-                    let vx = (crate::noise::unit(hash(h, k as i64, 1, 0)) - 0.5) * 16.0 * pw;
-                    let vy = (50.0 + 60.0 * crate::noise::unit(hash(h, k as i64, 2, 0))) * pw;
-                    let from = mid(mouth);
-                    let from = (from.0 + side.0 * (crate::noise::unit(hash(h, k as i64, 3, 0)) - 0.5) * 2.0, from.1 + side.1 * (crate::noise::unit(hash(h, k as i64, 3, 0)) - 0.5) * 2.0);
-                    // Out over the plume's time, a steady stream.
-                    let at = self.tick + self.ticks(dur * k as f64 / take.max(1) as f64);
-                    self.plume_out.push_back((at, from, m, (side.0 * vx + mu.0 * vy, side.1 * vx + mu.1 * vy)));
-                }
-            }
-        }
-        self.plume_out.make_contiguous().sort_by_key(|p| p.0);
-        // Unreacted uranium: a share is left through the rubble still here.
-        let sp = &self.eco.units.sapper;
-        let unreacted = (fissile - yield_kt / sp.kt_per_kg_fissioned.max(1e-9)).max(0.0) * sp.unreacted_doped.clamp(0.0, 1.0);
-        let here: Vec<(i64, i64)> = rubble.iter().copied().filter(|c| self.loose.contains(c)).collect();
-        if unreacted > 0.0 && !here.is_empty() {
-            let each = unreacted / here.len() as f64;
-            for c in here {
-                *self.units.dope.entry(c).or_insert(0.0) += each;
-            }
-            self.units.doped_kg += unreacted;
-        }
-        // Sappers caught in it go off too, a moment later.
-        self.sappers_caught(at, r * 0.9);
-        // Drones caught in it: the director never pulls them back.
-        self.blast_harm(at, top, r);
+        // Left loose where it was: baked near the heart.
+        self.loose.insert(c);
+        self.settling.insert(c);
+        self.world.set_look(c.0, c.1, if d < r * 0.6 { Look::BAKED } else { Look::RUBBLE });
+        j.rubble.push(c);
+        10
     }
 
-    /// The loosened column of a blast at `at` (radius `r`): every solid cell
-    /// from the charge up to the surface, blast-wide at the bottom and
-    /// `loosen_top` radii each side at the top, not already broken, is left
-    /// loose (rubble) where it is, or for hard rock now and then held in big
-    /// cracked pieces (Benjamin: leaving big chunks is good). Returns where
-    /// the column breaks the surface; the rubble is added to `rubble`.
-    pub(super) fn sapper_column(&mut self, at: (f64, f64), r: f64, blast: u64, broken: &CellMap<(f64, f64)>, rubble: &mut Vec<(i64, i64)>) -> (f64, f64) {
-        let lt = self.eco.units.sapper.loosen_top.max(1.0);
-        let up = unit_of(at);
-        let side = (-up.1, up.0);
-        let a = at.1.atan2(at.0);
-        // The surface over it, looked at either side of its own shaft (straight
-        // down the shaft, the first solid cell is the bottom of the hole).
-        let ground = self.ground_beside(at, r);
-        let height = (ground - len(at)).max(1.0);
-        let piece = |x: i64, y: i64, size: f64| -> u64 {
-            let (i, j) = ((x as f64 / size).floor() as i64, (y as f64 / size).floor() as i64);
-            hash(0x91ED, i, j, 0)
-        };
-        let mut cracked = 0u64;
-        let mut seen = Met::new(at, up, side, -r * 0.5, height + 1.0, r * lt);
-        let mut h = -r * 0.5;
-        while h <= height + 1.0 {
-            let half = r * (1.0 + (lt - 1.0) * (h / height).clamp(0.0, 1.0));
-            let mut s = -half;
-            while s <= half {
-                let c = cell_of((at.0 + up.0 * h + side.0 * s, at.1 + up.1 * h + side.1 * s));
-                s += 0.7;
-                if !seen.insert(c) || broken.contains_key(&c) || self.loose.contains(&c) {
-                    continue;
-                }
-                let m = self.world.material(c.0, c.1);
-                if m == VACUUM || self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
-                    continue;
-                }
-                let mat = self.world.planet.mats.get(m);
-                if mat.state != State::Solid {
-                    continue;
-                }
-                let hd = (mat.hardness as f64 / 10.0).clamp(0.05, 0.95);
-                // Hard rock: some of it holds in big pieces, cracked through.
-                if hd > 0.6 {
-                    let size = 6.0 + 10.0 * hd;
-                    let id = piece(c.0, c.1, size);
-                    if crate::noise::unit(hash(id, blast as i64, 0, 62)) < (hd - 0.5) * 1.1 {
-                        if self.fractured.insert(c) {
-                            cracked += 1;
-                        }
-                        self.world.set_look(c.0, c.1, Look::HELD);
-                        continue;
-                    }
-                }
-                self.loose.insert(c);
-                self.settling.insert(c);
-                self.world.set_look(c.0, c.1, Look::RUBBLE);
-                rubble.push(c);
+    /// The shell from `lo` to `hi` m from the charge of a blast's loosened
+    /// column: every solid cell from the charge up to the surface,
+    /// blast-wide at the bottom and `loosen_top` radii each side at the top,
+    /// not already broken, is left loose (rubble) where it is, or for hard
+    /// rock now and then held in big cracked pieces (Benjamin: leaving big
+    /// chunks is good). Returns the work done.
+    fn blast_column(&mut self, j: &mut BlastJob, lo: f64, hi: f64) -> u64 {
+        let (r, lt, height) = (j.r, j.lt, j.height);
+        let mut cells = std::mem::take(&mut j.cells);
+        shell_cells(&mut cells, j.at, lo, hi, None);
+        let mut work = cells.len() as u64 / WORK_PASS;
+        for &c in &cells {
+            let p = mid(c);
+            let (dx, dy) = (p.0 - j.at.0, p.1 - j.at.1);
+            let h = dx * j.up.0 + dy * j.up.1;
+            if h < -0.5 * r || h > height + 1.0 || (dx * j.side.0 + dy * j.side.1).abs() > r * (1.0 + (lt - 1.0) * (h / height).clamp(0.0, 1.0)) {
+                continue;
             }
-            h += 0.7;
+            work += 1;
+            if j.broken.contains_key(&c) || self.loose.contains(&c) {
+                continue;
+            }
+            let m = self.world.material(c.0, c.1);
+            work += WORK_LOOK;
+            if m == VACUUM || self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
+                continue;
+            }
+            let mat = self.world.planet.mats.get(m);
+            if mat.state != State::Solid {
+                continue;
+            }
+            let hd = (mat.hardness as f64 / 10.0).clamp(0.05, 0.95);
+            // Hard rock: some of it holds in big pieces, cracked through.
+            if hd > 0.6 {
+                let size = 6.0 + 10.0 * hd;
+                let id = hash(0x91ED, (c.0 as f64 / size).floor() as i64, (c.1 as f64 / size).floor() as i64, 0);
+                if crate::noise::unit(hash(id, j.blast as i64, 0, 62)) < (hd - 0.5) * 1.1 {
+                    if self.fractured.insert(c) {
+                        self.units.cracked += 1;
+                    }
+                    self.world.set_look(c.0, c.1, Look::HELD);
+                    work += WORK_CHANGE;
+                    continue;
+                }
+            }
+            self.loose.insert(c);
+            self.settling.insert(c);
+            self.world.set_look(c.0, c.1, Look::RUBBLE);
+            j.rubble.push(c);
+            work += WORK_CHANGE;
         }
-        self.units.cracked += cracked;
-        (a.cos() * ground, a.sin() * ground)
+        j.cells = cells;
+        work
     }
 
     /// The ground at angle `a` for a crater, where a dip narrower than the
@@ -1102,221 +1703,392 @@ impl Sim {
         if c < side - 3.0 { side } else { c }
     }
 
-    /// The ground right over a blast thrown out, leaving a crater (Benjamin,
-    /// 26 Nov: the top layer over the blast should be thrown off). A bowl
-    /// `CRATER_W` of the loosened column's top half-width each side and
-    /// `CRATER_D` of that deep at its middle (and the plants on it) is
-    /// lifted and thrown, the top layer first and the deeper ground after:
-    /// near the middle steeply up (much of it falls back in), towards the
-    /// rim out at about 45 degrees, coming down round the crater. `height`
-    /// is how far the ground is over the charge. Returns how many cells.
-    pub(super) fn sapper_crater(&mut self, at: (f64, f64), r: f64, yield_kt: f64, height: f64, blast: u64) -> CellSet {
+    /// The ground right over a blast to be thrown out, leaving a crater
+    /// (Benjamin, 26 Nov: the top layer over the blast should be thrown
+    /// off). A bowl `CRATER_W` of the loosened column's top half-width each
+    /// side and `CRATER_D` of that deep at its middle (and the plants on it)
+    /// is lifted and thrown, the top layer first and the deeper ground
+    /// after: near the middle steeply up (much of it falls back in), towards
+    /// the rim out at about 45 degrees, coming down round the crater.
+    /// `height` is how far the ground is over the charge. This only sets it
+    /// up: `crater_work` works it out, `crater_throw` throws it.
+    pub(super) fn crater_plan(&self, at: (f64, f64), r: f64, yield_kt: f64, height: f64, blast: u64) -> Crater {
         let lt = self.eco.units.sapper.loosen_top.max(1.0);
         let w0 = (r * lt * CRATER_W).max(2.0);
         let dmax = (w0 * CRATER_D).min(height * 0.8).max(1.0);
         let a0 = at.1.atan2(at.0);
         let g0 = len(at) + height;
-        // How hard it throws (as the plume does).
-        let pw = (0.8 + 0.35 * yield_kt.max(0.0).cbrt()).min(6.0);
-        let flora = |s: &Self, m: MatId| s.units.is_flora.get(m as usize).copied().unwrap_or(false);
         let un = |k: i64, salt: u64| crate::noise::unit(hash(blast, k, 0, salt));
         // A ragged bowl: each side reaches its own way out, and the depth
         // wanders a little (smooth noise, a fifth of the crater across).
         let (wl, wr) = (w0 * (0.85 + 0.3 * un(0, 0xC1)), w0 * (0.85 + 0.3 * un(1, 0xC1)));
-        let period = (w0 / 5.0).max(6.0);
-        let wander = |s: f64| {
-            let t = s / period;
-            let i = t.floor();
-            let f = t - i;
-            let f = f * f * (3.0 - 2.0 * f);
-            un(i as i64, 0xC2) * (1.0 - f) + un(i as i64 + 1, 0xC2) * f
-        };
-        // The ground along it, and its slope: the throw goes out square to
-        // the ground there, not to the sky straight up (on a hillside
-        // straight up throws the uphill side into the hill).
-        // (Down a shaft, a narrow dip, the ground either side of it.)
-        let ground = |s: &Self, near: &mut f64, x: f64| s.crater_ground(a0 + x / g0, 5.0 / g0, near);
+        // The ground's slope across it: the throw goes out square to the
+        // ground there, not to the sky straight up (on a hillside straight
+        // up throws the uphill side into the hill).
         let (mut nl, mut nr) = (g0, g0);
-        let slope = ((ground(self, &mut nr, wr) - ground(self, &mut nl, -wl)) / (wl + wr)).clamp(-1.5, 1.5);
-        let mut near = g0;
-        // (cell, offset across, depth share, depth m)
-        let mut take: Vec<((i64, i64), f64, f64, f64)> = Vec::new();
-        let mut seen = CellSet::default();
-        let mut x = -wl;
-        while x <= wr {
-            let ang = a0 + x / g0;
-            let (ux, uy) = (ang.cos(), ang.sin());
-            let gr = ground(self, &mut near, x);
-            let e = if x < 0.0 { x / wl } else { x / wr };
-            let d = dmax * (1.0 - e * e) * (0.85 + 0.3 * wander(x));
-            // The plants on it.
-            let mut z = 0.5;
-            while z < 24.0 {
-                let c = cell_of((ux * (gr + z), uy * (gr + z)));
-                let m = self.world.material(c.0, c.1);
-                if m != VACUUM && flora(self, m) && seen.insert(c) {
-                    take.push((c, x, 0.0, -z));
-                }
-                z += 0.7;
-            }
-            let mut z = 0.0;
-            while z <= d {
-                let c = cell_of((ux * (gr - 0.5 - z), uy * (gr - 0.5 - z)));
-                // (The bottom edge frayed.)
-                let frayed = z > d - 1.5 && crate::noise::unit(hash(blast, c.0, c.1, 0xC3)) < 0.5;
-                if !frayed && seen.insert(c) && self.world.material(c.0, c.1) != VACUUM {
-                    take.push((c, x, z / d.max(1.0), z));
-                }
-                z += 0.7;
-            }
-            x += 0.7;
+        let right = self.crater_ground(a0 + wr / g0, 5.0 / g0, &mut nr);
+        let left = self.crater_ground(a0 - wl / g0, 5.0 / g0, &mut nl);
+        let slope = ((right - left) / (wl + wr)).clamp(-1.5, 1.5);
+        Crater {
+            blast,
+            a0,
+            g0,
+            wl,
+            wr,
+            dmax,
+            period: (w0 / 5.0).max(6.0),
+            // How hard it throws (as the plume does).
+            pw: (0.8 + 0.35 * yield_kt.max(0.0).cbrt()).min(6.0),
+            slope,
+            near: g0,
+            x: -wl,
+            cols: Vec::new(),
+            want: CRATER_MAX as f64 * 2.5,
+            share: 1.0,
+            i: 0,
+            take: Vec::new(),
+            seen: CellSet::default(),
+            top: 0.0,
+            span: 1.0,
+            col_top: HashMap::new(),
+            out: Vec::new(),
+            cells: CellSet::default(),
+            stage: CraterStage::Ground,
         }
-        if take.len() > CRATER_MAX {
-            take.sort_by(|a, b| a.2.total_cmp(&b.2));
-            take.truncate(CRATER_MAX);
-        }
-        let out: CellSet = take.iter().map(|t| t.0).collect();
-        // Highest first, by height (not depth under the ground just over it,
-        // which differs column to column: a piece flew into the cell beside
-        // it, as high but due later, and fell back in).
-        let top = take.iter().map(|t| len(mid(t.0))).fold(f64::MIN, f64::max);
-        let low = take.iter().map(|t| len(mid(t.0))).fold(f64::MAX, f64::min);
-        let span = (top - low).max(1.0);
-        // The highest of each column (by its place across).
-        let mut col_top: HashMap<i64, f64> = HashMap::new();
-        for t in &take {
-            let e = col_top.entry((t.1 / 0.7).round() as i64).or_insert(f64::MIN);
-            *e = e.max(len(mid(t.0)));
-        }
-        let k = (1.0 + slope * slope).sqrt();
-        for (c, x, q, _) in take {
-            let u = |k: u64| crate::noise::unit(hash(blast, c.0, c.1, 0xC0 + k));
-            let f = (if x < 0.0 { -x / wl } else { x / wr }).min(1.0);
-            let sgn = if x.abs() < 0.5 { if u(0) < 0.5 { -1.0 } else { 1.0 } } else { x.signum() };
-            // Steep in the middle, about 45 degrees at the rim, and always
-            // steeper than the crater's wall beside it (thrown flatter, most
-            // of a big crater hit its own wall and fell back in).
-            let wall = (2.0 * dmax * f / (if x < 0.0 { wl } else { wr })).atan().to_degrees() * 1.15;
-            let th = (82.0 - 40.0 * f).max(wall + 12.0).min(86.0);
-            let th = (th + (u(1) - 0.5) * 12.0).clamp(wall + 6.0, 89.0).to_radians();
-            // As fast as the blast throws it (not as far as the body's pull
-            // would bring it back: on a small body that is a crawl, and the
-            // rest of the blast flies out fast): the deep ground slower.
-            let v = 35.0 * pw * (1.0 - 0.45 * q) * (0.75 + 0.5 * u(2));
-            let p = mid(c);
-            let pr = len(p).max(1.0);
-            let (ux, uy) = (p.0 / pr, p.1 / pr);
-            // Square to the ground: its normal and its line across.
-            let nrm = ((ux + uy * slope) / k, (uy - ux * slope) / k);
-            let tan = (-nrm.1, nrm.0);
-            let (vn, vt) = (v * th.sin(), sgn * v * th.cos());
-            let vel = (nrm.0 * vn + tan.0 * vt, nrm.1 * vn + tan.1 * vt);
-            // The top layer lifts off first, the deeper ground after it,
-            // layer by layer (each on its way before the one under it goes:
-            // a jumbled order threw cells into the ground still over them,
-            // and the crater filled back in).
-            let due = self.tick + self.ticks(0.08 + 0.6 * ((top - len(p)) / span).clamp(0.0, 1.0));
-            // It flies from the crater's mouth, over the top of its column (a
-            // piece flown from down in the hole could snag on a bit left
-            // standing or a pocket something fell into, and drop back in;
-            // flown all from one height, pieces caught on each other).
-            let up_by = col_top.get(&((x / 0.7).round() as i64)).copied().unwrap_or(top) - len(p) + 1.5;
-            self.eject.push_back((due, c, (p.0 + nrm.0 * up_by, p.1 + nrm.1 * up_by), vel));
-        }
-        self.eject.make_contiguous().sort_by_key(|e| e.0);
-        out
     }
 
-    /// The rock round a blast cracked by its shock (Benjamin, 26 Nov: the
-    /// shockwave should crack and frack more): past where each ray stopped
-    /// breaking rock (`stop`, m, by ray), `CRACK_REACH` blast radii further,
-    /// and either side of the loosened column (more widely near the surface,
-    /// where the ground lifts), the rock is cracked into blocks: small near,
-    /// bigger further out, fewer the further out, more in hard brittle
-    /// rock. A cracked cell is cut in half the time (`fracture_dig`); the
-    /// blocks' edges show as cracks. `height`: how far the ground is over
-    /// the charge (0: no column). Returns how many cells were cracked.
-    pub(super) fn sapper_fracture(&mut self, at: (f64, f64), r: f64, blast: u64, stop: &[f64], height: f64, broken: &CellMap<(f64, f64)>) -> u64 {
-        let lt = self.eco.units.sapper.loosen_top.max(1.0);
-        let up = unit_of(at);
-        let side = (-up.1, up.0);
-        let rays = stop.len().max(1);
-        let reach = r * CRACK_REACH;
-        let far = stop.iter().fold(0.0f64, |a, &b| a.max(b)) + reach;
-        let wide = far.max(r * lt + r);
-        let mut cracked = 0u64;
-        let mut seen = Met::new(at, up, side, -far, height + 1.0, wide);
-        let (x0, y0, x1, y1) = (seen.x0, seen.y0, seen.x0 + seen.w, seen.y0 + seen.h);
-        let mut blocks = [3.5, 5.0, 7.0, 10.0].map(|size| Blocks::new(size, blast, x0, y0, x1, y1));
-        let mut h = -far;
-        while h <= height + 1.0 {
-            let mut s = -wide;
-            while s <= wide {
-                let c = cell_of((at.0 + up.0 * h + side.0 * s, at.1 + up.1 * h + side.1 * s));
-                s += 0.7;
-                if !seen.insert(c) {
-                    continue;
-                }
-                let p = mid(c);
-                let (dx, dy) = (p.0 - at.0, p.1 - at.1);
-                // Round the charge, past where the rays stopped.
-                let d = (dx * dx + dy * dy).sqrt();
-                let k = ((dy.atan2(dx) / std::f64::consts::TAU * rays as f64).round() as i64).rem_euclid(rays as i64) as usize;
-                let mut t = ((d - stop[k]) / reach).max(0.0);
-                // Either side of the column, more widely near the surface.
-                if height > 0.0 {
-                    let along = dx * up.0 + dy * up.1;
-                    if along >= -0.5 * r && along <= height + 2.0 {
-                        let f = (along / height).clamp(0.0, 1.0);
-                        let half = r * (1.0 + (lt - 1.0) * f);
-                        let out = (dx * side.0 + dy * side.1).abs() - half;
-                        t = t.min((out / (r * (0.35 + 0.65 * f))).max(0.0));
+    /// A crater worked out on, while `budget` lasts: the ground along it,
+    /// then the cells to throw, then where and how fast each flies.
+    pub(super) fn crater_work(&mut self, cr: &mut Crater, budget: &mut u64) {
+        let flora = |s: &Self, m: MatId| s.units.is_flora.get(m as usize).copied().unwrap_or(false);
+        while *budget > 0 {
+            match cr.stage {
+                CraterStage::Ground => {
+                    if cr.x > cr.wr {
+                        cr.share = cr.share_for();
+                        cr.stage = CraterStage::Scan;
+                        continue;
                     }
+                    // (Down a shaft, a narrow dip, the ground either side of it.)
+                    let x = cr.x;
+                    let gr = self.crater_ground(cr.a0 + x / cr.g0, 5.0 / cr.g0, &mut cr.near);
+                    let e = if x < 0.0 { x / cr.wl } else { x / cr.wr };
+                    cr.cols.push((x, gr, cr.dmax * (1.0 - e * e) * (0.85 + 0.3 * cr.wander(x))));
+                    cr.x += 0.7;
+                    *budget = budget.saturating_sub(40);
                 }
-                if t >= 1.0 {
-                    continue;
+                CraterStage::Scan => {
+                    if cr.i >= cr.cols.len() {
+                        // Too few, in caves: looked through deeper.
+                        if cr.take.len() < CRATER_MAX && cr.share < 1.0 {
+                            cr.want *= 2.0;
+                            cr.share = cr.share_for();
+                            cr.i = 0;
+                            cr.take.clear();
+                            cr.seen.clear();
+                            continue;
+                        }
+                        if cr.take.len() > CRATER_MAX {
+                            cr.take.sort_by(|a, b| a.2.total_cmp(&b.2));
+                            cr.take.truncate(CRATER_MAX);
+                        }
+                        // Highest first, by height (not depth under the ground
+                        // just over it, which differs column to column: a piece
+                        // flew into the cell beside it, as high but due later,
+                        // and fell back in).
+                        cr.top = cr.take.iter().map(|t| len(mid(t.0))).fold(f64::MIN, f64::max);
+                        let low = cr.take.iter().map(|t| len(mid(t.0))).fold(f64::MAX, f64::min);
+                        cr.span = (cr.top - low).max(1.0);
+                        // The highest of each column (by its place across).
+                        for t in &cr.take {
+                            let e = cr.col_top.entry((t.1 / 0.7).round() as i64).or_insert(f64::MIN);
+                            *e = e.max(len(mid(t.0)));
+                        }
+                        cr.seen = CellSet::default();
+                        cr.i = 0;
+                        cr.stage = CraterStage::Throw;
+                        *budget = budget.saturating_sub(cr.take.len() as u64);
+                        continue;
+                    }
+                    let (x, gr, d) = cr.cols[cr.i];
+                    cr.i += 1;
+                    let ang = cr.a0 + x / cr.g0;
+                    let (ux, uy) = (ang.cos(), ang.sin());
+                    let mut work = 0;
+                    // The plants on it.
+                    let mut z = 0.5;
+                    while z < 24.0 {
+                        let c = cell_of((ux * (gr + z), uy * (gr + z)));
+                        let m = self.world.material(c.0, c.1);
+                        if m != VACUUM && flora(self, m) && cr.seen.insert(c) {
+                            cr.take.push((c, x, 0.0, -z));
+                        }
+                        z += 0.7;
+                        work += 1 + WORK_LOOK;
+                    }
+                    let deep = d.min(cr.share * d.max(1.0));
+                    let mut z = 0.0;
+                    while z <= deep {
+                        let c = cell_of((ux * (gr - 0.5 - z), uy * (gr - 0.5 - z)));
+                        // (The bottom edge frayed.)
+                        let frayed = z > d - 1.5 && crate::noise::unit(hash(cr.blast, c.0, c.1, 0xC3)) < 0.5;
+                        if !frayed && cr.seen.insert(c) {
+                            work += 2 * WORK_LOOK;
+                            if self.world.material(c.0, c.1) != VACUUM {
+                                cr.take.push((c, x, z / d.max(1.0), z));
+                            }
+                        }
+                        z += 0.7;
+                        work += 1;
+                    }
+                    *budget = budget.saturating_sub(work);
                 }
-                let blocks = &mut blocks[((t * 4.0) as usize).min(3)];
-                let (id, roll) = blocks.of(c.0, c.1);
-                let near = (1.0 - t).powf(0.8);
-                // Not cracked even if it were the hardest rock: no need to
-                // look at what it is (asking the world is the dear part).
-                if roll >= (near * (0.45 + 0.75 * 0.95)).min(1.0) || broken.contains_key(&c) || self.loose.contains(&c) {
-                    continue;
+                CraterStage::Throw => {
+                    if cr.i >= cr.take.len() {
+                        // In the order they go (a stable sort: as they were
+                        // found, among those due together).
+                        cr.out.sort_by_key(|o| o.0);
+                        cr.take = Vec::new();
+                        cr.col_top = HashMap::new();
+                        cr.stage = CraterStage::Ready;
+                        continue;
+                    }
+                    let (c, x, q, _) = cr.take[cr.i];
+                    cr.i += 1;
+                    let (wl, wr, slope) = (cr.wl, cr.wr, cr.slope);
+                    let k = (1.0 + slope * slope).sqrt();
+                    let u = |k: u64| crate::noise::unit(hash(cr.blast, c.0, c.1, 0xC0 + k));
+                    let f = (if x < 0.0 { -x / wl } else { x / wr }).min(1.0);
+                    let sgn = if x.abs() < 0.5 { if u(0) < 0.5 { -1.0 } else { 1.0 } } else { x.signum() };
+                    // Steep in the middle, about 45 degrees at the rim, and
+                    // always steeper than the crater's wall beside it (thrown
+                    // flatter, most of a big crater hit its own wall and fell
+                    // back in).
+                    let wall = (2.0 * cr.dmax * f / (if x < 0.0 { wl } else { wr })).atan().to_degrees() * 1.15;
+                    let th = (82.0 - 40.0 * f).max(wall + 12.0).min(86.0);
+                    let th = (th + (u(1) - 0.5) * 12.0).clamp(wall + 6.0, 89.0).to_radians();
+                    // As fast as the blast throws it (not as far as the body's
+                    // pull would bring it back: on a small body that is a
+                    // crawl, and the rest of the blast flies out fast): the
+                    // deep ground slower.
+                    let v = 35.0 * cr.pw * (1.0 - 0.45 * q) * (0.75 + 0.5 * u(2));
+                    let p = mid(c);
+                    let pr = len(p).max(1.0);
+                    let (ux, uy) = (p.0 / pr, p.1 / pr);
+                    // Square to the ground: its normal and its line across.
+                    let nrm = ((ux + uy * slope) / k, (uy - ux * slope) / k);
+                    let tan = (-nrm.1, nrm.0);
+                    let (vn, vt) = (v * th.sin(), sgn * v * th.cos());
+                    let vel = (nrm.0 * vn + tan.0 * vt, nrm.1 * vn + tan.1 * vt);
+                    // The top layer lifts off first, the deeper ground after
+                    // it, layer by layer (each on its way before the one under
+                    // it goes: a jumbled order threw cells into the ground
+                    // still over them, and the crater filled back in).
+                    let after = self.ticks(0.08 + 0.6 * ((cr.top - len(p)) / cr.span).clamp(0.0, 1.0));
+                    // It flies from the crater's mouth, over the top of its
+                    // column (a piece flown from down in the hole could snag on
+                    // a bit left standing or a pocket something fell into, and
+                    // drop back in; flown all from one height, pieces caught
+                    // on each other).
+                    let up_by = cr.col_top.get(&((x / 0.7).round() as i64)).copied().unwrap_or(cr.top) - len(p) + 1.5;
+                    cr.out.push((after, c, (p.0 + nrm.0 * up_by, p.1 + nrm.1 * up_by), vel));
+                    cr.cells.insert(c);
+                    // Its leaf of the world generated now, a budget's worth
+                    // at a time, not by the first of it lifted (dozens of
+                    // leaves at once for a big crater).
+                    let fresh = if self.world.generate_leaf(c.0, c.1) { FRESH_LEAF } else { 0 };
+                    *budget = budget.saturating_sub(3 + fresh);
                 }
-                let m = self.world.material(c.0, c.1);
-                if m == VACUUM || self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
-                    continue;
-                }
-                let mat = self.world.planet.mats.get(m);
-                if mat.state != State::Solid {
-                    continue;
-                }
-                let hd = (mat.hardness as f64 / 10.0).clamp(0.05, 0.95);
-                if roll >= (near * (0.45 + 0.75 * hd)).min(1.0) {
-                    continue;
-                }
-                // (Newly cracked only: what an earlier blast held or cracked
-                // keeps its look.)
-                if !self.fractured.insert(c) {
-                    continue;
-                }
-                cracked += 1;
-                if (blocks.of(c.0 + 1, c.1).0 != id || blocks.of(c.0, c.1 + 1).0 != id) && crate::noise::unit(hash(blast, c.0, c.1, 72)) < 0.9 - 0.4 * t {
-                    self.world.set_look(c.0, c.1, Look::CRACKED);
+                CraterStage::Ready => return,
+            }
+        }
+    }
+
+    /// A worked-out crater is thrown: its cells queued to be lifted and
+    /// thrown from now on, a layer at a time (see `blast_tick`). Returns the
+    /// cells.
+    pub(super) fn crater_throw(&mut self, cr: Crater) -> CellSet {
+        let now = self.tick;
+        let later = self.eject.back().is_some_and(|e| e.0 > now + cr.out.first().map_or(0, |o| o.0));
+        self.eject.extend(cr.out.into_iter().map(|(after, c, from, vel)| (now + after, c, from, vel)));
+        // (Only when another crater's ground is still due later than some of
+        // this one's does the queue need putting back in order.)
+        if later {
+            self.eject.make_contiguous().sort_by_key(|e| e.0);
+        }
+        cr.cells
+    }
+
+    /// The shell from `lo` to `hi` m from the charge of the rock round a
+    /// blast cracked by its shock (Benjamin, 26 Nov: the shockwave should
+    /// crack and frack more): past where each ray stopped breaking rock,
+    /// `CRACK_REACH` blast radii further, and either side of the loosened
+    /// column (more widely near the surface, where the ground lifts), the
+    /// rock is cracked into blocks: small near, bigger further out, fewer the
+    /// further out, more in hard brittle rock. A cracked cell is cut in half
+    /// the time (`fracture_dig`); the blocks' edges show as cracks. Returns
+    /// the work done.
+    fn blast_cracks(&mut self, j: &mut BlastJob, lo: f64, hi: f64) -> u64 {
+        if hi <= 0.0 {
+            return 0;
+        }
+        let (at, r, lt, height, up, side) = (j.at, j.r, j.lt, j.height, j.up, j.side);
+        let rays = j.stop.len().max(1);
+        let reach = r * CRACK_REACH;
+        // Past where any ray's cracks reach, only either side of the column.
+        let past_rays = j.ray_end.is_some_and(|e| lo >= e);
+        let band = |h: f64| {
+            if !past_rays {
+                return f64::INFINITY;
+            }
+            if height <= 0.0 || h < -0.5 * r || h > height + 2.0 {
+                return -1.0;
+            }
+            let f = (h / height).clamp(0.0, 1.0);
+            r * (1.0 + (lt - 1.0) * f) + r * (0.35 + 0.65 * f)
+        };
+        if past_rays && height <= 0.0 {
+            return 0;
+        }
+        // Past the rays' cracks, and far enough out that nothing below the
+        // charge is beside the column, the band either side of it lies
+        // within asin(widest / lo) of straight up: only that wedge of the
+        // shell is walked (late in a big blast, a quarter of it or less).
+        let wedge = (past_rays && lo >= 1.5 * r).then(|| {
+            let s = ((r * lt + r) / lo).min(1.0);
+            let c = (1.0 - s * s).sqrt();
+            let e1 = (up.0 * c - up.1 * s, up.0 * s + up.1 * c);
+            let e2 = (up.0 * c + up.1 * s, -up.0 * s + up.1 * c);
+            [(e1.1, -e1.0), (-e2.1, e2.0)]
+        });
+        let mut cells = std::mem::take(&mut j.cells);
+        shell_cells(&mut cells, at, lo, hi, wedge);
+        let mut work = cells.len() as u64 / WORK_PASS;
+        for &c in &cells {
+            let p = mid(c);
+            let (dx, dy) = (p.0 - at.0, p.1 - at.1);
+            // (Not over the ground over it.)
+            let h = dx * up.0 + dy * up.1;
+            if h > height + 1.0 || (dx * side.0 + dy * side.1).abs() > band(h) {
+                continue;
+            }
+            work += 1;
+            // Round the charge, past where the rays stopped.
+            let d = (dx * dx + dy * dy).sqrt();
+            let k = ((dy.atan2(dx) / std::f64::consts::TAU * rays as f64).round() as i64).rem_euclid(rays as i64) as usize;
+            let mut t = ((d - j.stop[k]) / reach).max(0.0);
+            // Either side of the column, more widely near the surface.
+            if height > 0.0 {
+                let along = dx * up.0 + dy * up.1;
+                if along >= -0.5 * r && along <= height + 2.0 {
+                    let f = (along / height).clamp(0.0, 1.0);
+                    let half = r * (1.0 + (lt - 1.0) * f);
+                    let out = (dx * side.0 + dy * side.1).abs() - half;
+                    t = t.min((out / (r * (0.35 + 0.65 * f))).max(0.0));
                 }
             }
-            h += 0.7;
+            if t >= 1.0 {
+                continue;
+            }
+            let blocks = &mut j.blocks[((t * 4.0) as usize).min(3)];
+            let (id, roll) = blocks.of(c.0, c.1);
+            let near = (1.0 - t).powf(0.8);
+            // Not cracked even if it were the hardest rock: no need to
+            // look at what it is (asking the world is the dear part).
+            if roll >= (near * (0.45 + 0.75 * 0.95)).min(1.0) || j.broken.contains_key(&c) || self.loose.contains(&c) {
+                continue;
+            }
+            let m = self.world.material(c.0, c.1);
+            work += WORK_LOOK;
+            if m == VACUUM || self.units.is_flora.get(m as usize).copied().unwrap_or(false) {
+                continue;
+            }
+            let mat = self.world.planet.mats.get(m);
+            if mat.state != State::Solid {
+                continue;
+            }
+            let hd = (mat.hardness as f64 / 10.0).clamp(0.05, 0.95);
+            if roll >= (near * (0.45 + 0.75 * hd)).min(1.0) {
+                continue;
+            }
+            // (Newly cracked only: what an earlier blast held or cracked
+            // keeps its look.)
+            if !self.fractured.insert(c) {
+                continue;
+            }
+            self.units.cracked += 1;
+            work += WORK_CHANGE;
+            if (blocks.of(c.0 + 1, c.1).0 != id || blocks.of(c.0, c.1 + 1).0 != id) && crate::noise::unit(hash(j.blast, c.0, c.1, 72)) < 0.9 - 0.4 * t {
+                self.world.set_look(c.0, c.1, Look::CRACKED);
+            }
         }
-        cracked
+        j.cells = cells;
+        work
+    }
+
+    /// A blast's plume, once its rubble is all made: most blasts find a way
+    /// up. (Not where the ground over it was thrown out as a crater: a jet
+    /// out of one hole beside the crater's even fan looked lopsided;
+    /// Benjamin, 26 Nov.) Returns the work done.
+    fn blast_plume(&mut self, j: &BlastJob) -> u64 {
+        let blast = j.blast;
+        if !j.seen || j.cratered || crate::noise::unit(hash(blast, 0, 0, 77)) >= 0.9 || j.rubble.is_empty() {
+            return 0;
+        }
+        let Some(mouth) = self.way_up(j.c0, j.r) else { return 0 };
+        // A random share of the rubble still lying where it broke, the same
+        // every run. (By now some of it may have settled away or been taken,
+        // and melt or other rubble come into its place: only loose rubble
+        // is blown out, never liquid that flowed in.)
+        let mut pick: Vec<(u64, (i64, i64))> = j.rubble.iter().filter(|c| self.loose.contains(c) && self.world.look(c.0, c.1) != Look::MELT).map(|&c| (hash(blast, c.0, c.1, 13), c)).collect();
+        let work = j.rubble.len() as u64 + pick.len() as u64 * WORK_LOOK;
+        let share = 0.35 + 0.25 * crate::noise::unit(hash(blast, 0, 0, 7));
+        let take = ((pick.len() as f64 * share).round() as usize).min(pick.len()).min(PLUME_MAX);
+        if take == 0 {
+            return work;
+        }
+        // (The lowest hashes found without sorting them all.)
+        if take < pick.len() {
+            pick.select_nth_unstable(take);
+            pick.truncate(take);
+        }
+        pick.sort_unstable();
+        let pw = (0.8 + j.yield_kt.max(0.0).cbrt() * 0.35).min(4.0);
+        // How long it pours out (the proving ground's plume).
+        let dur = 0.6 + 0.35 * (j.yield_kt * 10.0 + 1.0).log10();
+        if self.plumes.len() < 100 {
+            let m = mid(mouth);
+            self.plumes.push((m.0, m.1, pw as f32));
+        }
+        let mu = unit_of(mid(mouth));
+        let side = (-mu.1, mu.0);
+        for (k, &(h, c)) in pick.iter().enumerate() {
+            let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
+            self.loose.remove(&c);
+            self.undope(c, false);
+            self.progress.remove(&c);
+            self.reserved.remove(&c);
+            self.open_cell(c);
+            let vx = (crate::noise::unit(hash(h, k as i64, 1, 0)) - 0.5) * 16.0 * pw;
+            let vy = (50.0 + 60.0 * crate::noise::unit(hash(h, k as i64, 2, 0))) * pw;
+            let from = mid(mouth);
+            let from = (from.0 + side.0 * (crate::noise::unit(hash(h, k as i64, 3, 0)) - 0.5) * 2.0, from.1 + side.1 * (crate::noise::unit(hash(h, k as i64, 3, 0)) - 0.5) * 2.0);
+            // Out over the plume's time, a steady stream.
+            let at = self.tick + self.ticks(dur * k as f64 / take.max(1) as f64);
+            self.plume_out.push_back((at, from, m, (side.0 * vx + mu.0 * vy, side.1 * vx + mu.1 * vy)));
+        }
+        self.plume_out.make_contiguous().sort_by_key(|p| p.0);
+        work
     }
 
     /// What a blast does to the swarm (Benjamin, 25 Nov: blasts kill
     /// cutters; haulers are damaged and can die; nothing is pulled back).
     /// Cutters in the loosened column from `at` up to `top` (and
     /// kill_margin_m round it) are wrecked; haulers near `top` lose life,
-    /// the nearer the more.
-    pub(super) fn blast_harm(&mut self, at: (f64, f64), top: (f64, f64), r: f64) {
+    /// the nearer the more (only when `haulers`: the second time a blast
+    /// catches cutters, once its front reaches the ground, they aren't
+    /// hurt again).
+    pub(super) fn blast_harm(&mut self, at: (f64, f64), top: (f64, f64), r: f64, haulers: bool) {
         let sp = &self.eco.units.sapper;
         let (lt, margin, harm_r) = (sp.loosen_top.max(1.0), sp.kill_margin_m, sp.hauler_harm_r * r);
         let up = unit_of(at);
@@ -1359,7 +2131,7 @@ impl Sim {
         let life = self.eco.hauler.life_s;
         let mut hurt = 0u64;
         for k in 0..self.haulers.len() {
-            if !self.haulers[k].alive {
+            if !haulers || !self.haulers[k].alive {
                 continue;
             }
             let p = self.hauler_pos(k);

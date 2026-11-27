@@ -79,6 +79,7 @@ fn main() {
         if free.is_none() {
             let t1 = Instant::now();
             let mut o = W::default();
+            s.finish_blasts();
             s.write_save(&mut o);
             let mut l = Sim::read_save(&mut R(&o.0, 0), p, e).unwrap();
             if !all {

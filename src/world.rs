@@ -597,6 +597,17 @@ impl World {
         }
     }
 
+    /// Generate the leaf holding cell (x, y) cell by cell now, if it isn't
+    /// yet (as the first change in it would): a blast does this a leaf at a
+    /// time ahead of the ground it will throw, so that no one tick pays for
+    /// many. True if it had to.
+    pub fn generate_leaf(&mut self, x: i64, y: i64) -> bool {
+        if self.dense_leaf(x, y).is_some() {
+            return false;
+        }
+        self.leaf_for_edit(x, y).is_some()
+    }
+
     /// The leaf (64 x 64 cells, on the tree's grid) holding cell (x, y).
     pub fn leaf_of(&self, x: i64, y: i64) -> (i64, i64) {
         let o = self.tree.origin;

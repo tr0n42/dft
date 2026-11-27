@@ -91,6 +91,8 @@ pub struct Stats {
     pub merges: u64,
     pub helpers: u64,
     pub explosions: u64,
+    /// Blasts still going off (their shock fronts running out).
+    pub blasts: usize,
     pub mother_share: f64,
     /// Cells burned away so far, and cutters lost to heat.
     pub burned_cells: u64,
@@ -595,6 +597,7 @@ fn run(shared: &Shared) {
                 stats.frontier = s.frontier_len();
                 stats.dormant = s.sandbox.dormant();
                 stats.tick = s.tick;
+                stats.blasts = s.blasts_pending();
                 let haulers = s.hauler_views();
                 let units = s.unit_views();
                 let animals = s.animal_views();

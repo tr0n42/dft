@@ -20,6 +20,7 @@ fn round_trip(body: &str, minutes: f64, free: Option<u64>) {
     s.free_drones = free;
     s.run(minutes * 60.0);
     let t = std::time::Instant::now();
+    s.finish_blasts();
     let mut o = W::default();
     s.write_save(&mut o);
     let raw = o.0;

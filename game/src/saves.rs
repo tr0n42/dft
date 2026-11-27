@@ -226,7 +226,9 @@ fn snapshot(run: &Run, body: &Body, fog: &crate::fog::Fog, view: &crate::view::V
     }
     let t0 = Instant::now();
     let (time, drones, eaten) = {
-        let s = run.0.world();
+        let mut s = run.0.world();
+        // (A blast going off is finished first: a save keeps none half done.)
+        s.finish_blasts();
         s.write_save(&mut o);
         (s.time(), s.drone_count() as u64 + s.packet, s.consumed_share())
     };
@@ -363,8 +365,17 @@ fn autosave(mut saves: ResMut<Saves>, time: Res<Time<Real>>, run: Res<Run>) {
     if !saves.autosave || now - saves.last_auto < AUTOSAVE_S {
         return;
     }
+    // While a blast is going off it waits (up to half a minute): saving
+    // finishes every blast at once, which stalls the frame and changes how
+    // the blast turns out, depending on when the clock happened to save.
+    let (t, blasts) = {
+        let out = run.0.out.lock();
+        (out.stats.time, out.stats.blasts)
+    };
+    if now - saves.last_auto < AUTOSAVE_S + 30.0 && blasts > 0 {
+        return;
+    }
     saves.last_auto = now;
-    let t = run.0.out.lock().stats.time;
     if t > saves.last_game_t + 1.0 && saves.wanted.is_none() {
         saves.wanted = Some(Slot::Auto);
     }

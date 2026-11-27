@@ -65,7 +65,8 @@ fn far_sectors_eat_their_ground_and_deliver_it() {
 #[test]
 fn far_field_survives_a_save() {
     let planet = Arc::new(dft_sim::load_body(&data(), "dev-planet").unwrap());
-    let s = far_swarm(planet.clone(), 300.0);
+    let mut s = far_swarm(planet.clone(), 300.0);
+    s.finish_blasts();
     let mut o = W::default();
     s.write_save(&mut o);
     let mut l = Sim::read_save(&mut R(&o.0, 0), planet, eco()).unwrap();
