@@ -120,23 +120,43 @@ pub fn pull(p: &crate::planet::Planet, x: f64, y: f64) -> (f64, f64) {
     (-x / r * g, -y / r * g)
 }
 
-/// A drop of liquid in flight: what, where, how fast, and where it was
-/// thrown from (it keeps that place's colour).
+/// A drop in flight (liquid blasted out of a vent, or rock thrown by a
+/// blast): where, how fast, where it was thrown from (it keeps that place's
+/// colour), and what it carries: one cell, or a clump of up to CLUMP_MAX
+/// cells of a big crater's ground (the first `n` of `mats`), each keeping
+/// its own material, so the books balance cell by cell when it lands.
 #[derive(Clone, Copy)]
 struct Drop {
-    m: MatId,
     p: (f64, f64),
     v: (f64, f64),
     from: Cell,
+    mats: [MatId; CLUMP_MAX],
+    n: u8,
+}
+
+impl Drop {
+    fn mats(&self) -> &[MatId] {
+        &self.mats[..self.n as usize]
+    }
 }
 
 /// Most drops in flight at once (more are set straight down where they land).
 const MAX_DROPS: usize = 20_000;
 
-/// Where a cell thrown from `at` at `vel` comes down: up and down again at
-/// the same height, carried along the ground by its sideways speed meanwhile
-/// (a simple throw over level ground). Set down there; None if it couldn't be.
-fn land_thrown(w: &mut World, at: (f64, f64), m: MatId, vel: (f64, f64)) -> Option<Cell> {
+/// Most cells one drop carries: a big crater throws its ground in clumps,
+/// so that it throws far more ground without more pieces in the air.
+pub const CLUMP_MAX: usize = 24;
+
+/// Most drops out of sight set down a tick (at about 0.1 to 0.25 ms each).
+const LAND_UNSEEN: usize = 120;
+
+/// Where a cell thrown from `at` at `vel` comes down, worked out at once
+/// (out of sight): on its path round the body under the body's pull (an
+/// ellipse round its centre), back at the height it was thrown from. Set
+/// down there (a clump as a small pile, see `pile`); what was set down goes
+/// into `out`. What would never come back, or would go higher than a drop
+/// in sight is followed (three times the body's radius), is lost to space.
+fn land_thrown(w: &mut World, at: (f64, f64), mats: &[MatId], vel: (f64, f64), out: &mut Vec<(Cell, MatId)>) {
     let r0 = (at.0 * at.0 + at.1 * at.1).sqrt().max(1.0);
     let (ux, uy) = (at.0 / r0, at.1 / r0);
     let (tx, ty) = (-uy, ux);
@@ -144,19 +164,87 @@ fn land_thrown(w: &mut World, at: (f64, f64), m: MatId, vel: (f64, f64)) -> Opti
         let p = pull(&w.planet, at.0, at.1);
         (p.0 * p.0 + p.1 * p.1).sqrt().max(1e-6)
     };
-    let vr = (vel.0 * ux + vel.1 * uy).max(0.0);
+    let gm = g * r0 * r0;
+    let vr = vel.0 * ux + vel.1 * uy;
     let vt = vel.0 * tx + vel.1 * ty;
-    let flight = (2.0 * vr / g).min(3600.0);
-    let along = (vt * flight).clamp(-0.5 * r0, 0.5 * r0);
-    let a = along / r0;
+    let lose = |w: &mut World| {
+        for &m in mats {
+            w.lose_aloft(m);
+        }
+    };
+    // Going up faster than the body's escape speed, it never comes back (as
+    // in sight, where it flies off for good). (Until 27 Nov it came down
+    // half a radian away, so all of a big crater's fast ground made two
+    // heaps there.)
+    if vr > 0.0 && vel.0 * vel.0 + vel.1 * vel.1 >= 2.0 * gm / r0 {
+        lose(w);
+        return;
+    }
+    // On its way up, how far round the body it gets before it is back at
+    // this height: the ellipse's angle from its low point at the throw is
+    // th0, and it comes back at the same angle the other side of its high
+    // point, so it goes 2 (pi - th0) round. (A small throw is the old flat
+    // throw, 2 vr vt / g along the ground; a throw nearly fast enough to
+    // escape goes far round, and was cut off half a radian along before 27
+    // Nov, heaping everything there.) Already on its way down, it lands
+    // right below.
+    let mut a = 0.0;
+    if vr > 0.0 {
+        let h = r0 * vt.abs();
+        let p = h * h / gm;
+        let (ec, es) = (p / r0 - 1.0, vr * h / gm);
+        let e = (ec * ec + es * es).sqrt();
+        if e < 1.0 && p / (1.0 - e) > w.planet.max_radius * 3.0 {
+            lose(w);
+            return;
+        }
+        a = vt.signum() * 2.0 * (std::f64::consts::PI - es.atan2(ec));
+    }
     let (ca, sa) = (a.cos(), a.sin());
     let land = ((ux * ca - uy * sa) * r0, (ux * sa + uy * ca) * r0);
     let c = ground_below(w, land.0, land.1);
-    match settle_near(w, c, m) {
-        Some(t) => Some(t),
-        None => {
-            w.lose_aloft(m);
-            None
+    pile(w, c, mats, out);
+}
+
+/// Cells that came down together at open cell `c`, set down: one cell in
+/// the open cell nearest it (`settle_near`); a clump as a small pile in the
+/// lowest open cells that join up with `c` through open cells (loose
+/// settling takes it on from there). Only joined-up cells: a ring round the
+/// hit took the open cells of a tunnel or cave under a thin roof first, and
+/// rubble turned up inside closed tunnels. What there is no room for there
+/// goes to the open cell nearest, and failing that is lost to space (booked
+/// as vented). What was set down goes into `out`.
+fn pile(w: &mut World, c: Cell, mats: &[MatId], out: &mut Vec<(Cell, MatId)>) {
+    let open = |w: &World, q: Cell| w.in_bounds(q.0, q.1) && w.material(q.0, q.1) == VACUUM;
+    let mut room: Vec<Cell> = Vec::new();
+    if mats.len() > 1 && open(w, c) {
+        // A small search out from the hit (breadth first, so the same
+        // every run), a few times the clump's cells and at most 16 m out.
+        let most = 4 * mats.len() + 8;
+        let mut seen = CellSet::default();
+        let mut queue = std::collections::VecDeque::from([c]);
+        seen.insert(c);
+        while let Some(q) = queue.pop_front() {
+            room.push(q);
+            if room.len() >= most {
+                break;
+            }
+            for d in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+                let n = (q.0 + d.0, q.1 + d.1);
+                if (n.0 - c.0).abs() < 16 && (n.1 - c.1).abs() < 16 && seen.insert(n) && open(w, n) {
+                    queue.push_back(n);
+                }
+            }
+        }
+        // The lowest first (nearest the body's centre).
+        room.sort_by_key(|q| (q.0 * q.0 + q.1 * q.1, q.0, q.1));
+    }
+    let mut room = room.into_iter();
+    for &m in mats {
+        let t = room.find(|q| w.land_cell(q.0, q.1, m)).or_else(|| settle_near(w, c, m));
+        match t {
+            Some(t) => out.push((t, m)),
+            None => w.lose_aloft(m),
         }
     }
 }
@@ -426,9 +514,67 @@ impl Bodies {
         l.cells.into_iter().map(|c| c.1).collect()
     }
 
-    /// Drops of liquid in flight right now.
+    /// Drops in flight right now.
     pub fn drops(&self) -> usize {
         self.drops.len()
+    }
+
+    /// The materials of every cell the drops in flight carry (each of a
+    /// clump's): their mass is booked as in the air.
+    pub fn drop_mats(&self) -> Vec<MatId> {
+        self.drops.iter().flat_map(|d| d.mats().iter().copied()).collect()
+    }
+
+    /// The materials of the cells of the rock bodies in the air (not drops),
+    /// booked as in the air. Wrecked drones' scrap is left out: it is booked
+    /// only when it lands (as deposited), so a save that counted it as lost
+    /// from the air booked scrap as lost that the body never had.
+    pub fn rock_aloft(&self) -> Vec<MatId> {
+        let rock = self.loose.iter().filter(|l| !l.wreck).flat_map(|l| l.cells.iter().map(|c| c.1));
+        rock.chain(self.slabs.iter().flat_map(|sl| sl.cells.iter().map(|c| c.1))).collect()
+    }
+
+    /// The drops in flight, for a save: where, how fast, where from, and
+    /// each cell's material. (A big crater's slow ground can be up for
+    /// minutes on a small body; left out of a save, it was lost from it.)
+    pub fn write_drops(&self, o: &mut crate::save::W) {
+        o.u64(self.drops.len() as u64);
+        for d in &self.drops {
+            for v in [d.p.0, d.p.1, d.v.0, d.v.1] {
+                o.f64(v);
+            }
+            o.i64(d.from.0);
+            o.i64(d.from.1);
+            o.u8(d.n);
+            for &m in d.mats() {
+                o.u16(m);
+            }
+        }
+    }
+
+    /// The drops a save had in flight, back in the air (their mass is
+    /// already booked as in the air by the saved books). `mats` is how many
+    /// materials the body has.
+    pub fn read_drops(&mut self, r: &mut crate::save::R, mats: usize) -> Result<(), String> {
+        for _ in 0..r.u64()? {
+            let p = (r.f64()?, r.f64()?);
+            let v = (r.f64()?, r.f64()?);
+            let from = (r.i64()?, r.i64()?);
+            let n = r.u8()?;
+            if n == 0 || n as usize > CLUMP_MAX {
+                return Err("a piece in the air in this save is broken".into());
+            }
+            let mut d = Drop { p, v, from, mats: [VACUUM; CLUMP_MAX], n };
+            for k in 0..n as usize {
+                let m = r.u16()?;
+                if m as usize >= mats {
+                    return Err("a piece in the air in this save is broken".into());
+                }
+                d.mats[k] = m;
+            }
+            self.drops.push(d);
+        }
+        Ok(())
     }
 
     /// A cell next to `c` just opened: check its solid neighbours for being cut free.
@@ -459,8 +605,17 @@ impl Bodies {
                 out.push(AirCell { x: p.0, y: p.1, angle, home: (l.origin.0 + *i as i64, l.origin.1 + *j as i64), m: *m });
             }
         }
+        // A clump is drawn as its cells heaped in a square round where it
+        // is, each in its own material (one big square of the first one's
+        // colour read as a single magnified cell).
         for d in &self.drops {
-            out.push(AirCell { x: d.p.0, y: d.p.1, angle: 0.0, home: d.from, m: d.m });
+            let side = (d.n as f64).sqrt().ceil().max(1.0) as usize;
+            let half = (side as f64 - 1.0) * 0.5;
+            for (k, &m) in d.mats().iter().enumerate() {
+                let (gx, gy) = ((k % side) as f64 - half, (k / side) as f64 - half);
+                let home = (d.from.0 + (k % side) as i64, d.from.1 + (k / side) as i64);
+                out.push(AirCell { x: d.p.0 + gx, y: d.p.1 + gy, angle: 0.0, home, m });
+            }
         }
         for sl in &self.slabs {
             for ((i, j), m) in &sl.cells {
@@ -647,61 +802,103 @@ impl Bodies {
     /// many in the air) it is set straight down where it would come down.
     /// Returns the cell it was set into, if it was.
     pub fn throw(&mut self, w: &mut World, at: (f64, f64), m: MatId, vel: (f64, f64)) -> Option<Cell> {
+        let mut out = Vec::new();
+        self.throw_clump(w, at, &[m], vel, &mut out);
+        out.first().map(|t| t.0)
+    }
+
+    /// As `throw`, for a clump of up to CLUMP_MAX cells already lifted out of
+    /// the ground, flying as one piece; set straight down, it lands as a
+    /// small pile. The cells set down are added to `out`.
+    pub fn throw_clump(&mut self, w: &mut World, at: (f64, f64), mats: &[MatId], vel: (f64, f64), out: &mut Vec<(Cell, MatId)>) {
+        debug_assert!(!mats.is_empty() && mats.len() <= CLUMP_MAX);
         let c = (at.0.floor() as i64, at.1.floor() as i64);
         if self.drops.len() < MAX_DROPS && crate::sandbox::in_attention(self.attention, c) && w.material(c.0, c.1) == VACUUM {
-            self.drops.push(Drop { m, p: at, v: vel, from: c });
-            return None;
+            let mut d = Drop { p: at, v: vel, from: c, mats: [VACUUM; CLUMP_MAX], n: mats.len() as u8 };
+            d.mats[..mats.len()].copy_from_slice(mats);
+            self.drops.push(d);
+            return;
         }
-        land_thrown(w, at, m, vel)
+        land_thrown(w, at, mats, vel, out);
     }
 
     /// Move the drops in flight one tick; set down those that hit something.
     fn step_drops(&mut self, w: &mut World, ev: &mut Events, dt: f64) {
         let far = w.planet.max_radius * 3.0;
+        // (Rubble can heap a little over the highest ground the body was
+        // made with.)
+        let clear2 = (w.planet.max_radius + 32.0).powi(2);
+        let mut set_down = 0;
         let mut i = 0;
         while i < self.drops.len() {
             let d = self.drops[i];
             let c0 = (d.p.0.floor() as i64, d.p.1.floor() as i64);
-            // Out of sight (the view moved away, or zoomed out): down at once where it would land.
+            // Out of sight (the view moved away, or zoomed out): down at once
+            // where it would land, up to LAND_UNSEEN a tick (each is a look
+            // down to the ground somewhere else, often ground not made yet:
+            // a screen's worth of a big crater all at once was a 200 to 400
+            // ms tick). The rest wait where they are, out of sight, for a
+            // later tick.
             if !crate::sandbox::in_attention(self.attention, c0) {
-                self.drops.swap_remove(i);
-                if let Some(t) = land_thrown(w, d.p, d.m, d.v) {
-                    ev.landed.push((t, d.m));
+                if set_down < LAND_UNSEEN {
+                    set_down += 1;
+                    self.drops.swap_remove(i);
+                    land_thrown(w, d.p, d.mats(), d.v, &mut ev.landed);
+                } else {
+                    i += 1;
                 }
                 continue;
             }
             let a = pull(&w.planet, d.p.0, d.p.1);
             let v = (d.v.0 + a.0 * dt, d.v.1 + a.1 * dt);
             let to = (d.p.0 + v.0 * dt, d.p.1 + v.1 * dt);
-            if (to.0 * to.0 + to.1 * to.1).sqrt() > far {
+            // Well over the ground and going up faster than the body's
+            // escape speed there, it never comes back: lost now, not once
+            // it has drifted out to three radii minutes later (until then it
+            // took up room among the drops in flight).
+            let r2 = to.0 * to.0 + to.1 * to.1;
+            if r2 > clear2 && to.0 * v.0 + to.1 * v.1 > 0.0 && v.0 * v.0 + v.1 * v.1 >= 2.0 * (a.0 * a.0 + a.1 * a.1).sqrt() * (d.p.0 * d.p.0 + d.p.1 * d.p.1).sqrt() {
                 self.drops.swap_remove(i);
-                w.lose_aloft(d.m);
+                for &m in d.mats() {
+                    w.lose_aloft(m);
+                }
+                continue;
+            }
+            if r2.sqrt() > far {
+                self.drops.swap_remove(i);
+                for &m in d.mats() {
+                    w.lose_aloft(m);
+                }
                 continue;
             }
             // Along the way a metre at a time: the last open cell before
-            // anything in the way is where it lands.
-            let len = ((to.0 - d.p.0).powi(2) + (to.1 - d.p.1).powi(2)).sqrt();
-            let n = (len.ceil() as usize).max(1);
+            // anything in the way is where it lands. Well over the highest
+            // ground there is nothing to hit, and it isn't looked along (a
+            // big crater's fast pieces spend most of their flight up there).
+            // Past the edge of the world's grid there is nothing either: it
+            // flies on (until 27 Nov it stopped there, and a big crater's
+            // ground was left heaped at the edge of the grid, in space).
             let mut last = c0;
             let mut hit = false;
-            for k in 1..=n {
-                let t = k as f64 / n as f64;
-                let p = ((d.p.0 + (to.0 - d.p.0) * t).floor() as i64, (d.p.1 + (to.1 - d.p.1) * t).floor() as i64);
-                if p == last {
-                    continue;
+            if d.p.0 * d.p.0 + d.p.1 * d.p.1 < clear2 || to.0 * to.0 + to.1 * to.1 < clear2 {
+                let len = ((to.0 - d.p.0).powi(2) + (to.1 - d.p.1).powi(2)).sqrt();
+                let n = (len.ceil() as usize).max(1);
+                for k in 1..=n {
+                    let t = k as f64 / n as f64;
+                    let p = ((d.p.0 + (to.0 - d.p.0) * t).floor() as i64, (d.p.1 + (to.1 - d.p.1) * t).floor() as i64);
+                    if p == last {
+                        continue;
+                    }
+                    if w.in_bounds(p.0, p.1) && w.material(p.0, p.1) != VACUUM {
+                        hit = true;
+                        break;
+                    }
+                    last = p;
                 }
-                if !w.in_bounds(p.0, p.1) || w.material(p.0, p.1) != VACUUM {
-                    hit = true;
-                    break;
-                }
-                last = p;
             }
             if hit {
                 self.drops.swap_remove(i);
-                match settle_near(w, last, d.m) {
-                    Some(t) => ev.landed.push((t, d.m)),
-                    None => w.lose_aloft(d.m),
-                }
+                pile(w, last, d.mats(), &mut ev.landed);
                 continue;
             }
             self.drops[i].p = to;

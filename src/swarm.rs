@@ -627,10 +627,13 @@ pub struct Sim {
     /// a time: (tick, from, material, velocity).
     plume_out: std::collections::VecDeque<(u64, (f64, f64), MatId, (f64, f64))>,
     /// Ground over a blast to be thrown out of its crater, a layer at a
-    /// time, lifted only as it goes (so the crater opens as it is thrown):
-    /// (tick, cell, where it flies from, velocity). Not saved: what is left
-    /// of it stays put.
-    pub(super) eject: std::collections::VecDeque<(u64, (i64, i64), (f64, f64), (f64, f64))>,
+    /// time, lifted only as it goes (so the crater opens as it is thrown),
+    /// in pieces of a cell or a clump (see `sapper::Ejecta`). Not saved:
+    /// what is left of it stays put.
+    eject: std::collections::VecDeque<sapper::Ejecta>,
+    /// The last crater thrown: its cells, and how deep its bowl was planned
+    /// at the middle (m), for the timings and tests.
+    pub last_crater: (usize, f64),
     /// Sappers caught in a blast, going off a moment later: (tick, where).
     chain: Vec<(u64, (f64, f64), f64)>,
     /// Blasts going off, their shock fronts running out over the ticks
@@ -1053,6 +1056,7 @@ impl Sim {
             settle_wait: CellSet::default(),
             plume_out: Default::default(),
             eject: Default::default(),
+            last_crater: (0, 0.0),
             chain: Vec::new(),
             blast_jobs: Vec::new(),
             next_tunnel_k: 0,
@@ -4318,7 +4322,7 @@ pub const COUNT_NAMES: [&str; 6] = ["drone events", "work searches", "searches f
 // ---- Saving and loading ----
 
 /// Version of the swarm's part of a save (after the world's part).
-const SIM_VERSION: u32 = 16; // 16: ground units v2 (25 Nov); 15: the far field; 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
+const SIM_VERSION: u32 = 17; // 17: drops in flight (a blast's crater; 27 Nov); 16: ground units v2 (25 Nov); 15: the far field; 14: placeholder animals; 13: the fuser, conventional charges, uranium in rubble; 12: the life cycle and the ledger's grown column; 6: life.toml added materials; 7: the element stockpile; 8: 75 elements, raw and refined; 9: the parts stock; 10: production; 11: specialists
 
 fn put_cell(o: &mut crate::save::W, c: (i64, i64)) {
     o.i64(c.0);
@@ -4352,7 +4356,8 @@ impl Sim {
     /// `save::pack`). Not everything is kept exactly, which nobody would
     /// notice in a game about scale:
     /// - drones mid-trip are home again, idle, and what they carried is lost;
-    /// - rock in the air is lost (counted as vented);
+    /// - rock in the air is lost (counted as vented), except the drops in
+    ///   flight (a blast's thrown ground), which are kept;
     /// - the sandbox's cells are all woken on loading, and heat banked
     ///   toward a phase change is kept, as are temperatures;
     /// - histories (samples) and profiling start over.
@@ -4541,8 +4546,10 @@ impl Sim {
         for c in pending {
             put_cell(o, c);
         }
-        // Rock in the air: lost on loading (only its materials are kept, for the books).
-        let mut air: Vec<MatId> = self.bodies.cells().into_iter().map(|(_, m)| m).collect();
+        // Rock in the air: lost on loading (only its materials are kept, for
+        // the books). Not the drops in flight (saved whole, at the end), nor
+        // wrecked drones' scrap (not booked until it lands).
+        let mut air = self.bodies.rock_aloft();
         air.extend(self.plume_out.iter().map(|p| p.2));
         o.u64(air.len() as u64);
         for m in air {
@@ -4559,6 +4566,17 @@ impl Sim {
         self.write_fauna(o);
         self.write_far(o);
         self.write_units_16(o);
+        self.bodies.write_drops(o);
+    }
+
+    /// The materials of every cell booked as in the air: rock bodies, drops
+    /// in flight, and broken rock waiting to pour out of a plume (for the
+    /// tests that check the books).
+    pub fn aloft_mats(&self) -> Vec<MatId> {
+        let mut air = self.bodies.rock_aloft();
+        air.extend(self.bodies.drop_mats());
+        air.extend(self.plume_out.iter().map(|p| p.2));
+        air
     }
 
     /// Rebuild a game from what `write_save` wrote, on the same body, with
@@ -4812,6 +4830,12 @@ impl Sim {
         }
         if version >= 16 {
             s.read_units_16(r)?;
+        }
+        // (Older saves left the drops in flight out, and their mass stayed
+        // booked as in the air.)
+        if version >= 17 {
+            let mats = s.world.planet.mats.len();
+            s.bodies.read_drops(r, mats)?;
         }
         s.sandbox.time_s = s.time();
         s.legs_all_changed();

@@ -98,6 +98,22 @@ first. The agreed behaviour is `docs/design/ground-units.md`.
     spreading over ticks first. Zoomed out past ~2 m a pixel a blast is out
     of sight (pure math). Big craters (3000 kt) also came out shallower than
     their bowl: not looked into yet.
+- **27 Nov (clumps, crater cap, ejecta speed):** step 4 of
+  docs/explosions-research.md and the ejecta-speed item of step 5. A crater
+  past 4,000 cells flies in clumps of up to 24 cells (2 to 4 m squares of
+  the bowl, each cell's material kept); `CRATER_MAX` 250,000, so the 3000
+  and 10,000 kt craters are as deep as their bowl (101 of 110 m, 161 of
+  164 m; they were 77 and 58). Launch speed falls with distance from the
+  middle (Housen and Holsapple), from the blast's speed to what sets the rim
+  down just past the rim under the body's own pull: the blanket comes down
+  round the crater, slowly on a small body (minutes), and never too slow to
+  clear the rim on a hillside. On a 3 km body about half a crater's ground
+  (its fast middle) leaves the body for good, 47% at 10 kt and 64% at
+  10,000 kt (a decision for Benjamin whether to hold it back). Found: drops
+  stopped at the edge of the world's grid and heaped there in space; out of
+  sight they now come down along their real path round the body (or leave
+  it), at most 120 a tick; drops in flight are saved (save version 17).
+  Numbers in docs/explosions-research.md.
 - **Depth from yield**: `depth_m_per_cbrt_kt = 46` (79 m at 5 kt). The old
   rays break only about the blast radius (24 m at 5 kt), so a new
   **loosened column** (`sapper_column`) turns every solid cell from the charge

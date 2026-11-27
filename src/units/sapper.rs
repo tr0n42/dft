@@ -73,8 +73,34 @@ pub(super) const CRATER_W: f64 = 0.85;
 pub(super) const CRATER_D: f64 = 0.4;
 /// Most cells thrown out of a crater (the top layers first; the rest stays
 /// as rubble). Raised from 3000 on 26 Nov (Benjamin: the throw looked
-/// uneven) to what the screen can fly at once.
-pub(super) const CRATER_MAX: usize = 20_000;
+/// uneven) to what the screen can fly at once (20,000), and on 27 Nov, with
+/// the ground thrown in clumps, well past the whole bowl of a 10,000 kt
+/// blast (about 50,000 cells; at 20,000, craters past about 1000 kt came
+/// out shallower than their size).
+pub(super) const CRATER_MAX: usize = 250_000;
+/// A crater's ground flies as single cells while it is at most this many;
+/// past that, in clumps of neighbouring cells (2 x 2 up to 4 x 4, see
+/// `bodies::CLUMP_MAX`), so a big crater throws all its ground with at most
+/// about CRATER_MAX / 16 pieces in the air (flying 20,000 single cells was
+/// most of the dearest tick of a big blast).
+pub(super) const CRATER_PIECES: usize = 4_000;
+/// The side of the biggest clump (cells).
+const CLUMP_SIDE: usize = 4;
+/// At most about this many of a crater's cells are lifted out a game second
+/// (each one lifted opens the ground under it, at a few microseconds): a big
+/// crater is thrown out over a few seconds, not all in the 0.6 s a small
+/// one takes.
+const CRATER_LIFT_PER_S: f64 = 40_000.0;
+/// How fast a crater throws its ground: fastest in the middle (the blast's
+/// own speed), falling off towards the rim to EJECTA_RIM_SHARE of that
+/// (as Housen and Holsapple's scaling has it, if more gently), and never
+/// slower than gets it past the rim over the ground as it lies.
+/// (Tried 27 Nov: the rim as slow as the body's pull brings it down just
+/// past the rim, the physics of a real asteroid. On these small bodies the
+/// pull is so weak that the ground then hung over the crater in two thin
+/// streams for minutes, like smoke; the fast fan Benjamin had approved was
+/// put back, gentler at the rim, until he picks.)
+const EJECTA_RIM_SHARE: f64 = 0.45;
 /// A sapper hovers this high over the ground while it moves along it
 /// looking for its way down (less under a low roof) (Benjamin, 26 Nov).
 pub(super) const HOVER_M: f64 = 5.0;
@@ -362,6 +388,8 @@ pub(super) enum CraterStage {
     Ground,
     /// Finding the cells to throw.
     Scan,
+    /// Finding the highest of them, and of each column.
+    Tops,
     /// Working out where and how fast each flies.
     Throw,
     /// Waiting for the front to reach the ground.
@@ -381,11 +409,12 @@ pub(super) struct Crater {
     wl: f64,
     wr: f64,
     dmax: f64,
-    /// How far across its depth wanders, how hard it throws, and the
-    /// ground's slope.
+    /// How far across its depth wanders, how hard it throws, the ground's
+    /// slope, and the body's pull there (m/s2).
     period: f64,
     pw: f64,
     slope: f64,
+    pull: f64,
     /// The ground looked up so far (where the next look starts, and the
     /// next place across), and along it: (across, ground, depth).
     near: f64,
@@ -401,15 +430,34 @@ pub(super) struct Crater {
     take: Vec<((i64, i64), f64, f64, f64)>,
     seen: CellSet,
     /// The highest of the cells, how far they reach down, and the highest
-    /// of each column.
+    /// of each column; how long (s) it takes to throw it all out, and the
+    /// side of its clumps (m; 1, single cells, for a small crater).
     top: f64,
     span: f64,
     col_top: HashMap<i64, f64>,
-    /// What is thrown: (ticks after it goes, cell, where it flies from,
-    /// velocity), and the cells.
-    out: Vec<(u64, (i64, i64), (f64, f64), (f64, f64))>,
+    spread: f64,
+    side: f64,
+    /// What is thrown: the pieces that fly (while being worked out, a
+    /// clump's `from` and `vel` are the sums over its cells), the clumps
+    /// still taking cells, by when they go and their block of the crater (a
+    /// square `side` m across, in its own frame: across it, and down from
+    /// its top), and the cells.
+    pieces: Vec<Ejecta>,
+    open: std::collections::BTreeMap<(u64, i64, i64), usize>,
     cells: CellSet,
     stage: CraterStage,
+}
+
+/// A piece of a crater's ground to be thrown: when (the tick; while being
+/// worked out, ticks after the crater goes), its cells (one, or a clump of
+/// neighbours lifted and flying together), where it flies from and how fast,
+/// and how far along its way it starts (s: see `blast_tick`).
+pub(super) struct Ejecta {
+    pub(super) due: u64,
+    pub(super) cells: Vec<(i64, i64)>,
+    pub(super) from: (f64, f64),
+    pub(super) vel: (f64, f64),
+    pub(super) lead: f64,
 }
 
 impl Crater {
@@ -956,26 +1004,49 @@ impl Sim {
         // The crater's ground due now: all of it lifted first, then thrown
         // (thrown one by one, a piece could fly into a neighbour due the
         // same tick but not yet lifted, and fall back in).
+        // A clump's cells are lifted together and fly as one piece.
         let mut flying = Vec::new();
-        while let Some(&(due, c, from, vel)) = self.eject.front() {
-            if due > self.tick {
-                break;
+        while self.eject.front().is_some_and(|e| e.due <= self.tick) {
+            let Some(e) = self.eject.pop_front() else { break };
+            let mut mats = Vec::with_capacity(e.cells.len());
+            for &c in &e.cells {
+                let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
+                self.loose.remove(&c);
+                self.progress.remove(&c);
+                self.reserved.remove(&c);
+                self.open_cell(c);
+                mats.push(m);
             }
-            self.eject.pop_front();
-            let Some(m) = self.world.lift_cell(c.0, c.1) else { continue };
-            self.loose.remove(&c);
-            self.progress.remove(&c);
-            self.reserved.remove(&c);
-            self.open_cell(c);
-            flying.push((from, m, vel));
+            if mats.is_empty() {
+                continue;
+            }
+            // Each piece starts as far along its way as it would have got
+            // had it left with the top of its column (the deeper, the
+            // further), so a column goes up as a stream, not as a sheet
+            // over the hole: slow ground all thrown from the column's mouth
+            // a tick or so apart hung there in one layer (27 Nov). Where
+            // that place isn't open, it goes from the mouth.
+            let (mut from, mut vel) = (e.from, e.vel);
+            if e.lead > 0.0 {
+                let a = crate::bodies::pull(&self.world.planet, from.0, from.1);
+                let t = e.lead;
+                let p = (from.0 + vel.0 * t + 0.5 * a.0 * t * t, from.1 + vel.1 * t + 0.5 * a.1 * t * t);
+                let c = cell_of(p);
+                if self.world.in_bounds(c.0, c.1) && self.world.material(c.0, c.1) == VACUUM {
+                    (from, vel) = (p, (vel.0 + a.0 * t, vel.1 + a.1 * t));
+                }
+            }
+            flying.push((from, mats, vel));
         }
-        for (from, m, vel) in flying {
-            if let Some(t) = self.bodies.throw(&mut self.world, from, m, vel) {
-                self.loose.insert(t);
-                self.world.set_look(t.0, t.1, Look::RUBBLE);
-                self.settling.insert(t);
-                self.scrap_landed(t);
-            }
+        let mut landed = Vec::new();
+        for (from, mats, vel) in flying {
+            self.bodies.throw_clump(&mut self.world, from, &mats, vel, &mut landed);
+        }
+        for (t, _) in landed {
+            self.loose.insert(t);
+            self.world.set_look(t.0, t.1, Look::RUBBLE);
+            self.settling.insert(t);
+            self.scrap_landed(t);
         }
         while let Some(&(due, from, m, vel)) = self.plume_out.front() {
             if due > self.tick {
@@ -1391,6 +1462,12 @@ impl Sim {
                 j.front_done = true;
             }
         }
+        // What the front left of the budget goes to the crater too (a big
+        // one takes many ticks to work out, and once the rock is all dealt
+        // with, the blast only waits for it).
+        if let Some(cr) = j.plan.as_mut().filter(|cr| cr.stage != CraterStage::Ready) {
+            self.crater_work(cr, budget);
+        }
         self.blast_fin(j, budget);
     }
 
@@ -1729,6 +1806,10 @@ impl Sim {
         let right = self.crater_ground(a0 + wr / g0, 5.0 / g0, &mut nr);
         let left = self.crater_ground(a0 - wl / g0, 5.0 / g0, &mut nl);
         let slope = ((right - left) / (wl + wr)).clamp(-1.5, 1.5);
+        let pull = {
+            let p = crate::bodies::pull(&self.world.planet, a0.cos() * g0, a0.sin() * g0);
+            (p.0 * p.0 + p.1 * p.1).sqrt()
+        };
         Crater {
             blast,
             a0,
@@ -1740,6 +1821,7 @@ impl Sim {
             // How hard it throws (as the plume does).
             pw: (0.8 + 0.35 * yield_kt.max(0.0).cbrt()).min(6.0),
             slope,
+            pull,
             near: g0,
             x: -wl,
             cols: Vec::new(),
@@ -1751,7 +1833,10 @@ impl Sim {
             top: 0.0,
             span: 1.0,
             col_top: HashMap::new(),
-            out: Vec::new(),
+            spread: 0.6,
+            side: 1.0,
+            pieces: Vec::new(),
+            open: Default::default(),
             cells: CellSet::default(),
             stage: CraterStage::Ground,
         }
@@ -1788,26 +1873,27 @@ impl Sim {
                             cr.seen.clear();
                             continue;
                         }
+                        // (The top layers kept: picked out in one pass, not
+                        // sorted, as a big crater has a few hundred thousand.)
                         if cr.take.len() > CRATER_MAX {
-                            cr.take.sort_by(|a, b| a.2.total_cmp(&b.2));
+                            cr.take.select_nth_unstable_by(CRATER_MAX, |a, b| a.2.total_cmp(&b.2));
                             cr.take.truncate(CRATER_MAX);
                         }
-                        // Highest first, by height (not depth under the ground
-                        // just over it, which differs column to column: a piece
-                        // flew into the cell beside it, as high but due later,
-                        // and fell back in).
-                        cr.top = cr.take.iter().map(|t| len(mid(t.0))).fold(f64::MIN, f64::max);
-                        let low = cr.take.iter().map(|t| len(mid(t.0))).fold(f64::MAX, f64::min);
-                        cr.span = (cr.top - low).max(1.0);
-                        // The highest of each column (by its place across).
-                        for t in &cr.take {
-                            let e = cr.col_top.entry((t.1 / 0.7).round() as i64).or_insert(f64::MIN);
-                            *e = e.max(len(mid(t.0)));
+                        // The bigger the crater, the longer it takes to throw
+                        // out, and the bigger the clumps it throws.
+                        let n = cr.take.len();
+                        cr.spread = (n as f64 / CRATER_LIFT_PER_S).max(0.6);
+                        let mut side = 1;
+                        while side < CLUMP_SIDE && n > CRATER_PIECES * side * side {
+                            side += 1;
                         }
+                        cr.side = side as f64;
+                        cr.top = f64::MIN;
+                        cr.span = f64::MAX;
                         cr.seen = CellSet::default();
                         cr.i = 0;
-                        cr.stage = CraterStage::Throw;
-                        *budget = budget.saturating_sub(cr.take.len() as u64);
+                        cr.stage = CraterStage::Tops;
+                        *budget = budget.saturating_sub(n as u64);
                         continue;
                     }
                     let (x, gr, d) = cr.cols[cr.i];
@@ -1843,13 +1929,46 @@ impl Sim {
                     }
                     *budget = budget.saturating_sub(work);
                 }
+                CraterStage::Tops => {
+                    if cr.i >= cr.take.len() {
+                        cr.span = (cr.top - cr.span).max(1.0);
+                        cr.i = 0;
+                        cr.stage = CraterStage::Throw;
+                        continue;
+                    }
+                    // Highest first, by height (not depth under the ground
+                    // just over it, which differs column to column: a piece
+                    // flew into the cell beside it, as high but due later,
+                    // and fell back in). (`span` holds the lowest until all
+                    // are gone through.)
+                    let end = cr.i.saturating_add((*budget / 2).max(1) as usize).min(cr.take.len());
+                    for t in &cr.take[cr.i..end] {
+                        let h = len(mid(t.0));
+                        cr.top = cr.top.max(h);
+                        cr.span = cr.span.min(h);
+                        // The highest of each column (by its place across).
+                        let e = cr.col_top.entry((t.1 / 0.7).round() as i64).or_insert(f64::MIN);
+                        *e = e.max(h);
+                    }
+                    *budget = budget.saturating_sub(2 * (end - cr.i) as u64);
+                    cr.i = end;
+                }
                 CraterStage::Throw => {
                     if cr.i >= cr.take.len() {
                         // In the order they go (a stable sort: as they were
-                        // found, among those due together).
-                        cr.out.sort_by_key(|o| o.0);
+                        // found, among those due together); a clump flies
+                        // from the middle of its cells, at their mean
+                        // velocity, as far along as they are on average.
+                        for p in cr.pieces.iter_mut() {
+                            let n = p.cells.len() as f64;
+                            p.from = (p.from.0 / n, p.from.1 / n);
+                            p.vel = (p.vel.0 / n, p.vel.1 / n);
+                            p.lead /= n;
+                        }
+                        cr.pieces.sort_by_key(|p| p.due);
                         cr.take = Vec::new();
                         cr.col_top = HashMap::new();
+                        cr.open = Default::default();
                         cr.stage = CraterStage::Ready;
                         continue;
                     }
@@ -1866,12 +1985,33 @@ impl Sim {
                     // back in).
                     let wall = (2.0 * cr.dmax * f / (if x < 0.0 { wl } else { wr })).atan().to_degrees() * 1.15;
                     let th = (82.0 - 40.0 * f).max(wall + 12.0).min(86.0);
-                    let th = (th + (u(1) - 0.5) * 12.0).clamp(wall + 6.0, 89.0).to_radians();
-                    // As fast as the blast throws it (not as far as the body's
-                    // pull would bring it back: on a small body that is a
-                    // crawl, and the rest of the blast flies out fast): the
-                    // deep ground slower.
-                    let v = 35.0 * cr.pw * (1.0 - 0.45 * q) * (0.75 + 0.5 * u(2));
+                    let th = (th + (u(1) - 0.5) * 12.0).clamp(wall + 6.0, 89.0);
+                    // That is measured from the slope; over the true level,
+                    // the ground it flies over rises at `rise` (uphill, the
+                    // slope's own angle; downhill, less than level). Kept
+                    // under 80 degrees over the level (steeper on the uphill
+                    // side of a hillside, it went up nearly straight and came
+                    // down in the crater), and under 88 even where its wall
+                    // is steeper than that.
+                    let rise = slope.atan().to_degrees() * sgn;
+                    let th = th.min((80.0 - rise).max(wall + 6.0)).min(88.0 - rise).to_radians();
+                    let (rise, lift) = (rise.to_radians(), th + rise.to_radians());
+                    // Fast in the middle, slower towards the rim
+                    // (EJECTA_RIM_SHARE), the deep ground slower again.
+                    let w = if x < 0.0 { wl } else { wr };
+                    let fast = 35.0 * cr.pw;
+                    let fall = fast * (EJECTA_RIM_SHARE + (1.0 - EJECTA_RIM_SHARE) * (1.0 - f).powf(1.5)) * (1.0 - 0.45 * q) * (0.85 + 0.3 * u(2));
+                    // But never too slow to get past the rim over the ground
+                    // as it really lies (the rule above is for level ground:
+                    // on the uphill side of a hillside the slow ground came
+                    // down short, back in the crater). Over ground rising at
+                    // `rise`, thrown at `lift` over the level, it comes down
+                    // 2 v^2 cos(lift) sin(lift - rise) / (g cos(rise))
+                    // across (measured level, as the crater's own across
+                    // is); it should get 10% past the rim, and a metre.
+                    let reach = (w - x.abs()).max(0.0) * 1.1 + 1.0;
+                    let need = (cr.pull * reach * rise.cos() / (2.0 * lift.cos().max(0.02) * th.sin().max(0.02))).sqrt();
+                    let v = fall.max(1.1 * need).min(fast);
                     let p = mid(c);
                     let pr = len(p).max(1.0);
                     let (ux, uy) = (p.0 / pr, p.1 / pr);
@@ -1884,14 +2024,45 @@ impl Sim {
                     // it, layer by layer (each on its way before the one under
                     // it goes: a jumbled order threw cells into the ground
                     // still over them, and the crater filled back in).
-                    let after = self.ticks(0.08 + 0.6 * ((cr.top - len(p)) / cr.span).clamp(0.0, 1.0));
+                    let after = self.ticks(0.08 + cr.spread * ((cr.top - len(p)) / cr.span).clamp(0.0, 1.0));
                     // It flies from the crater's mouth, over the top of its
                     // column (a piece flown from down in the hole could snag on
                     // a bit left standing or a pocket something fell into, and
                     // drop back in; flown all from one height, pieces caught
                     // on each other).
                     let up_by = cr.col_top.get(&((x / 0.7).round() as i64)).copied().unwrap_or(cr.top) - len(p) + 1.5;
-                    cr.out.push((after, c, (p.0 + nrm.0 * up_by, p.1 + nrm.1 * up_by), vel));
+                    let from = (p.0 + nrm.0 * up_by, p.1 + nrm.1 * up_by);
+                    // And it starts as far along its way as it is deep under
+                    // its column's top (the time that takes), so a column
+                    // flies off as a stream as long as it was deep; at most
+                    // half way to the top of its path.
+                    let rise_v = (vel.0 * ux + vel.1 * uy).max(0.0);
+                    let lead = ((up_by - 1.5).max(0.0) / v.max(1e-3)).min(0.5 * rise_v / cr.pull.max(1e-6));
+                    // A small crater throws its ground cell by cell; a big
+                    // one in clumps, a square of it at a time (those of its
+                    // cells that go in the same tick, up to CLUMP_MAX).
+                    let open = if cr.side > 1.0 {
+                        let key = (after, (x / cr.side).floor() as i64, ((cr.top - len(p)) / cr.side).floor() as i64);
+                        match cr.open.get(&key) {
+                            Some(&i) if cr.pieces[i].cells.len() < crate::bodies::CLUMP_MAX => Some(i),
+                            _ => {
+                                cr.open.insert(key, cr.pieces.len());
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    match open {
+                        Some(i) => {
+                            let pc = &mut cr.pieces[i];
+                            pc.cells.push(c);
+                            pc.from = (pc.from.0 + from.0, pc.from.1 + from.1);
+                            pc.vel = (pc.vel.0 + vel.0, pc.vel.1 + vel.1);
+                            pc.lead += lead;
+                        }
+                        None => cr.pieces.push(Ejecta { due: after, cells: vec![c], from, vel, lead }),
+                    }
                     cr.cells.insert(c);
                     // Its leaf of the world generated now, a budget's worth
                     // at a time, not by the first of it lifted (dozens of
@@ -1909,12 +2080,13 @@ impl Sim {
     /// cells.
     pub(super) fn crater_throw(&mut self, cr: Crater) -> CellSet {
         let now = self.tick;
-        let later = self.eject.back().is_some_and(|e| e.0 > now + cr.out.first().map_or(0, |o| o.0));
-        self.eject.extend(cr.out.into_iter().map(|(after, c, from, vel)| (now + after, c, from, vel)));
+        self.last_crater = (cr.cells.len(), cr.dmax);
+        let later = self.eject.back().is_some_and(|e| e.due > now + cr.pieces.first().map_or(0, |p| p.due));
+        self.eject.extend(cr.pieces.into_iter().map(|p| Ejecta { due: now + p.due, ..p }));
         // (Only when another crater's ground is still due later than some of
         // this one's does the queue need putting back in order.)
         if later {
-            self.eject.make_contiguous().sort_by_key(|e| e.0);
+            self.eject.make_contiguous().sort_by_key(|e| e.due);
         }
         cr.cells
     }

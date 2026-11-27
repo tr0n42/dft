@@ -654,7 +654,9 @@ fn run(shared: &Shared) {
                 if stats.director.len() != s.director_log.len() || stats.director.last() != s.director_log.back() {
                     stats.director = s.director_log.iter().cloned().collect();
                 }
-                let chunks = if s.bodies.count() > 0 { s.bodies.drawn() } else { Vec::new() };
+                // (Drops too: a blast's crater flies as drops, and with no
+                // rigid body in the air it was not drawn at all.)
+                let chunks = if s.bodies.count() > 0 || s.bodies.drops() > 0 { s.bodies.drawn() } else { Vec::new() };
                 let mother = (s.mother.centre, s.mother.half, s.mother.radius);
                 let fields = if s.fields_version != fields_seen {
                     fields_seen = s.fields_version;
