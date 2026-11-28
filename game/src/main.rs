@@ -36,9 +36,12 @@
 //!   --watch <unit>        keep the view on the first unit of a kind (forester, sapper...)
 //!   --summon <unit>       press that unit's Watch button 30 game seconds in (sapper, tunneler,
 //!                         heatsink, forester, abductor)
-//!   --test-blast <kt>     a buried charge of that yield goes off under the middle of the
-//!                         view 2 game seconds after --run-s (how big a blast the screen
-//!                         can show)
+//!   --test-blast <kt>[,<depth_m>[,conv]]
+//!                         a charge of that yield goes off under the middle of the view
+//!                         2 game seconds after --run-s: as deep as a sapper buries one,
+//!                         or depth_m under the ground (0 on the surface, less than 0 in
+//!                         the air over it); nuclear, or conventional with ",conv"
+//!                         (--test-blast 100,40,conv)
 //!   --size <w>x<h>        a window this size (default: maximized)
 //!   --windowed            a 1600x900 window rather than maximized
 //!   --continue            load the newest save (saves folder)
@@ -120,9 +123,9 @@ pub struct Options {
     pub watch: Option<String>,
     /// Press this unit's Watch button 30 game seconds in (--summon sapper).
     pub summon: Option<String>,
-    /// A buried charge of this many kt under the middle of the view, 2 game
-    /// seconds after --run-s (--test-blast 100).
-    pub test_blast: Option<f64>,
+    /// A charge under the middle of the view, 2 game seconds after --run-s
+    /// (--test-blast 100, or 100,40,conv: 100 kt, 40 m down, conventional).
+    pub test_blast: Option<sim::TestBlast>,
     /// Blocks drawn the 5 Nov way (--old-look), for comparison.
     pub old_look: bool,
     pub size: (u32, u32),
@@ -270,7 +273,7 @@ impl Options {
                 "--film" => o.film = Some(val(i)?.parse().map_err(|_| "--film takes seconds")?),
                 "--watch" => o.watch = Some(val(i)?),
                 "--summon" => o.summon = Some(val(i)?),
-                "--test-blast" => o.test_blast = Some(val(i)?.parse().map_err(|_| "--test-blast takes kilotons")?),
+                "--test-blast" => o.test_blast = Some(sim::TestBlast::parse(&val(i)?)?),
                 "--old-look" => {
                     o.old_look = true;
                     used = 1;

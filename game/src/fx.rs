@@ -79,23 +79,23 @@ struct Queue {
     new: Vec<Bit>,
     rng: u64,
     /// A white flash over the whole screen, and the screen shaking (pixels),
-    /// each dying away.
-    flash: f32,
-    shake: f32,
+    /// this frame (see `flash_now`).
+    flash_now: f32,
+    shake_now: f32,
 }
 
-static QUEUE: Mutex<Queue> = Mutex::new(Queue { lights: Vec::new(), glows: Vec::new(), new: Vec::new(), rng: 0x5EED, flash: 0.0, shake: 0.0 });
+static QUEUE: Mutex<Queue> = Mutex::new(Queue { lights: Vec::new(), glows: Vec::new(), new: Vec::new(), rng: 0x5EED, flash_now: 0.0, shake_now: 0.0 });
 
-/// A white flash over the whole screen (0 to 1), dying away.
-pub fn flash(f: f32) {
+/// A white flash over the whole screen (0 to 1) and the screen shaking (up
+/// to `s` pixels), this frame only, at least `f` and `s`: what makes them
+/// (a charge going off) sets them every frame as they die away by the game's
+/// clock. (Set once and dying away by the real clock, a charge's flash was
+/// gone before its fireball had grown when slowed down, and lingered after
+/// it when sped up.)
+pub fn flash_now(f: f32, s: f32) {
     let mut q = QUEUE.lock().unwrap();
-    q.flash = q.flash.max(f);
-}
-
-/// The screen shakes (up to `s` pixels), dying away.
-pub fn shake(s: f32) {
-    let mut q = QUEUE.lock().unwrap();
-    q.shake = q.shake.max(s);
+    q.flash_now = q.flash_now.max(f);
+    q.shake_now = q.shake_now.max(s);
 }
 
 fn rand(q: &mut Queue) -> f64 {
@@ -192,16 +192,16 @@ fn up_of(x: f64, y: f64) -> (f64, f64) {
 #[derive(Component)]
 struct Flash;
 
-/// The flash over the screen and the camera's shake, dying away (the
-/// proving ground's: flash -3 a second, shake -18 pixels a second).
-fn flash_and_shake(mut commands: Commands, time: Res<Time<Real>>, view: Res<View>, mut cams: Query<&mut Transform, (With<Camera2d>, Without<Flash>)>, mut flashes: Query<(&mut Sprite, &mut Transform, &mut Visibility), With<Flash>>) {
-    let dt = time.delta_secs().min(0.05);
+/// The flash over the screen and the camera's shake this frame (see
+/// `flash_now`; as they die away is up to what sets them).
+fn flash_and_shake(mut commands: Commands, view: Res<View>, mut cams: Query<&mut Transform, (With<Camera2d>, Without<Flash>)>, mut flashes: Query<(&mut Sprite, &mut Transform, &mut Visibility), With<Flash>>) {
     let (f, s, j) = {
         let mut q = QUEUE.lock().unwrap();
-        q.flash = (q.flash - dt * 3.0).max(0.0);
-        q.shake = (q.shake - dt * 18.0).max(0.0);
         let (a, b) = (rand(&mut q) as f32 - 0.5, rand(&mut q) as f32 - 0.5);
-        (q.flash, q.shake, (a, b))
+        let (f, s) = (q.flash_now, q.shake_now);
+        q.flash_now = 0.0;
+        q.shake_now = 0.0;
+        (f, s, (a, b))
     };
     for mut tf in cams.iter_mut() {
         tf.translation.x = j.0 * s;

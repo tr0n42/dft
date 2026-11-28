@@ -42,9 +42,42 @@ pub struct Control {
     /// Make one of these now, free, to watch it (the Watch panel); the
     /// answer comes back in `Out::summoned`.
     pub summon: Option<dft_sim::production::Unit>,
-    /// A test blast of this many kt under the middle of the view (--test-blast).
-    pub blast: Option<f64>,
+    /// A test blast under the middle of the view (--test-blast).
+    pub blast: Option<TestBlast>,
     pub quit: bool,
+}
+
+/// A test charge (--test-blast): how big (kt), how deep (m under the
+/// ground; 0 on the surface, less than 0 in the air; None, as deep as a
+/// sapper buries one), and whether it is conventional rather than nuclear.
+#[derive(Clone, Copy, Debug)]
+pub struct TestBlast {
+    pub kt: f64,
+    pub depth_m: Option<f64>,
+    pub conventional: bool,
+}
+
+impl TestBlast {
+    /// From the option's text: `<kt>[,<depth_m>[,conv]]`.
+    pub fn parse(s: &str) -> Result<TestBlast, String> {
+        let bad = || format!("--test-blast takes kt[,depth_m[,conv]], not {s}");
+        let mut parts = s.split(',').map(str::trim);
+        let kt: f64 = parts.next().and_then(|p| p.parse().ok()).filter(|k: &f64| *k > 0.0).ok_or_else(bad)?;
+        let depth_m = match parts.next() {
+            None | Some("") => None,
+            Some(p) => Some(p.parse::<f64>().map_err(|_| bad())?),
+        };
+        let conventional = match parts.next() {
+            None => false,
+            Some(p) if p.eq_ignore_ascii_case("conv") || p.eq_ignore_ascii_case("conventional") => true,
+            Some(p) if p.eq_ignore_ascii_case("nuclear") || p.eq_ignore_ascii_case("nuke") => false,
+            Some(_) => return Err(bad()),
+        };
+        if parts.next().is_some() {
+            return Err(bad());
+        }
+        Ok(TestBlast { kt, depth_m, conventional })
+    }
 }
 
 /// The numbers the dev panel shows.
@@ -192,8 +225,15 @@ pub struct Out {
     pub booms: Vec<dft_sim::swarm::Boom>,
     /// Sapper plumes (where, how hard), for the dust columns.
     pub plumes: Vec<(f64, f64, f32)>,
-    /// Animals burst by abductors' lasers (where, kg), for the red bursts.
+    /// Animals burst by abductors' lasers or flung by a blast (where, kg),
+    /// for the red bursts.
     pub gore: Vec<(f64, f64, f32)>,
+    /// Blasts' domes bursting, not yet shown (drawn by the game's clock).
+    pub vents: Vec<dft_sim::swarm::Vent>,
+    /// Machines blasts' air blasts throw, and blasts' base surges, not yet
+    /// shown (drawn by the game's clock).
+    pub pushes: Vec<dft_sim::swarm::Push>,
+    pub surges: Vec<dft_sim::swarm::Surge>,
     /// The ground's height round the body (see Sim::ground_heights), and
     /// which sweep it is from.
     pub heights: Option<(u64, Arc<Vec<f32>>)>,
@@ -203,7 +243,10 @@ pub struct Out {
     /// Happenings the camera director hasn't seen yet.
     pub happenings: Vec<(dft_sim::swarm::Happening, f64, f64)>,
     /// Cells of rock in the air (chunks cut free), and their materials.
-    pub chunks: Vec<dft_sim::bodies::AirCell>,
+    /// (Shared, not copied: the game reads them every frame, and a big
+    /// blast's dome is hundreds of thousands of cells; copied, they took
+    /// 17 ms a frame. 27 Nov.)
+    pub chunks: std::sync::Arc<Vec<dft_sim::bodies::AirCell>>,
     /// The flocks' flow fields (drones on screen fly along them), with the
     /// simulation's count of rebuilds when they were taken.
     /// (By flock: a drone's leg names its flock's.)
@@ -503,10 +546,11 @@ fn run(shared: &Shared) {
             }
             let blast = {
                 let mut c = shared.control.lock();
-                c.blast.take().map(|kt| (kt, c.attention))
+                c.blast.take().map(|b| (b, c.attention))
             };
-            if let Some((kt, Some(Some([x0, x1, y0, y1])))) = blast {
-                s.test_blast((((x0 + x1) / 2) as f64, ((y0 + y1) / 2) as f64), kt);
+            if let Some((b, Some(Some([x0, x1, y0, y1])))) = blast {
+                let depth = b.depth_m.unwrap_or_else(|| s.test_blast_depth(b.kt));
+                s.test_blast_at((((x0 + x1) / 2) as f64, ((y0 + y1) / 2) as f64), b.kt, depth, b.conventional);
             }
             // The molten rock's heat round the view, a few times a second,
             // close enough in to see it.
@@ -673,6 +717,9 @@ fn run(shared: &Shared) {
                 let mut booms = s.take_booms();
                 let mut plumes = std::mem::take(&mut s.plumes);
                 let mut gore = std::mem::take(&mut s.gore);
+                let mut vents = std::mem::take(&mut s.vents);
+                let mut pushes = std::mem::take(&mut s.pushes);
+                let mut surges = std::mem::take(&mut s.surges);
                 let mut happenings = s.take_happenings();
                 // The screen's copy of the ground: the leaves changed since,
                 // then a few hundred of those waiting, nearest the view first.
@@ -809,10 +856,19 @@ fn run(shared: &Shared) {
                 if out.gore.len() < 200 {
                     out.gore.append(&mut gore);
                 }
+                if out.vents.len() < 200 {
+                    out.vents.append(&mut vents);
+                }
+                if out.pushes.len() < 200_000 {
+                    out.pushes.append(&mut pushes);
+                }
+                if out.surges.len() < 200 {
+                    out.surges.append(&mut surges);
+                }
                 if out.booms.len() < 2000 {
                     out.booms.append(&mut booms);
                 }
-                out.chunks = chunks;
+                out.chunks = std::sync::Arc::new(chunks);
                 if let Some(f) = fields {
                     out.fields = f;
                     out.fields_version = fields_seen;

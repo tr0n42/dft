@@ -36,8 +36,8 @@ pub struct Fleet {
     pub legs: Vec<Leg>,
     pub paths: PathIndex,
     pub clock: f64,
-    /// Buried blasts lately (where, how far they reach (m), when, real s):
-    /// the fog is lifted round them while they glow.
+    /// Buried blasts lately (where, how far they reach (m), when they went
+    /// off, game s): the fog is lifted round them while they glow.
     pub blasts: Vec<(f64, f64, f64, f64)>,
     /// The moment drawn last frame (None at first).
     prev_clock: Option<f64>,
@@ -119,6 +119,56 @@ struct DrawMem {
     shoves: Shoves,
     /// Drones flying back onto their path after it changed (see `Catch`).
     catch: std::collections::HashMap<u32, Catch>,
+    /// Machines thrown by a blast's air blast, by kind and number (see
+    /// `Blown`).
+    blown: std::collections::HashMap<(u8, u32), Blown>,
+}
+
+/// A machine a blast's air blast throws (the simulation's `Push`): from the
+/// moment the front gets to it (game time `t0`), it is drawn thrown `dist`
+/// m along `dir`, leaving at `speed` and slowing to a stop there, then flying
+/// back to where the simulation has it at `back` m/s.
+#[derive(Clone, Copy)]
+struct Blown {
+    dir: (f64, f64),
+    dist: f64,
+    speed: f64,
+    back: f64,
+    t0: f64,
+}
+
+impl Blown {
+    fn from(p: &dft_sim::swarm::Push) -> Blown {
+        let (dx, dy) = (p.dx as f64, p.dy as f64);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let l = dist.max(1e-9);
+        Blown { dir: (dx / l, dy / l), dist, speed: (p.speed as f64).max(1.0), back: (p.back as f64).max(1.0), t0: p.t }
+    }
+
+    /// How long it takes to get out there (s): slowing evenly to a stop.
+    fn out_s(&self) -> f64 {
+        2.0 * self.dist / self.speed
+    }
+
+    /// How far it is off its place at game time t.
+    fn at(&self, t: f64) -> (f64, f64) {
+        let dt = t - self.t0;
+        if dt <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let out = self.out_s();
+        let d = if dt < out {
+            let q = 1.0 - dt / out;
+            self.dist * (1.0 - q * q)
+        } else {
+            (self.dist - (dt - out) * self.back).max(0.0)
+        };
+        (self.dir.0 * d, self.dir.1 * d)
+    }
+
+    fn done(&self, t: f64) -> bool {
+        t - self.t0 > self.out_s() + self.dist / self.back
+    }
 }
 
 /// A drone whose path changed under it (sent home early as its flock came
@@ -435,7 +485,9 @@ fn draw(
     mut perf: ResMut<crate::log::Perf>,
     mut grid: Local<Grid>,
     body: Res<crate::Body>,
-    mut shown: Local<Vec<(dft_sim::swarm::Boom, f64)>>,
+    mut shown: Local<Vec<(dft_sim::swarm::Boom, f64, bool)>>,
+    mut vents: Local<Vec<(dft_sim::swarm::Vent, bool)>>,
+    mut surges: Local<Vec<dft_sim::swarm::Surge>>,
     time: Res<Time<Real>>,
     swarm: Res<crate::swarmview::SwarmNow>,
     lights: Res<crate::lights::Lights>,
@@ -450,11 +502,18 @@ fn draw(
     let shape = swarm.0;
     // Zoomed out this far, each flock is drawn as one mark (see ICON_MPP).
     let icons = view.mpp >= ICON_MPP;
-    let (now, haulers, units, (chunks, chunks_t), new_booms, recent, heights, flocks) = {
+    let (now, haulers, mut units, (chunks, chunks_t), new_booms, recent, heights, flocks) = {
         let mut out = run.0.out.lock();
         if let Some(v) = out.leg_full.take() {
             fleet.legs = v;
             mem.catch.clear();
+        }
+        // Machines a blast's air blast throws (a later throw of the same
+        // one replaces an earlier).
+        for p in std::mem::take(&mut out.pushes) {
+            if mem.blown.len() < 300_000 {
+                mem.blown.insert((p.kind, p.id), Blown::from(&p));
+            }
         }
         let changes = std::mem::take(&mut out.leg_changes);
         for (i, leg) in changes {
@@ -505,10 +564,22 @@ fn draw(
     let chunk = 16384;
     let mut lists: [Vec<[f32; 3]>; 6] = std::array::from_fn(|i| meshes.get_mut(&meshes_r.kinds[i]).map(|mut mm| take_positions(&mut *mm)).unwrap_or_default());
     let shape = &shape;
-    // (Drones done flying back onto their paths are on them again.)
+    // (Drones done flying back onto their paths are on them again; so are
+    // machines thrown by a blast, and none is thrown from before the clock
+    // went back, a save loaded.)
     mem.catch.retain(|_, c| !c.done(now));
+    let clock_back = fleet.prev_clock.is_some_and(|p| now < p - 1.0);
+    mem.blown.retain(|_, b| !clock_back && !b.done(now));
     let catch = &mem.catch;
+    let blown = &mem.blown;
     let caught = |id: usize, p: (f64, f64)| -> (f64, f64) {
+        let p = match (blown.is_empty(), blown.get(&(0, id as u32))) {
+            (false, Some(b)) => {
+                let o = b.at(now);
+                (p.0 + o.0, p.1 + o.1)
+            }
+            _ => p,
+        };
         if catch.is_empty() {
             return p;
         }
@@ -717,48 +788,99 @@ fn draw(
         // left it jumped along at that rate (Benjamin, 27 Nov). (Never more
         // than a few ticks either way, should the clocks part.)
         let ahead = (now - chunks_t).clamp(-0.3, 0.3);
-        let moved: Vec<dft_sim::bodies::AirCell> = chunks
-            .iter()
-            .map(|a| dft_sim::bodies::AirCell { x: a.x + a.vx as f64 * ahead, y: a.y + a.vy as f64 * ahead, angle: a.angle + a.spin * ahead as f32, ..*a })
-            .collect();
-        let on_screen: Vec<&dft_sim::bodies::AirCell> = moved.iter().filter(|a| a.x > l - 2.0 && a.x < r + 2.0 && a.y > b - 2.0 && a.y < t + 2.0).collect();
-        let mut n = 1usize;
-        while n < 8 && (n * 2) as f32 <= ppm && on_screen.len() * (n * 2) * (n * 2) <= 150_000 {
-            n *= 2;
-        }
-        let homes: std::collections::HashMap<(i64, i64), dft_sim::materials::MatId> = if n >= 4 { on_screen.iter().map(|a| (a.home, a.m)).collect() } else { Default::default() };
+        let moved = |a: &dft_sim::bodies::AirCell| dft_sim::bodies::AirCell { x: a.x + a.vx as f64 * ahead, y: a.y + a.vy as f64 * ahead, angle: a.angle + a.spin * ahead as f32, ..*a };
+        let inside = |a: &dft_sim::bodies::AirCell| a.x > l - 2.0 && a.x < r + 2.0 && a.y > b - 2.0 && a.y < t + 2.0;
         let h = (0.5 * ppm).max(0.5);
-        for a in on_screen {
-            let base = *air.colour.entry((a.home, a.m)).or_insert_with(|| {
-                let (fx, fy) = (a.home.0 as f64 + 0.5, a.home.1 as f64 + 0.5);
-                let rr = (fx * fx + fy * fy).sqrt().max(1e-9);
-                dft_sim::render::colour_at(p, a.m, a.home.0, a.home.1, p.surface_radius(fx / rr, fy / rr))
-            });
-            let c = v.to_screen(a.x, a.y);
-            if n == 1 {
-                let k = rgb(base[0], base[1], base[2]);
-                rot_square(&mut pos, c.x, c.y, h, a.angle, -0.5, -0.5, 1.0);
-                col.extend_from_slice(&[k; 6]);
-                continue;
-            }
-            let kind = air.kinds.get(a.m as usize).copied().unwrap_or(tx::Kind::Rock);
-            let (hx, hy) = a.home;
-            let sides = if n >= 4 {
-                let ns = [(hx, hy + 1), (hx, hy - 1), (hx - 1, hy), (hx + 1, hy)];
-                Sides { open: ns.map(|q| !homes.contains_key(&q)), other: ns.map(|q| homes.get(&q) != Some(&a.m)) }
-            } else {
-                Sides::default()
-            };
-            let f = 1.0 / n as f32;
-            for j in 0..n {
-                for i in 0..n {
-                    let (u, w) = ((i as f64 + 0.5) / n as f64, (j as f64 + 0.5) / n as f64);
-                    let tc = tx::texel(kind, base, hx, hy, u, w, n as f64, sides);
-                    rot_square(&mut pos, c.x, c.y, h, a.angle, -0.5 + i as f32 * f, -0.5 + j as f32 * f, f);
-                    col.extend_from_slice(&[rgb(tc[0], tc[1], tc[2]); 6]);
-                }
+        // How finely each is drawn needs how many are in sight, counted
+        // only when close enough in for more than a block a cell.
+        let mut n = 1usize;
+        let mut on_screen: Vec<dft_sim::bodies::AirCell> = Vec::new();
+        if ppm >= 2.0 {
+            on_screen = chunks.iter().map(moved).filter(inside).collect();
+            while n < 8 && (n * 2) as f32 <= ppm && on_screen.len() * (n * 2) * (n * 2) <= 150_000 {
+                n *= 2;
             }
         }
+        // The cells drawn on all cores, each moved on, kept if in sight,
+        // coloured (from those worked out before; any new worked out there
+        // and kept after) and drawn in one go. (A big blast's dome holds some
+        // 80,000 cells in sight for 14 s: gone through in turn, moved, kept,
+        // coloured and drawn one step after another, they took 15 ms a
+        // frame; 27 Nov.)
+        let (colour, kinds, view) = (&air.colour, &air.kinds, &v);
+        type Part = (Vec<[f32; 3]>, Vec<[f32; 4]>, Vec<(((i64, i64), dft_sim::materials::MatId), [u8; 3])>);
+        let colour_of = |a: &dft_sim::bodies::AirCell, new: &mut Vec<(((i64, i64), dft_sim::materials::MatId), [u8; 3])>| -> [u8; 3] {
+            if let Some(&c) = colour.get(&(a.home, a.m)) {
+                return c;
+            }
+            let (fx, fy) = (a.home.0 as f64 + 0.5, a.home.1 as f64 + 0.5);
+            let rr = (fx * fx + fy * fy).sqrt().max(1e-9);
+            let c = dft_sim::render::colour_at(p, a.m, a.home.0, a.home.1, p.surface_radius(fx / rr, fy / rr));
+            new.push(((a.home, a.m), c));
+            c
+        };
+        let parts: Vec<Part> = {
+            use rayon::prelude::*;
+            if n == 1 {
+                chunks
+                    .par_chunks(4096)
+                    .map(|cells| {
+                        let (mut pos, mut col, mut new) = (Vec::with_capacity(cells.len() * 6), Vec::with_capacity(cells.len() * 6), Vec::new());
+                        for a in cells {
+                            let a = moved(a);
+                            if !inside(&a) {
+                                continue;
+                            }
+                            let base = colour_of(&a, &mut new);
+                            let c = view.to_screen(a.x, a.y);
+                            rot_square(&mut pos, c.x, c.y, h, a.angle, -0.5, -0.5, 1.0);
+                            col.extend_from_slice(&[rgb(base[0], base[1], base[2]); 6]);
+                        }
+                        (pos, col, new)
+                    })
+                    .collect()
+            } else {
+                let homes: std::collections::HashMap<(i64, i64), dft_sim::materials::MatId> = if n >= 4 { on_screen.iter().map(|a| (a.home, a.m)).collect() } else { Default::default() };
+                on_screen
+                    .par_chunks(1024)
+                    .map(|cells| {
+                        let (mut pos, mut col, mut new) = (Vec::with_capacity(cells.len() * 6 * n * n), Vec::with_capacity(cells.len() * 6 * n * n), Vec::new());
+                        for a in cells {
+                            let base = colour_of(a, &mut new);
+                            let c = view.to_screen(a.x, a.y);
+                            let kind = kinds.get(a.m as usize).copied().unwrap_or(tx::Kind::Rock);
+                            let (hx, hy) = a.home;
+                            let sides = if n >= 4 {
+                                let ns = [(hx, hy + 1), (hx, hy - 1), (hx - 1, hy), (hx + 1, hy)];
+                                Sides { open: ns.map(|q| !homes.contains_key(&q)), other: ns.map(|q| homes.get(&q) != Some(&a.m)) }
+                            } else {
+                                Sides::default()
+                            };
+                            let f = 1.0 / n as f32;
+                            for j in 0..n {
+                                for i in 0..n {
+                                    let (u, w) = ((i as f64 + 0.5) / n as f64, (j as f64 + 0.5) / n as f64);
+                                    let tc = tx::texel(kind, base, hx, hy, u, w, n as f64, sides);
+                                    rot_square(&mut pos, c.x, c.y, h, a.angle, -0.5 + i as f32 * f, -0.5 + j as f32 * f, f);
+                                    col.extend_from_slice(&[rgb(tc[0], tc[1], tc[2]); 6]);
+                                }
+                            }
+                        }
+                        (pos, col, new)
+                    })
+                    .collect()
+            }
+        };
+        let total: usize = parts.iter().map(|q| q.0.len()).sum();
+        pos.reserve(total);
+        col.reserve(total);
+        let mut fresh = Vec::new();
+        for (pp, cc, nn) in parts {
+            pos.extend_from_slice(&pp);
+            col.extend_from_slice(&cc);
+            fresh.extend(nn);
+        }
+        air.colour.extend(fresh);
         if pos.is_empty() {
             pos.extend_from_slice(&[[0.0; 3]; 3]);
             col.extend_from_slice(&[[0.0; 4]; 3]);
@@ -796,6 +918,14 @@ fn draw(
         let mut placed: Vec<(usize, f64, f64, f32)> = Vec::new();
         for (k, hl) in haulers.iter().enumerate() {
             let (x, y) = hl.at(now);
+            // (Thrown by a blast's air blast, and flying back.)
+            let (x, y) = match blown.get(&(1, hl.id)) {
+                Some(bl) => {
+                    let o = bl.at(now);
+                    (x + o.0, y + o.1)
+                }
+                None => (x, y),
+            };
             if x < l - near || x > r + near || y < b - near || y > t + near {
                 continue;
             }
@@ -1017,6 +1147,23 @@ fn draw(
             let m = mirror.get(x, y).unwrap_or_else(|| body.0.material(x, y));
             m != dft_sim::materials::VACUUM && !flora.get(m as usize).copied().unwrap_or(false)
         };
+        // Walkers thrown by a blast's air blast, body, legs and all.
+        if !blown.is_empty() {
+            for u in units.0.iter_mut().filter(|u| matches!(u.kind, dft_sim::production::Unit::Forester | dft_sim::production::Unit::Abductor)) {
+                if let Some(bl) = blown.get(&(2, u.id)) {
+                    let o = bl.at(now);
+                    let sh = |p: &mut (f64, f64)| {
+                        p.0 += o.0;
+                        p.1 += o.1;
+                    };
+                    sh(&mut u.from);
+                    sh(&mut u.to);
+                    sh(&mut u.mark);
+                    sh(&mut u.claw);
+                    sh(&mut u.sweep_from);
+                }
+            }
+        }
         crate::units::draw(&units.0, now, real_t, &v, [l, b, r, t], cell_px, lc, &solid, &mut pos, &mut col);
         crate::units::draw_animals(&units.1, now, real_t, &v, [l, b, r, t], cell_px, &mut pos, &mut col);
         drop(mirror);
@@ -1042,30 +1189,91 @@ fn draw(
     // dust racing out along the shock; embers arcing away and falling back,
     // trailing; and a scatter of the swarm's own lights from the wreckage.
     // The bigger the blast, the more of all of it, and the longer it lasts.
-    for b in new_booms {
-        let (vl, vb, vr, vt) = v.bounds();
-        // Only a blast the player can see flashes and shakes the screen;
-        // anywhere else the physics just runs.
-        let near = b.x > vl && b.x < vr && b.y > vb && b.y < vt;
-        if b.buried {
-            fleet.blasts.push((b.x, b.y, b.size_m as f64, real));
+    // (When the clock drawn goes back, a save loaded or a new body, buried
+    // blasts still waiting for it are from the time before.)
+    let back = fleet.prev_clock.is_some_and(|p| now < p - 1.0);
+    shown.retain(|(bm, at, _)| {
+        if bm.buried {
+            !back && now - bm.t < BURIED_LIFE_S.max(ground_ring_life(bm))
+        } else if open_charge(bm) {
+            !back && now - bm.t < boom_life(bm.size_m).max(fireball_life(bm)).max(ground_ring_life(bm))
+        } else {
+            real - at < boom_life(bm.size_m)
         }
-        if b.buried && near {
+    });
+    fleet.blasts.retain(|b| !back && now - b.3 < BURIED_LIFE_S);
+    for b in new_booms {
+        if b.buried {
+            fleet.blasts.push((b.x, b.y, b.size_m as f64, b.t));
+        }
+        if shown.len() < 600 {
+            shown.push((b, real, false));
+        }
+    }
+    // Domes bursting, drawn by the game's clock too (see below).
+    vents.retain(|(vn, _)| !back && now - vn.t < vent_life(vn.size_m));
+    for vn in std::mem::take(&mut run.0.out.lock().vents) {
+        if vents.len() < 100 {
+            vents.push((vn, false));
+        }
+    }
+    // Base surges, by the game's clock too.
+    surges.retain(|sg| !back && now - sg.t < sg.life_s as f64);
+    for sg in std::mem::take(&mut run.0.out.lock().surges) {
+        if surges.len() < 50 {
+            surges.push(sg);
+        }
+    }
+    // A charge (buried, or in the open) is drawn by the game's own clock from
+    // the moment it went off (`Boom::t`), as the simulation works it out, so
+    // its flash, shock ring, fireball and glow keep step with the ground at
+    // any game speed. (It can come in a moment before the clock drawn gets
+    // there: it then waits.)
+    let (vl, vb, vr, vt) = v.bounds();
+    for (b, _, fired) in shown.iter_mut() {
+        if !(b.buried || open_charge(b)) || now < b.t {
+            continue;
+        }
+        let first = !*fired;
+        *fired = true;
+        // Only a blast the player can see (or its fireball) flashes and
+        // shakes the screen; anywhere else the physics just runs.
+        let m = b.fireball_m as f64;
+        if !(b.x > vl - m && b.x < vr + m && b.y > vb - m && b.y < vt + m) {
+            continue;
+        }
+        let kt = (b.size_m as f64 / 2.2 / 14.0).powi(3);
+        if first {
             // Hot flecks thrown out of the broken rock.
             crate::fx::spark(b.x, b.y, 50, [255.0, 200.0, 120.0], 45.0);
             crate::fx::spark(b.x, b.y, 14, [150.0, 255.0, 90.0], 30.0);
-            // A charge going off underground: a white flash over everything,
-            // the screen shaking (the proving ground's flash and shake).
-            let kt = (b.size_m as f64 / 2.2 / 14.0).powi(3);
-            crate::fx::flash((0.35 + (kt + 1.0).log10() * 0.22).min(1.0) as f32);
-            crate::fx::shake((3.0 + 5.0 * (kt * 10.0 + 1.0).log10()).min(22.0) as f32);
         }
-        if shown.len() < 600 {
-            shown.push((b, real));
+        // How bright its flash is and how hard the screen shakes, each
+        // dying away by the game's clock (at normal speed as fast as the
+        // proving ground's, by 3 and 18 pixels a second), set every frame.
+        let (fl, sh, fl_s) = if b.buried {
+            // A charge going off underground: a white flash over
+            // everything, the screen shaking (the proving ground's flash
+            // and shake); a conventional charge's flash is small.
+            let k = if b.nuclear { 1.0 } else { 0.45 };
+            let f = (0.35 + (kt + 1.0).log10() * 0.22).min(1.0) * k;
+            (f, (3.0 + 5.0 * (kt * 10.0 + 1.0).log10()).min(22.0), f / 3.0)
+        } else if b.nuclear {
+            // A nuclear charge in the open: its flash whites out
+            // everything, while its fireball grows (at most 1.5 s).
+            (1.0, (6.0 + 8.0 * (kt * 10.0 + 1.0).log10()).min(30.0), (1.0f64 / 3.0).max((b.fireball_s as f64).min(1.5)))
+        } else {
+            // A conventional one's flash is small and short.
+            let f = (0.25 + (kt + 1.0).log10() * 0.1).min(0.5);
+            (f, (4.0 + 6.0 * (kt * 10.0 + 1.0).log10()).min(26.0), f / 3.0)
+        };
+        let age = now - b.t;
+        let f = fl * (1.0 - age / fl_s).max(0.0);
+        let s = sh * (1.0 - age / (sh / 18.0)).max(0.0);
+        if f > 0.0 || s > 0.0 {
+            crate::fx::flash_now(f as f32, s as f32);
         }
     }
-    shown.retain(|(bm, at)| real - at < if bm.buried { BURIED_LIFE_S } else { boom_life(bm.size_m) });
-    fleet.blasts.retain(|b| real - b.3 < BURIED_LIFE_S);
     if let Some(mut mm) = meshes.get_mut(&meshes_r.booms) {
         let mut pos = take_positions(&mut mm);
         let mut col = Vec::new();
@@ -1095,11 +1303,106 @@ fn draw(
             }
             stops[5].1
         };
-        for (bm, at) in shown.iter() {
+        // The ground's height by direction (m from the centre), where the
+        // simulation has sent it.
+        let ground_at = |a: f64| -> Option<f64> {
+            let h = heights.as_ref()?;
+            let n = h.len();
+            if n == 0 {
+                return None;
+            }
+            let tt = (a.rem_euclid(std::f64::consts::TAU) / std::f64::consts::TAU) * n as f64;
+            let i = tt.floor() as usize % n;
+            let f = tt - tt.floor();
+            Some(h[i] as f64 * (1.0 - f) + h[(i + 1) % n] as f64 * f)
+        };
+        let under = |x: f64, y: f64| ground_at(y.atan2(x)).is_some_and(|g| x.hypot(y) < g);
+        for (bm, at, _) in shown.iter() {
             let size = bm.size_m.max(2.0) as f64;
             let life = boom_life(bm.size_m);
-            let age = real - at;
-            let reach = size * 3.0 + 60.0;
+            let age = if bm.buried || open_charge(bm) { now - bm.t } else { real - at };
+            if age < 0.0 {
+                continue;
+            }
+            // What runs out along the ground, by the game's clock (drawn
+            // first: it reaches far past the rest).
+            if budget > 0 {
+                let start = pos.len();
+                // A charge's air blast (on a body with air): a low wall of
+                // dust running out along the ground either side at the speed
+                // of sound, from when and where its front leaves (over a
+                // charge in the air, from where the front first meets the
+                // ground), thinning as it weakens, as the simulation has it
+                // blow machines and plants away, out to where it no longer
+                // moves them (`Boom::air_m`; kilometres at 10 kt).
+                let air_m = bm.air_m as f64;
+                let ar = AIR_SOUND_MPS * (age - bm.air_t as f64);
+                if air_m > 0.0 && ar > 0.0 && ar < air_m {
+                    let a0 = bm.air_y.atan2(bm.air_x);
+                    let r0 = bm.air_x.hypot(bm.air_y).max(1.0);
+                    let h = (r0 - ground_at(a0).unwrap_or(r0)).max(0.0);
+                    if ar > h {
+                        let x = (ar * ar - h * h).sqrt();
+                        let q = ar / air_m;
+                        let alpha = (0.65 * (1.0 - q).powf(0.7)) as f32;
+                        let m = (ar * 0.004).clamp(1.0, 6.0) as f32;
+                        let tall = 1.5 + 0.012 * x.min(2_000.0);
+                        let trail = 2.0 + 0.03 * x.min(2_000.0);
+                        let seed = dft_sim::noise::hash((bm.x * 8.0) as i64 as u64, (bm.y * 8.0) as i64, (bm.t * 10.0) as i64, 0xA1_2B);
+                        for (k, side) in [-1.0f64, 1.0].into_iter().enumerate() {
+                            let ga = a0 + side * x / r0;
+                            let g = ground_at(ga).unwrap_or(r0);
+                            let (cx, cy) = (ga.cos() * g, ga.sin() * g);
+                            if cx < l - 60.0 || cx > r + 60.0 || cy < b - 60.0 || cy > t + 60.0 {
+                                continue;
+                            }
+                            // Thickest at its front, trailing back a little.
+                            for i in 0..40u64 {
+                                let un = |j: u64| crate::rnd::unit(seed, k as u64 * 1000 + i * 4 + j);
+                                let back = un(0) * un(0) * trail;
+                                let up = un(1) * tall * (1.0 - 0.6 * back / trail);
+                                let gb = ga - side * back / r0;
+                                let gg = ground_at(gb).unwrap_or(r0) + up + 0.5;
+                                let tint = 0.9 + 0.2 * un(2) as f32;
+                                block(&mut pos, &mut col, gb.cos() * gg, gb.sin() * gg, m, [0.66 * tint, 0.62 * tint, 0.56 * tint, alpha * (1.0 - 0.5 * (up / tall) as f32)]);
+                            }
+                        }
+                    }
+                }
+                // A buried charge on a body with no air (no air blast to
+                // draw): dust thrown up off the jumping ground as the shock
+                // gets to each place (`Boom::spall_m` either side), settling
+                // out over a second and a half. (The ground itself flies as
+                // the simulation throws it.)
+                let sd = age - bm.t_surface as f64;
+                if bm.buried && air_m <= 0.0 && bm.spall_m > 0.0 && sd >= 0.0 && sd < SPALL_DUST_S {
+                    let rr = (bm.x * bm.x + bm.y * bm.y).sqrt().max(1.0);
+                    let a0 = bm.y.atan2(bm.x);
+                    let g0 = rr + bm.depth_m.max(0.0) as f64;
+                    let d = bm.depth_m.max(0.0) as f64;
+                    let sr = bm.shock_mps as f64 * age;
+                    let front = if sr > d { (sr * sr - d * d).sqrt().min(bm.spall_m as f64) } else { 0.0 };
+                    let (cx, cy) = (a0.cos() * g0, a0.sin() * g0);
+                    let span = bm.spall_m as f64 + 30.0;
+                    if front > 0.0 && cx > l - span && cx < r + span && cy > b - span && cy < t + span {
+                        let fade = (1.0 - sd / SPALL_DUST_S) as f32;
+                        let seed = dft_sim::noise::hash((bm.x * 8.0) as i64 as u64, (bm.y * 8.0) as i64, (bm.t * 10.0) as i64, 0x5BA1);
+                        let n = ((front * 0.8) as usize).clamp(12, 600);
+                        let m = (bm.spall_m * 0.008).clamp(1.0, 4.0);
+                        for i in 0..n as u64 {
+                            let un = |j: u64| crate::rnd::unit(seed, i * 4 + j);
+                            let x = (un(0) * 2.0 - 1.0) * front;
+                            let ga = a0 + x / g0;
+                            let rise = un(1) * (1.0 + 6.0 * sd) * (1.0 - x.abs() / (bm.spall_m as f64 + 1.0)).max(0.2);
+                            let gg = ground_at(ga).unwrap_or(g0) + rise + 0.5;
+                            let tint = 0.85 + 0.25 * un(2) as f32;
+                            block(&mut pos, &mut col, ga.cos() * gg, ga.sin() * gg, m, [0.55 * tint, 0.52 * tint, 0.48 * tint, 0.5 * fade * (0.5 + 0.5 * un(3) as f32)]);
+                        }
+                    }
+                }
+                budget = budget.saturating_sub((pos.len() - start) / 6);
+            }
+            let reach = (size * 3.0 + 60.0).max(bm.fireball_m as f64 * 2.5);
             if bm.x < l - reach || bm.x > r + reach || bm.y < b - reach || bm.y > t + reach || budget == 0 {
                 continue;
             }
@@ -1113,23 +1416,36 @@ fn draw(
             let (ux, uy) = (bm.x / rr, bm.y / rr);
             let g = 9.0;
             if bm.buried {
-                // Underground: a white-hot flash of light lighting the rock
-                // far round, gone in under a second; a shock ring of blocks
-                // racing out past the blast's reach, white at its front with
-                // dust behind, fading (the proving ground's rings); and the
-                // broken rock's heat, glowing and fading.
+                // Underground (all by the game's clock): a white-hot flash of
+                // light lighting the rock far round, gone in under a second;
+                // a shock ring of blocks racing out past the blast's reach,
+                // white at its front with dust behind, fading (the proving
+                // ground's rings); and the broken rock's heat, glowing and
+                // fading.
+                // (A conventional charge's flash is small and short, and it
+                // melts nothing: it leaves no glow.)
                 let max = bm.size_m as f64;
-                let fl = (1.0 - age / 0.8).max(0.0) as f32;
+                let (flash_s, flash_k) = if bm.nuclear { (0.8, 1.0) } else { (0.15, 0.6) };
+                let fl = (1.0 - age / flash_s).max(0.0) as f32;
                 if fl > 0.0 {
-                    crate::fx::emit(bm.x, bm.y, max * 1.4, [255.0, 235.0, 190.0], 3.0 * fl * fl);
+                    crate::fx::emit(bm.x, bm.y, max * 1.4 * flash_k, [255.0, 235.0, 190.0], 3.0 * flash_k as f32 * fl * fl);
                 }
-                let ring_t = 0.5;
-                if age < ring_t {
-                    let q = age / ring_t;
+                // The ring runs at the shock's own speed through the rock
+                // (kilometres a second), so it reaches the ground over the
+                // charge when the simulation has it do so (`t_surface`): at
+                // full speed it crosses a 10 kt blast's 80 m of rock in a frame
+                // or two, slowed down it can be watched. Out to 1.3 times the
+                // blast's size, and past the ground over it.
+                let ring_end = (max * 1.3).max(bm.depth_m as f64 * 1.2);
+                let ring_r = bm.shock_mps as f64 * age;
+                if ring_r < ring_end {
+                    let q = ring_r / ring_end;
                     let a = (1.0 - q) as f32;
                     let mut seen = std::collections::HashSet::new();
-                    for (k, (back, c)) in [(0.0, [1.0, 0.94, 0.82]), (1.5, [0.85, 0.6, 0.35]), (3.0, [0.55, 0.5, 0.45])].into_iter().enumerate() {
-                        let rr_ = (max * 1.3 * q.sqrt() - back).max(0.0);
+                    // (Its dust trails it by a share of how far it goes, as
+                    // the proving ground's did by a metre or two at 10 kt.)
+                    for (k, (back, c)) in [(0.0, [1.0, 0.94, 0.82]), (0.02, [0.85, 0.6, 0.35]), (0.04, [0.55, 0.5, 0.45])].into_iter().enumerate() {
+                        let rr_ = (ring_r - back * ring_end).max(0.0);
                         let n = ((rr_ * 6.0) as usize).max(24);
                         for i in 0..n {
                             let ang = (i as f64 + 0.5 * k as f64) / n as f64 * std::f64::consts::TAU;
@@ -1140,14 +1456,75 @@ fn draw(
                         }
                     }
                 }
-                let heat = (1.0 - age / BURIED_LIFE_S).clamp(0.0, 1.0) as f32;
-                crate::fx::emit(bm.x, bm.y, max * 0.75, [255.0, 150.0, 50.0], 1.8 * heat * heat);
+                if bm.nuclear {
+                    let heat = (1.0 - age / BURIED_LIFE_S).clamp(0.0, 1.0) as f32;
+                    crate::fx::emit(bm.x, bm.y, max * 0.75, [255.0, 150.0, 50.0], 1.8 * heat * heat);
+                }
                 continue;
             }
             let start = pos.len();
-            // The core: a ragged white-hot knot, gone in a blink.
+            // A charge in the open on a body with air: its fireball (by the
+            // game's clock, as the simulation has it vaporise what is in it).
+            // It grows to full size quickly (as the time to the 0.4), white-hot
+            // and lighting everything round; then rises, swelling and cooling
+            // through yellow, orange and red to smoke. A nuclear one's is huge
+            // and lasts seconds; a conventional one's, its hot gas, is small,
+            // orange and gone in a moment. On the ground it is a dome.
+            let ball = bm.fireball_m as f64;
+            let ball_life = fireball_life(bm);
+            if ball > 0.0 && age < ball_life {
+                let tf = (bm.fireball_s as f64).max(0.01);
+                let grow = (age / tf).min(1.0).powf(0.4);
+                let q = if age < tf { 0.0 } else { ((age - tf) / (ball_life - tf).max(0.1)).clamp(0.0, 1.0) };
+                let rise = (age - tf).max(0.0) * ball * if bm.nuclear { 0.12 } else { 0.3 };
+                let rad = ball * grow.max(0.03) * (1.0 + 0.35 * q);
+                let (cx, cy) = (bm.x + ux * rise, bm.y + uy * rise);
+                let glow = (1.0 - q) as f32;
+                crate::fx::emit(cx, cy, rad * 2.5 + 20.0, [255.0, 235.0, 200.0], if bm.nuclear { 4.0 } else { 2.0 } * glow * glow);
+                // A smooth ball (rings of triangles, coloured at their
+                // corners), its surface boiling: drawn as 1,600 square
+                // blocks, a big one close up was a wall of flat tiles each
+                // tens of pixels across (27 Nov). Hottest in the middle, its
+                // edge cooling first and fading out softly; cut off at the
+                // ground (a corner under it is clear).
+                let base = if bm.nuclear { 0.0 } else { 0.15 };
+                let alpha = if q < 0.7 { 1.0 } else { 1.0 - (q as f32 - 0.7) / 0.3 };
+                let (rings, segs) = (20usize, 72usize);
+                let spin = (bm.x * 0.013 + bm.y * 0.007).fract() * std::f64::consts::TAU;
+                let corner = |ri: usize, si: usize| -> ([f32; 3], [f32; 4]) {
+                    let f = ri as f64 / rings as f64;
+                    let a = si as f64 / segs as f64 * std::f64::consts::TAU;
+                    // Lumpy at the edge, churning (by game time).
+                    let boil = (a * 5.0 + spin + age * 1.7 + f * 4.0).sin() * 0.5 + (a * 11.0 - age * 2.3 + f * 9.0 + spin).sin() * 0.3 + (a * 3.0 + f * 13.0 + age * 0.9).sin() * 0.2;
+                    let d = rad * f * (1.0 + 0.06 * boil * f);
+                    let (x, y) = (cx + a.cos() * d, cy + a.sin() * d);
+                    let s = v.to_screen(x, y);
+                    // (The boil fades to none at the middle, whose corners
+                    // are all one point: coloured apart, they drew a star.)
+                    let c = heat(base + q as f32 + 0.16 * f as f32 + 0.07 * (boil * f) as f32);
+                    let edge = if f > 0.8 { (1.0 - (f as f32 - 0.8) / 0.2).max(0.0) } else { 1.0 };
+                    let a = if under(x, y) { 0.0 } else { alpha * 0.95 * edge };
+                    let k = Color::srgba(c[0], c[1], c[2], a).to_linear();
+                    ([s.x, s.y, 0.0], [k.red, k.green, k.blue, k.alpha])
+                };
+                let mut prev: Vec<([f32; 3], [f32; 4])> = (0..segs).map(|si| corner(0, si)).collect();
+                for ri in 1..=rings {
+                    let ring: Vec<([f32; 3], [f32; 4])> = (0..segs).map(|si| corner(ri, si)).collect();
+                    for si in 0..segs {
+                        let sj = (si + 1) % segs;
+                        let (a, b, c, d) = (prev[si], prev[sj], ring[sj], ring[si]);
+                        for t in [a, b, c, a, c, d] {
+                            pos.push(t.0);
+                            col.push(t.1);
+                        }
+                    }
+                    prev = ring;
+                }
+            }
+            // The core: a ragged white-hot knot, gone in a blink (inside a
+            // fireball, not seen).
             let core_t = 0.12 + 0.02 * size.sqrt();
-            if age < core_t {
+            if age < core_t && ball <= 0.0 {
                 let q = (age / core_t) as f32;
                 let rad = size * 0.32 * (0.6 + 0.8 * q as f64);
                 let n = ((rad * rad * 1.5) as usize).clamp(8, 900);
@@ -1178,9 +1555,11 @@ fn draw(
                 let alpha = if q < 0.6 { 1.0 } else { 1.0 - (q - 0.6) / 0.4 };
                 block(&mut pos, &mut col, x, y, m, [c[0], c[1], c[2], alpha * 0.95]);
             }
-            // The shock: a ring of dust racing out and thinning.
+            // The shock: a ring of dust racing out and thinning. (Not for a
+            // charge's air blast, drawn above running out along the ground
+            // at its own speed: this ring trailed the machines it threw.)
             let ring_t = 0.9 + 0.04 * size;
-            if age < ring_t {
+            if age < ring_t && bm.air_m <= 0.0 {
                 let q = (age / ring_t) as f32;
                 let rad = size * 2.6 * (age / ring_t).powf(0.45);
                 let n = ((rad * 1.2) as usize).clamp(16, 800);
@@ -1228,6 +1607,108 @@ fn draw(
             }
             budget = budget.saturating_sub((pos.len() - start) / 6);
         }
+        // A buried blast's dome bursting (the simulation's `Vent`), by the
+        // game's clock: a nuclear charge's hot gas and glowing rock let out,
+        // a glow over the crater and a column of glowing blocks rising and
+        // cooling; a conventional charge's a puff of brown fumes and dust,
+        // with no glow. (The ground itself flies as the simulation throws it.)
+        for (vn, fired) in vents.iter_mut() {
+            let age = now - vn.t;
+            if age < 0.0 {
+                continue;
+            }
+            let size = vn.size_m.max(4.0) as f64;
+            let reach = size * 2.0 + 60.0;
+            if vn.x < l - reach || vn.x > r + reach || vn.y < b - reach || vn.y > t + reach || budget == 0 {
+                continue;
+            }
+            let start = pos.len();
+            let life = vent_life(vn.size_m);
+            let fade = (1.0 - age / life).clamp(0.0, 1.0) as f32;
+            let rr = (vn.x * vn.x + vn.y * vn.y).sqrt().max(1.0);
+            let (ux, uy) = (vn.x / rr, vn.y / rr);
+            let (tx, ty) = (-uy, ux);
+            if !*fired {
+                *fired = true;
+                if vn.nuclear {
+                    crate::fx::spark(vn.x, vn.y, 40, [255.0, 170.0, 80.0], size * 0.6 + 10.0);
+                } else {
+                    for _ in 0..12 {
+                        crate::fx::dust(vn.x, vn.y, [120.0, 92.0, 60.0], size * 0.3 + 4.0, size * 0.4, 2.5);
+                    }
+                }
+            }
+            if vn.nuclear {
+                crate::fx::emit(vn.x, vn.y, size * 1.2 + 8.0, [255.0, 170.0, 90.0], 2.4 * fade * fade);
+            }
+            // (A conventional charge's gas comes out as a sharp second pulse
+            // of pressure, on a body with air: its air blast's ring, drawn
+            // with its `Boom`, leaves from here now.)
+            let seed = dft_sim::noise::hash((vn.x * 8.0) as i64 as u64, (vn.y * 8.0) as i64, (vn.t * 10.0) as i64, 0x7E47);
+            let u = |k: u64| crate::rnd::unit(seed, k);
+            let n = ((20.0 + size * 2.0) as usize).min(500);
+            for i in 0..n {
+                let k = i as u64 * 4;
+                // Out of the crater's middle, fanning up to 30 degrees either
+                // side, slowing as it spreads.
+                let off = (u(k) - 0.5) * size * 0.5;
+                let lean = (u(k + 1) - 0.5) * 1.0;
+                let sp = size * (0.4 + 0.9 * u(k + 2));
+                let own = life * (0.4 + 0.6 * u(k + 3));
+                if age > own {
+                    continue;
+                }
+                let q = (age / own) as f32;
+                let d = sp * (1.0 - (-age * 1.5).exp()) / 1.5;
+                let (x, y) = (vn.x + tx * (off + lean * d) + ux * d, vn.y + ty * (off + lean * d) + uy * d);
+                let (c, a) = if vn.nuclear { (heat(0.1 + q * 0.9), 1.0 - q * q) } else { ([0.48 - 0.1 * q, 0.36 - 0.06 * q, 0.24], 0.55 * (1.0 - q)) };
+                let m = (1.0 + 1.5 * q) * (size as f32 / 30.0).clamp(0.8, 3.0);
+                block(&mut pos, &mut col, x, y, m, [c[0], c[1], c[2], a]);
+            }
+            budget = budget.saturating_sub((pos.len() - start) / 6);
+        }
+        // A crater's base surge (the simulation's `Surge`), by the game's
+        // clock: a low cloud of dust rolling out along the ground either side,
+        // quickly at first and slowing, thickest at its rolling front, and
+        // thinning away over a minute or so (greyer for a nuclear charge,
+        // browner for a conventional one).
+        for sg in surges.iter() {
+            let age = now - sg.t;
+            if age < 0.0 || budget == 0 {
+                continue;
+            }
+            let reach = sg.reach_m.max(4.0) as f64;
+            let r0 = (sg.x * sg.x + sg.y * sg.y).sqrt().max(1.0);
+            let span = reach + 60.0;
+            if sg.x < l - span || sg.x > r + span || sg.y < b - span || sg.y > t + span {
+                continue;
+            }
+            let start = pos.len();
+            let life = sg.life_s.max(1.0) as f64;
+            let out = reach * (1.0 - (-age / sg.tau_s.max(0.1) as f64).exp());
+            let fade = ((age / 0.6).min(1.0) * (1.0 - age / life).clamp(0.0, 1.0)) as f32;
+            let tall = 0.12 * out + 2.0;
+            let a0 = sg.y.atan2(sg.x);
+            let seed = dft_sim::noise::hash((sg.x * 8.0) as i64 as u64, (sg.y * 8.0) as i64, (sg.t * 10.0) as i64, 0x5E26);
+            let u = |k: u64| crate::rnd::unit(seed, k);
+            let n = ((out * 2.0) as usize).clamp(30, 1200);
+            for i in 0..n {
+                let k = i as u64 * 6;
+                let side = if u(k) < 0.5 { -1.0 } else { 1.0 };
+                // More of it towards its front, where it rolls up thickest.
+                let s = u(k + 1).sqrt();
+                let along = side * s * out;
+                let ga = a0 + along / r0;
+                let g = ground_at(ga).unwrap_or(r0);
+                let rise = u(k + 2) * tall * (0.35 + 0.65 * s * s) + 0.6 * ((age * 0.8 + u(k + 3) * 6.283).sin() + 1.0);
+                let (x, y) = (ga.cos() * (g + rise), ga.sin() * (g + rise));
+                let tint = 0.9 + 0.2 * u(k + 4) as f32;
+                let c = if sg.nuclear { [0.6 * tint, 0.58 * tint, 0.55 * tint] } else { [0.55 * tint, 0.45 * tint, 0.33 * tint] };
+                let m = (1.5 + 2.5 * u(k + 5) as f32) * (1.0 + (age / life) as f32) * (reach as f32 / 120.0).clamp(0.8, 3.0);
+                block(&mut pos, &mut col, x, y, m, [c[0], c[1], c[2], 0.45 * fade * (0.6 + 0.4 * u(k + 3) as f32)]);
+            }
+            budget = budget.saturating_sub((pos.len() - start) / 6);
+        }
         if pos.is_empty() {
             pos.extend_from_slice(&[[0.0; 3]; 3]);
             col.extend_from_slice(&[[0.0; 4]; 3]);
@@ -1248,6 +1729,48 @@ const BURIED_LIFE_S: f64 = 2.5;
 
 fn boom_life(size_m: f32) -> f64 {
     (1.4 + 0.06 * size_m as f64).min(6.0)
+}
+
+/// How long a dome's burst is seen (game s), for a crater this wide (m).
+fn vent_life(size_m: f32) -> f64 {
+    (2.0 + 0.01 * size_m as f64).min(6.0)
+}
+
+/// How fast a charge's air blast runs out (m/s; the simulation's SOUND_MPS).
+const AIR_SOUND_MPS: f64 = 340.0;
+
+/// How long the dust thrown up off a buried charge's jumping ground is seen
+/// (game s after its shock gets there), on a body with no air.
+const SPALL_DUST_S: f64 = 1.5;
+
+/// How long (game s after it went off) a charge's rings along the ground
+/// run: its air blast's out to where it no longer moves machines, or the
+/// dust off its jumping ground (0 for neither).
+fn ground_ring_life(bm: &dft_sim::swarm::Boom) -> f64 {
+    let air = if bm.air_m > 0.0 { bm.air_t as f64 + bm.air_m as f64 / AIR_SOUND_MPS } else { 0.0 };
+    let dust = if bm.spall_m > 0.0 { bm.t_surface as f64 + SPALL_DUST_S } else { 0.0 };
+    air.max(dust)
+}
+
+/// A charge going off in the open (on the ground or over it), not a drone's
+/// wreck: drawn by the game's clock, as the simulation has it.
+fn open_charge(bm: &dft_sim::swarm::Boom) -> bool {
+    !bm.buried && bm.shock_mps > 0.0
+}
+
+/// How long a charge in the open's fireball is seen (game s; 0 for none): a
+/// nuclear one's some seconds, longer the bigger (7.5 s at 10 kt, at most
+/// 14); a conventional one's about a second.
+fn fireball_life(bm: &dft_sim::swarm::Boom) -> f64 {
+    if bm.fireball_m <= 0.0 {
+        return 0.0;
+    }
+    let tf = (bm.fireball_s as f64).max(0.01);
+    if bm.nuclear {
+        (3.0 + 6.0 * tf).min(14.0)
+    } else {
+        (0.5 + 10.0 * tf).min(2.5)
+    }
 }
 
 /// A drone that may show this frame: where its leg and swirl put it, and how

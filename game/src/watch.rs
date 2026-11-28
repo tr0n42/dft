@@ -91,12 +91,12 @@ fn press(o: Res<crate::Options>, run: Option<Res<Run>>, mut watch: ResMut<Watch>
 
 /// With --test-blast: the charge goes off once, 2 game seconds after --run-s.
 fn press_blast(o: Res<crate::Options>, run: Option<Res<Run>>, mut done: Local<bool>) {
-    let (Some(kt), Some(run)) = (o.test_blast, run) else { return };
+    let (Some(b), Some(run)) = (o.test_blast, run) else { return };
     if *done || run.0.out.lock().stats.time < o.run_s.unwrap_or(30.0) + 2.0 {
         return;
     }
     *done = true;
-    run.0.control.lock().blast = Some(kt);
+    run.0.control.lock().blast = Some(b);
 }
 
 /// The simulation's answer: follow the new unit, or say why there is none.

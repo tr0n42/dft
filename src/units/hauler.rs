@@ -27,6 +27,8 @@ pub enum HaulerState {
 /// flock `site`).
 #[derive(Debug, Clone)]
 pub struct Hauler {
+    /// Its own number for its life (see `Sim::haulers`).
+    pub id: u32,
     pub site: usize,
     pub dock: usize,
     pub state: HaulerState,
@@ -219,7 +221,9 @@ impl Sim {
     pub(super) fn launch_hauler(&mut self, h: usize) {
         let at = self.rendezvous(h);
         self.haulers_moved = true;
-        self.haulers.push(Hauler { site: h, dock: 0, state: HaulerState::Idle, load: 0.0, credited: 0.0, from: at, to: at, t0: self.tick, t1: self.tick, life_left: self.eco.hauler.life_s, alive: true, lift_at: 0, since: self.tick, mix: Default::default() });
+        let id = self.next_hauler_id;
+        self.next_hauler_id += 1;
+        self.haulers.push(Hauler { id, site: h, dock: 0, state: HaulerState::Idle, load: 0.0, credited: 0.0, from: at, to: at, t0: self.tick, t1: self.tick, life_left: self.eco.hauler.life_s, alive: true, lift_at: 0, since: self.tick, mix: Default::default() });
         if self.tick == 0 {
             self.place_docks();
             let k = self.haulers.len() - 1;
@@ -398,13 +402,12 @@ impl Sim {
         let cap = self.eco.hauler.capacity_kg * self.up_cached_cargo;
         self.haulers
             .iter()
-            .enumerate()
-            .filter(|(_, h)| h.alive)
-            .map(|(k, h)| {
+            .filter(|h| h.alive)
+            .map(|h| {
                 let (from, to) = (h.from, h.to);
                 // (Working, it drifts after its point the short way, never climbing.)
                 let cruise = if h.state == HaulerState::Working { len(from).max(len(to)) } else { route_cruise(from, to, self.world.planet.max_radius) };
-                HaulerView { from, to, cruise, t0: h.t0 as f64 * self.eco.tick_s, t1: h.t1 as f64 * self.eco.tick_s, since: h.since as f64 * self.eco.tick_s, fill: (h.load / cap).min(1.0) as f32, state: h.state, mix: h.mix, id: k as u32 }
+                HaulerView { from, to, cruise, t0: h.t0 as f64 * self.eco.tick_s, t1: h.t1 as f64 * self.eco.tick_s, since: h.since as f64 * self.eco.tick_s, fill: (h.load / cap).min(1.0) as f32, state: h.state, mix: h.mix, id: h.id }
             })
             .collect()
     }

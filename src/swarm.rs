@@ -55,6 +55,7 @@ use {abductor::*, cutter::*, fauna::*, forester::*, heatsink::*, opener::*, plat
 pub use fleet::{Call, FleetBooks};
 pub use hauler::{Hauler, HaulerState, HaulerView};
 pub use platform::{GroundReport, Skills, UnitView};
+pub use sapper::{AirReport, BlastTimeline, CraterKind, FlashReport};
 
 /// A small, fast, deterministic hash for cell coordinates. The standard one is
 /// built to resist attacks, which costs time we don't need to spend here.
@@ -388,6 +389,56 @@ pub struct FlockStats {
     want: u32,
 }
 
+/// The dome of ground over a buried charge bursts and its gas vents
+/// (docs/explosion-sequence.md), for the screen: where (the ground over the
+/// charge), how wide the crater is (m), when (game s), and whether the
+/// charge was nuclear (a glow of hot gas and glowing rock) or conventional
+/// (a puff of fumes, and on a body with air, `air`, a sharp second pulse of
+/// pressure as its gas comes out).
+#[derive(Debug, Clone, Copy)]
+pub struct Vent {
+    pub x: f64,
+    pub y: f64,
+    pub size_m: f32,
+    pub t: f64,
+    pub nuclear: bool,
+    pub air: bool,
+}
+
+/// A blast's air blast reaching a machine (docs/explosion-sequence.md), for
+/// the screen: which (`kind` 0 a cutter by its drone number, 1 a hauler by
+/// its own number, `HaulerView::id`, 2 a walker by its id), when the front gets there (game s),
+/// and how far it is thrown (m, away from the blast) at how much speed
+/// (m/s). The screen draws it flung there, slowing, then flying back to
+/// where the simulation has it, at `back` m/s.
+#[derive(Debug, Clone, Copy)]
+pub struct Push {
+    pub kind: u8,
+    pub id: u32,
+    pub t: f64,
+    pub dx: f32,
+    pub dy: f32,
+    pub speed: f32,
+    pub back: f32,
+}
+
+/// The base surge of a blast that throws out a crater, on a body with air:
+/// a low cloud of dust rolling out along the ground from the crater, slowing
+/// (for the screen only). Where it starts (the ground over the charge),
+/// when (game s), how far it rolls in the end (m either side), how long it
+/// takes to get most of the way (s), how long it is seen (s), and whether
+/// it was nuclear (greyer, with steam) or conventional (browner).
+#[derive(Debug, Clone, Copy)]
+pub struct Surge {
+    pub x: f64,
+    pub y: f64,
+    pub t: f64,
+    pub reach_m: f32,
+    pub tau_s: f32,
+    pub life_s: f32,
+    pub nuclear: bool,
+}
+
 /// Something blew up: where, and how big (metres across), for the screen.
 #[derive(Debug, Clone, Copy)]
 pub struct Boom {
@@ -397,6 +448,37 @@ pub struct Boom {
     /// A sapper's charge going off underground: a flash, a shock ring and
     /// the heat it leaves, rather than a fireball in the open.
     pub buried: bool,
+    /// When it went off (game s): the screen draws what follows from its own
+    /// game clock, so it agrees with the simulation at any game speed.
+    pub t: f64,
+    /// A charge's blast (0 for anything else): how fast its shock runs
+    /// through the ground (m/s), when that reaches the ground over it and
+    /// when the dome of ground over it bursts (s after `t`; see
+    /// `BlastTimeline`), how deep it went off (m under the ground, less than
+    /// 0 in the air), and whether it was nuclear.
+    pub shock_mps: f32,
+    pub t_surface: f32,
+    pub t_vent: f32,
+    pub depth_m: f32,
+    pub nuclear: bool,
+    /// A charge in the open on a body with air: how far its fireball reaches
+    /// (m; 0 for none) and when it is full size (s after `t`).
+    pub fireball_m: f32,
+    pub fireball_s: f32,
+    /// A charge's air blast, on a body with air: where its front leaves from
+    /// (the ground over a buried charge, or the charge), when the front that
+    /// does its work leaves (s after `t`: a buried conventional charge's
+    /// when its dome bursts), and how far out it blows machines away (m; 0
+    /// for none). The screen draws a ring of dust running out along the
+    /// ground at the speed of sound to there.
+    pub air_x: f64,
+    pub air_y: f64,
+    pub air_t: f32,
+    pub air_m: f32,
+    /// A buried charge's: how far either side of over it the ground jumps
+    /// (m; 0 for none), for the dust it throws up as the shock gets there
+    /// (drawn on a body with no air, which has no air blast to draw).
+    pub spall_m: f32,
 }
 
 /// Something worth a look happened (for the camera director).
@@ -566,8 +648,11 @@ pub struct Sim {
     hubs_moved: bool,
     /// Drones waiting for work because every hub was dry (each at its own hub).
     parked: Vec<u32>,
-    /// The haulers, and per flock the cutters waiting to unload.
+    /// The haulers, and per flock the cutters waiting to unload; and the
+    /// number the next hauler gets (its own for its life, where its place
+    /// in the list shifts as others retire; not saved, numbered afresh).
     pub haulers: Vec<Hauler>,
+    next_hauler_id: u32,
     site_wait: Vec<Vec<u32>>,
     /// Cutters lost when their energy ran out, and haulers broken down.
     pub starved: u64,
@@ -851,9 +936,20 @@ pub struct Sim {
     /// Sapper plumes since the screen last looked: where the broken rock
     /// blasts out of the ground, and how hard (for the dust column).
     pub plumes: Vec<(f64, f64, f32)>,
-    /// Animals burst by abductors' lasers since the screen last looked:
-    /// where, and their kg (for the red burst).
+    /// Animals burst by abductors' lasers (or flung by a blast) since the
+    /// screen last looked: where, and their kg (for the red burst).
     pub gore: Vec<(f64, f64, f32)>,
+    /// Blasts' domes bursting since the screen last looked.
+    pub vents: Vec<Vent>,
+    /// Machines blasts' air blasts reach, and their base surges, since the
+    /// screen last looked.
+    pub pushes: Vec<Push>,
+    pub surges: Vec<Surge>,
+    /// The latest blast's air blast, as it has got so far (for tests).
+    pub air_last: Option<AirReport>,
+    /// The latest nuclear blast in the open's fireball and flash, as they
+    /// have got so far (for tests).
+    pub flash_last: Option<FlashReport>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1066,6 +1162,7 @@ impl Sim {
             hubs_moved: true,
             parked: Vec::new(),
             haulers: Vec::new(),
+            next_hauler_id: 0,
             site_wait: Vec::new(),
             starved: 0,
             haulers_lost: 0,
@@ -1211,6 +1308,11 @@ impl Sim {
             life,
             plumes: Vec::new(),
             gore: Vec::new(),
+            vents: Vec::new(),
+            pushes: Vec::new(),
+            surges: Vec::new(),
+            air_last: None,
+            flash_last: None,
         };
         sim
     }
@@ -1598,7 +1700,7 @@ impl Sim {
     }
 
     fn explode(&mut self, at: (f64, f64), cells: u32, size_m: f32) {
-        self.booms.push(Boom { x: at.0, y: at.1, size_m, buried: false });
+        self.booms.push(Boom { x: at.0, y: at.1, size_m, buried: false, t: self.time(), shock_mps: 0.0, t_surface: 0.0, t_vent: 0.0, depth_m: 0.0, nuclear: false, fireball_m: 0.0, fireball_s: 0.0, air_x: 0.0, air_y: 0.0, air_t: 0.0, air_m: 0.0, spall_m: 0.0 });
         // Blasts dig: a crater a good part of the blast's size, where it
         // reaches the ground.
         self.crater(at, size_m as f64 * 0.45);
@@ -3691,6 +3793,11 @@ impl Sim {
         if dead < self.compact_min || dead < self.alive_count as usize {
             return;
         }
+        // (Not while a blast goes off: its air blast keeps the cutters it
+        // will reach by their numbers. The next pass compacts instead.)
+        if !self.blast_jobs.is_empty() {
+            return;
+        }
         let mut map: Vec<u32> = vec![u32::MAX; self.drones.len()];
         let mut kept = Vec::with_capacity(self.alive_count as usize);
         for (i, d) in std::mem::take(&mut self.drones).into_iter().enumerate() {
@@ -4919,7 +5026,9 @@ impl Sim {
                 return Err(bad("a hauler's flock"));
             }
             s.haulers_moved = true;
-            s.haulers.push(Hauler { site, dock, state, load: v[0], credited: v[1], from: (v[2], v[3]), to: (v[4], v[5]), t0, t1, life_left: v[6], alive: true, lift_at: 0, since: t1, mix: Default::default() });
+            let id = s.next_hauler_id;
+            s.next_hauler_id += 1;
+            s.haulers.push(Hauler { id, site, dock, state, load: v[0], credited: v[1], from: (v[2], v[3]), to: (v[4], v[5]), t0, t1, life_left: v[6], alive: true, lift_at: 0, since: t1, mix: Default::default() });
         }
         s.starved = r.u64()?;
         s.haulers_lost = r.u64()?;

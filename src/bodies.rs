@@ -139,6 +139,39 @@ struct Drop {
     from: Cell,
     mats: [MatId; CLUMP_MAX],
     n: u8,
+    /// How it flies besides (see `Flight`): a pull of its own back down,
+    /// and the dome it rises with and the speed it takes when that bursts.
+    fall: f32,
+    vent: u32,
+    then: (f32, f32),
+}
+
+/// How a piece thrown by a blast flies, besides the body's pull.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Flight {
+    /// A pull of its own back towards the body's centre (m/s2), on top of
+    /// the body's: ground a blast kicks up from under it falls back near
+    /// where it was, as it would on a bigger world (on these small bodies
+    /// the real pull is so weak that a jump of a few metres a second would
+    /// carry it off for minutes, or off the body).
+    pub fall: f64,
+    /// The blast whose dome of ground it rises with (0: none), and the
+    /// velocity it takes when that dome bursts and the gas throws it out
+    /// (see `Bodies::vent`).
+    pub vent: u32,
+    pub then: (f64, f64),
+}
+
+impl Flight {
+    /// A piece kicked up that falls back near where it was.
+    pub fn hop(fall: f64) -> Flight {
+        Flight { fall, ..Flight::default() }
+    }
+
+    /// A piece rising with the dome of blast `vent`, to be thrown at `then`.
+    pub fn dome(vent: u32, then: (f64, f64)) -> Flight {
+        Flight { vent, then, ..Flight::default() }
+    }
 }
 
 impl Drop {
@@ -211,6 +244,20 @@ fn land_thrown(w: &mut World, at: (f64, f64), mats: &[MatId], vel: (f64, f64), o
     let land = ((ux * ca - uy * sa) * r0, (ux * sa + uy * ca) * r0);
     let c = ground_below(w, land.0, land.1);
     pile(w, c, mats, out);
+}
+
+/// `land_thrown` for a piece flying as `how` says: kicked-up ground comes
+/// down right under where it is, and ground rising with a dome where its
+/// burst would throw it.
+fn land_flown(w: &mut World, at: (f64, f64), mats: &[MatId], vel: (f64, f64), how: Flight, out: &mut Vec<(Cell, MatId)>) {
+    if how.fall > 0.0 {
+        let c = ground_below(w, at.0, at.1);
+        pile(w, c, mats, out);
+    } else if how.vent != 0 {
+        land_thrown(w, at, mats, how.then, out);
+    } else {
+        land_thrown(w, at, mats, vel, out);
+    }
 }
 
 /// Cells that came down together at open cell `c`, set down: one cell in
@@ -328,6 +375,10 @@ struct Loose {
     gouge_left: usize,
     /// Ticks since it was launched (its first moments aren't knocks).
     age: u32,
+    /// The blast whose dome it rises with (0: none), and the velocity and
+    /// turn it takes when that bursts (see `Bodies::vent`).
+    vent: u32,
+    then: (f32, f32, f32),
 }
 
 /// A body in the air a drone could pick up: its name, middle, velocity
@@ -547,7 +598,11 @@ impl Bodies {
     pub fn write_drops(&self, o: &mut crate::save::W) {
         o.u64(self.drops.len() as u64);
         for d in &self.drops {
-            for v in [d.p.0, d.p.1, d.v.0, d.v.1] {
+            // (A save is written with every blast finished, its dome burst
+            // and its kicked-up ground down: see `vent_all`, `land_hops`.
+            // Should one still be waiting, it is saved as thrown out.)
+            let v = if d.vent != 0 { (d.then.0 as f64, d.then.1 as f64) } else { d.v };
+            for v in [d.p.0, d.p.1, v.0, v.1] {
                 o.f64(v);
             }
             o.i64(d.from.0);
@@ -571,7 +626,7 @@ impl Bodies {
             if n == 0 || n as usize > CLUMP_MAX {
                 return Err("a piece in the air in this save is broken".into());
             }
-            let mut d = Drop { p, v, from, mats: [VACUUM; CLUMP_MAX], n };
+            let mut d = Drop { p, v, from, mats: [VACUUM; CLUMP_MAX], n, fall: 0.0, vent: 0, then: (0.0, 0.0) };
             for k in 0..n as usize {
                 let m = r.u16()?;
                 if m as usize >= mats {
@@ -746,7 +801,7 @@ impl Bodies {
         let gouge_left = local.len() / 3;
         let id = self.next_id;
         self.next_id += 1;
-        self.loose.push(Loose { id, frame: fk, origin, handle, cells: local, still_s: 0.0, wreck, soft, last_speed: speed, gouge_left, age: 0 });
+        self.loose.push(Loose { id, frame: fk, origin, handle, cells: local, still_s: 0.0, wreck, soft, last_speed: speed, gouge_left, age: 0, vent: 0, then: (0.0, 0.0, 0.0) });
     }
 
     /// The ground covering cell c changed a little: rebuild it within a second.
@@ -820,7 +875,9 @@ impl Bodies {
     /// so often as it moves: a fast one drifting off a small body for
     /// minutes shed hundreds of them.) Returns the cells lifted (none if it
     /// wasn't).
-    pub fn throw_chunk(&mut self, w: &mut World, cells: &[Cell], vel: (f64, f64), spin: f64) -> Vec<Cell> {
+    /// `then`: rising with the dome of blast `then.0` (see `Flight`), it is
+    /// thrown at `then.1`, turning at `then.2`, when that bursts.
+    pub fn throw_chunk(&mut self, w: &mut World, cells: &[Cell], vel: (f64, f64), spin: f64, then: Option<(u32, (f64, f64), f64)>) -> Vec<Cell> {
         let Some(&first) = cells.first() else { return Vec::new() };
         if self.loose.len() >= MAX_LOOSE || !crate::sandbox::in_attention(self.attention, first) {
             return Vec::new();
@@ -834,7 +891,12 @@ impl Bodies {
             self.stale(c);
             lifted.push((c, m));
         }
+        let n = self.loose.len();
         self.launch_lifted(w, &lifted, false, Vector::new(vel.0 as Real, vel.1 as Real), spin as Real);
+        if let (Some((key, v, s)), Some(l)) = (then, self.loose.get_mut(n)) {
+            l.vent = key;
+            l.then = (v.0 as f32, v.1 as f32, s as f32);
+        }
         self.stats.broken_free += 1;
         self.stats.cells_lifted += lifted.len() as u64;
         lifted.into_iter().map(|c| c.0).collect()
@@ -855,15 +917,87 @@ impl Bodies {
     /// the ground, flying as one piece; set straight down, it lands as a
     /// small pile. The cells set down are added to `out`.
     pub fn throw_clump(&mut self, w: &mut World, at: (f64, f64), mats: &[MatId], vel: (f64, f64), out: &mut Vec<(Cell, MatId)>) {
+        self.throw_flight(w, at, mats, vel, Flight::default(), out);
+    }
+
+    /// As `throw_clump`, flying as `how` says (see `Flight`). Set straight
+    /// down, a piece kicked up lands right under where it is, and one
+    /// rising with a dome where its burst would throw it.
+    pub fn throw_flight(&mut self, w: &mut World, at: (f64, f64), mats: &[MatId], vel: (f64, f64), how: Flight, out: &mut Vec<(Cell, MatId)>) {
         debug_assert!(!mats.is_empty() && mats.len() <= CLUMP_MAX);
         let c = (at.0.floor() as i64, at.1.floor() as i64);
         if self.drops.len() < MAX_DROPS && crate::sandbox::in_attention(self.attention, c) && w.material(c.0, c.1) == VACUUM {
-            let mut d = Drop { p: at, v: vel, from: c, mats: [VACUUM; CLUMP_MAX], n: mats.len() as u8 };
+            let mut d = Drop { p: at, v: vel, from: c, mats: [VACUUM; CLUMP_MAX], n: mats.len() as u8, fall: how.fall as f32, vent: how.vent, then: (how.then.0 as f32, how.then.1 as f32) };
             d.mats[..mats.len()].copy_from_slice(mats);
             self.drops.push(d);
             return;
         }
-        land_thrown(w, at, mats, vel, out);
+        land_flown(w, at, mats, vel, how, out);
+    }
+
+    /// The dome of blast `key` bursts: every piece rising with it takes the
+    /// velocity its burst throws it at (drops, and rock bodies with their
+    /// turn). Returns how many there were.
+    pub fn vent(&mut self, key: u32) -> usize {
+        let mut n = 0;
+        for d in self.drops.iter_mut().filter(|d| d.vent != 0 && d.vent == key) {
+            d.v = (d.then.0 as f64, d.then.1 as f64);
+            d.vent = 0;
+            n += 1;
+        }
+        for l in self.loose.iter_mut().filter(|l| l.vent != 0 && l.vent == key) {
+            let b = &mut self.frames.get_mut(&l.frame).unwrap().phys.bodies[l.handle];
+            b.set_linvel(Vector::new(l.then.0, l.then.1), true);
+            b.set_angvel(l.then.2, true);
+            l.vent = 0;
+            n += 1;
+        }
+        n
+    }
+
+    /// Every dome still rising bursts now (a save keeps none waiting).
+    pub fn vent_all(&mut self) {
+        let mut keys: Vec<u32> = self.drops.iter().map(|d| d.vent).chain(self.loose.iter().map(|l| l.vent)).filter(|&k| k != 0).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        for k in keys {
+            self.vent(k);
+        }
+    }
+
+    /// Ground kicked up by a blast and still in the air comes down at once,
+    /// right under where it is (a save keeps no pull of its own: see
+    /// `Flight::fall`). What was set down goes into `out`.
+    pub fn land_hops(&mut self, w: &mut World, out: &mut Vec<(Cell, MatId)>) {
+        let mut i = 0;
+        while i < self.drops.len() {
+            if self.drops[i].fall > 0.0 {
+                let d = self.drops.swap_remove(i);
+                pile(w, ground_below(w, d.p.0, d.p.1), d.mats(), out);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Pieces in the air that a blast's dome still carries (see `vent`).
+    pub fn rising(&self) -> usize {
+        self.drops.iter().filter(|d| d.vent != 0).count() + self.loose.iter().filter(|l| l.vent != 0).count()
+    }
+
+    /// Pieces of kicked-up ground in the air (see `Flight::fall`).
+    pub fn hopping(&self) -> usize {
+        self.drops.iter().filter(|d| d.fall > 0.0).count()
+    }
+
+    /// The fastest of the drops in the air (m/s): of all, of those still
+    /// rising with a dome, and of the kicked-up ground (for the tests).
+    pub fn fastest(&self) -> (f64, f64, f64) {
+        let sp = |d: &Drop| d.v.0.hypot(d.v.1);
+        let all = self.drops.iter().map(sp).fold(0.0, f64::max);
+        let dome = self.drops.iter().filter(|d| d.vent != 0).map(sp).fold(0.0, f64::max);
+        let hop = self.drops.iter().filter(|d| d.fall > 0.0).map(sp).fold(0.0, f64::max);
+        (all, dome, hop)
     }
 
     /// Move the drops in flight one tick; set down those that hit something.
@@ -887,21 +1021,29 @@ impl Bodies {
                 if set_down < LAND_UNSEEN {
                     set_down += 1;
                     self.drops.swap_remove(i);
-                    land_thrown(w, d.p, d.mats(), d.v, &mut ev.landed);
+                    let how = Flight { fall: d.fall as f64, vent: d.vent, then: (d.then.0 as f64, d.then.1 as f64) };
+                    land_flown(w, d.p, d.mats(), d.v, how, &mut ev.landed);
                 } else {
                     i += 1;
                 }
                 continue;
             }
-            let a = pull(&w.planet, d.p.0, d.p.1);
+            let mut a = pull(&w.planet, d.p.0, d.p.1);
+            if d.fall > 0.0 {
+                let r = (d.p.0 * d.p.0 + d.p.1 * d.p.1).sqrt().max(1.0);
+                let f = d.fall as f64 / r;
+                a = (a.0 - d.p.0 * f, a.1 - d.p.1 * f);
+            }
             let v = (d.v.0 + a.0 * dt, d.v.1 + a.1 * dt);
             let to = (d.p.0 + v.0 * dt, d.p.1 + v.1 * dt);
             // Well over the ground and going up faster than the body's
             // escape speed there, it never comes back: lost now, not once
             // it has drifted out to three radii minutes later (until then it
-            // took up room among the drops in flight).
+            // took up room among the drops in flight). (Not a piece rising
+            // with a dome: its speed is not its own until the dome bursts,
+            // and a big dome over high ground rose past where this looks.)
             let r2 = to.0 * to.0 + to.1 * to.1;
-            if r2 > clear2 && to.0 * v.0 + to.1 * v.1 > 0.0 && v.0 * v.0 + v.1 * v.1 >= 2.0 * (a.0 * a.0 + a.1 * a.1).sqrt() * (d.p.0 * d.p.0 + d.p.1 * d.p.1).sqrt() {
+            if d.vent == 0 && r2 > clear2 && to.0 * v.0 + to.1 * v.1 > 0.0 && v.0 * v.0 + v.1 * v.1 >= 2.0 * (a.0 * a.0 + a.1 * a.1).sqrt() * (d.p.0 * d.p.0 + d.p.1 * d.p.1).sqrt() {
                 self.drops.swap_remove(i);
                 for &m in d.mats() {
                     w.lose_aloft(m);
@@ -939,6 +1081,16 @@ impl Bodies {
                     }
                     last = p;
                 }
+            }
+            // A piece of a dome that meets anything while it rises stops
+            // there and waits for the dome to burst (the dome is pushed up
+            // as one by its gas; set down, it piled up in the air against a
+            // steep slope beside a big crater, and the dome under it piled
+            // up against that, roofing the crater over).
+            if hit && d.vent != 0 {
+                self.drops[i].v = (0.0, 0.0);
+                i += 1;
+                continue;
             }
             if hit {
                 self.drops.swap_remove(i);

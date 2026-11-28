@@ -4,7 +4,7 @@
 use dft_sim::economy::Economy;
 use dft_sim::materials::VACUUM;
 use dft_sim::save::{R, W};
-use dft_sim::swarm::Sim;
+use dft_sim::swarm::{CraterKind, Sim};
 use dft_sim::world::World;
 use std::path::Path;
 
@@ -120,6 +120,848 @@ fn a_sapper_blast_throws_out_a_crater_and_keeps_the_books() {
     assert!(air_off(&s) < 1e-6 * initial, "after: the air is off by {} kg", air_off(&s));
 }
 
+/// A blast's events come by its own clock (docs/explosion-sequence.md): its
+/// shock runs through the rock at the rock's real speed and reaches the
+/// ground over a sapper's 10 kt charge within the first tick. From then its
+/// crater's ground rises as a dome, slower than the ground over the charge
+/// jumps (about 42 m/s here), and the ground round the crater is kicked up
+/// and falls back. When the dome bursts (about 1.8 s on; a conventional
+/// charge's about twice as soon) what is rising with it is thrown out in its
+/// fan, faster, and its gas vents (a glow for a nuclear charge, fumes for a
+/// conventional one). The screen is told when it went off and how fast its
+/// shock runs, to draw it by, and the books balance throughout.
+#[test]
+fn a_blast_lifts_its_crater_as_a_dome_and_throws_it_when_the_dome_bursts() {
+    for conventional in [false, true] {
+        let mut s = sim();
+        let initial: f64 = s.world.ledger.initial.iter().sum();
+        let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+        let over = (0.5, -(s.world.planet.max_radius + 5.0));
+        let mut y0 = over.1 as i64;
+        while s.world.material(0, y0) == VACUUM {
+            y0 += 1;
+        }
+        // The top of the ground over the charge.
+        let top = move |s: &Sim| (-6..=6).flat_map(|x: i64| (0..6).map(move |d: i64| (x, y0 + d))).filter(|&(x, y)| s.world.material(x, y) != VACUUM).count();
+        let before = top(&s);
+        let depth = s.test_blast_depth(10.0);
+        s.take_booms();
+        s.test_blast_at(over, 10.0, depth, conventional);
+        let tl = s.blast_timelines()[0];
+        assert_eq!(tl.nuclear, !conventional);
+        assert_eq!(tl.kind, CraterKind::Crater);
+        assert!((tl.depth_m - depth).abs() < 3.0, "{} m deep (put {depth} m down)", tl.depth_m);
+        assert!((1_000.0..=6_000.0).contains(&tl.shock_mps), "the shock runs at {} m/s", tl.shock_mps);
+        assert!(tl.t_surface < s.eco.tick_s, "the shock reaches the ground {} s on", tl.t_surface);
+        let full = if conventional { 0.45 } else { 0.85 } * 10f64.cbrt();
+        assert!(tl.t_vent > 0.8 * full && tl.t_vent <= full + 1e-9, "the dome bursts {} s on ({full} s at most)", tl.t_vent);
+        assert!((30.0..60.0).contains(&tl.spall_v0), "the ground over it jumps at {} m/s", tl.spall_v0);
+        assert!(tl.spall_m > 2.0 * depth && tl.spall_m <= 3.0 * depth + 1e-9, "the ground jumps out to {} m either side", tl.spall_m);
+        let booms = s.take_booms();
+        assert_eq!(booms.len(), 1);
+        let b = booms[0];
+        assert!(b.buried && b.nuclear == !conventional);
+        assert!((b.t - s.time()).abs() < 1e-9 && (b.shock_mps as f64 - tl.shock_mps).abs() < 1.0);
+        assert!((b.t_surface as f64 - tl.t_surface).abs() < 1e-4 && (b.t_vent as f64 - tl.t_vent).abs() < 1e-4);
+        let born = s.time();
+        let (mut dome_v, mut hop_v, mut hopped, mut at_vent, mut rising) = (0.0f64, 0.0f64, 0, before, 0);
+        let mut burst = None;
+        for k in 1..=100 {
+            s.step();
+            // (As of the end of the tick, as the blast reckons it.)
+            let age = k as f64 * s.eco.tick_s;
+            let (_, dome, hop) = s.bodies.fastest();
+            if age + 1e-9 < tl.t_vent {
+                if age >= 0.6 {
+                    assert!(s.last_crater.0 > 0, "{age:.1} s on: the crater's ground on its way");
+                    assert!(s.bodies.rising() > 0, "{age:.1} s on: the crater's ground rising as a dome");
+                }
+                dome_v = dome_v.max(dome);
+                hop_v = hop_v.max(hop);
+                hopped = hopped.max(s.bodies.hopping());
+                at_vent = top(&s);
+                rising = s.bodies.rising();
+            } else if burst.is_none() {
+                // The dome burst this tick: what rose with it is thrown out,
+                // not set down.
+                burst = Some(age);
+                assert_eq!(s.bodies.rising(), 0, "{age:.1} s on: the dome burst, nothing still rising with it");
+                assert!(s.bodies.drops() as f64 >= 0.8 * rising as f64, "{age:.1} s on: {rising} pieces rising before the burst, {} in the air after", s.bodies.drops());
+            }
+            if k % 3 == 0 {
+                assert!(off(&s) < 1e-6 * initial, "{age:.1} s on: the books are off by {} kg", off(&s));
+                assert!(air_off(&s) < 1e-6 * initial, "{age:.1} s on: the air is off by {} kg", air_off(&s));
+            }
+        }
+        // The dome rises at three quarters of the jump over the charge (see
+        // DOME_SHARE), the middle fastest; the ground round it jumps slower.
+        assert!(dome_v > 0.5 * tl.spall_v0 && dome_v <= 0.75 * tl.spall_v0 + 0.5, "the dome rose at {dome_v} m/s at most (the ground jumping at {})", tl.spall_v0);
+        assert!(hopped > 0 && hop_v > 3.0 && hop_v <= tl.spall_v0, "the ground round the crater kicked up ({hopped} pieces at most, {hop_v} m/s at most)");
+        assert!(at_vent + 15 < before, "the ground over the charge rose before the dome burst ({before} cells to {at_vent})");
+        let burst = burst.expect("the dome burst");
+        assert!(burst >= tl.t_vent && burst < tl.t_vent + s.eco.tick_s, "the dome burst {burst:.1} s on, its time {:.2} s", tl.t_vent);
+        assert_eq!(s.vents.len(), 1, "its gas vented once");
+        let v = s.vents[0];
+        assert!(v.nuclear == !conventional && (v.t - born - tl.t_vent).abs() < 1e-9);
+        assert!((v.x - over.0).abs() < 10.0 && ((v.y - y0 as f64).abs()) < 10.0, "it vents at the ground over the charge ({}, {}), the ground at {y0}", v.x, v.y);
+        // Ten seconds on the kicked-up ground is down (but for the pieces
+        // from the slope into this body's deep chasm, 80 to 100 m out, still
+        // falling down it), and the crater is open.
+        assert!(s.bodies.hopping() * 5 < hopped, "the kicked-up ground back down ({} of {hopped} still in the air)", s.bodies.hopping());
+        assert!(top(&s) + 30 < before, "a crater: {before} cells over the charge before, {} after", top(&s));
+        assert!(off(&s) < 1e-6 * initial, "the books are off by {} kg", off(&s));
+    }
+}
+
+/// The ground round a crater that the shock kicks up falls back near where
+/// it was within a few seconds (pulled back as on Earth: on this small body
+/// it would otherwise hang there for minutes), as loose rubble a cutter
+/// takes quickly, so the ground there ends up about as high as before; and
+/// a save taken while it is in the air (or while the dome still rises) sets
+/// it all down first, with the books balanced.
+#[test]
+fn the_ground_round_a_crater_is_kicked_up_and_falls_back() {
+    let mut s = sim();
+    let initial: f64 = s.world.ledger.initial.iter().sum();
+    let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+    let over = (0.5, -(s.world.planet.max_radius + 5.0));
+    let depth = s.test_blast_depth(10.0);
+    // The ground's height (m from the centre, the first cell met walking
+    // down from the sky), and its cell, at places along it `x` m from over
+    // the charge, between about twice and three times the crater's
+    // half-width out.
+    let a0 = over.1.atan2(over.0);
+    let top_r = s.world.planet.max_radius + 5.0;
+    let ground = move |s: &Sim, x: i64| {
+        let a = a0 + x as f64 / (top_r - 60.0);
+        let mut r = top_r;
+        loop {
+            let c = ((a.cos() * r).floor() as i64, (a.sin() * r).floor() as i64);
+            if s.world.material(c.0, c.1) != VACUUM || r < 1.0 {
+                return (r.round() as i64, c);
+            }
+            r -= 0.5;
+        }
+    };
+    let xs: Vec<i64> = [-120, -110, -100, 100, 110, 120].into();
+    let before: Vec<(i64, (i64, i64))> = xs.iter().map(|&x| ground(&s, x)).collect();
+    // Saved with it in the air and the dome still rising: all of it down,
+    // or thrown out, and the books balance.
+    {
+        let mut s = sim();
+        s.test_blast_at(over, 10.0, depth, false);
+        for _ in 0..8 {
+            s.step();
+        }
+        assert!(s.bodies.hopping() > 0 && s.bodies.rising() > 0, "in the air to save");
+        let mut l = save_and_load(&mut s);
+        assert_eq!(s.bodies.hopping(), 0, "the kicked-up ground set down for the save");
+        assert_eq!(s.bodies.rising(), 0, "the dome burst for the save");
+        assert!(off(&l) < 1e-6 * initial, "loaded: the books are off by {} kg", off(&l));
+        assert!(air_off(&l) < 1e-6 * initial, "loaded: the air is off by {} kg", air_off(&l));
+        for _ in 0..50 {
+            l.step();
+        }
+        assert!(off(&l) < 1e-6 * initial, "loaded, after: the books are off by {} kg", off(&l));
+        assert!(air_off(&l) < 1e-6 * initial, "loaded, after: the air is off by {} kg", air_off(&l));
+    }
+    s.test_blast_at(over, 10.0, depth, false);
+    let tl = s.blast_timelines()[0];
+    assert!(tl.spall_m > 130.0, "the ground jumps out to {} m", tl.spall_m);
+    let mut most = 0;
+    for _ in 0..10 {
+        s.step();
+        most = most.max(s.bodies.hopping());
+    }
+    assert!(most > 100, "the ground round the crater kicked up ({most} pieces)");
+    // It comes down within a few seconds, near where it was.
+    for t in 0..60 {
+        s.step();
+        if t % 5 == 0 {
+            assert!(off(&s) < 1e-6 * initial, "tick {t}: the books are off by {} kg", off(&s));
+            assert!(air_off(&s) < 1e-6 * initial, "tick {t}: the air is off by {} kg", air_off(&s));
+        }
+    }
+    assert!(s.bodies.hopping() * 5 < most, "the kicked-up ground back down, but for some still falling down this body's chasm 80 to 100 m out ({} of {most})", s.bodies.hopping());
+    let loose: std::collections::BTreeSet<(i64, i64)> = s.loose_cells().collect();
+    for (k, &x) in xs.iter().enumerate() {
+        let (now, c) = ground(&s, x);
+        assert!((now - before[k].0).abs() <= 4, "{x} m along: the ground was {} m from the centre, now {now}", before[k].0);
+        let near = (-1..=1).any(|dx| (-1..=1).any(|dy| loose.contains(&(c.0 + dx, c.1 + dy))));
+        assert!(near, "{x} m along: the ground there is loose rubble now");
+    }
+    assert!(off(&s) < 1e-6 * initial, "the books are off by {} kg", off(&s));
+}
+
+/// The ground a blast kicks up goes as its shock gets there, give or take
+/// SPALL_CATCH_S: within half a second of a 10 kt sapper's charge going
+/// off, the shock reaching the ground in its first tick. (Planned after the
+/// crater, it went 0.4 s on, with nothing moving till then.) The cutters on
+/// it are wrecked as it goes, not before.
+#[test]
+fn the_ground_jumps_as_the_shock_reaches_it() {
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let base = dft_sim::load_body(&data, "dev-planet").unwrap();
+    let p = dft_sim::planet::Planet::new(base.spec.clone(), base.mats.clone()).unwrap();
+    let mut eco = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
+    eco.seed_swarm.start_harvesters = 3000;
+    let mut s = Sim::new(World::new(p), eco);
+    s.free_drones = Some(3000);
+    s.run(40.0);
+    let initial: f64 = s.world.ledger.initial.iter().sum();
+    let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+    // Right under the thickest of the cutters at work.
+    let mut legs = Vec::new();
+    s.drone_legs(&mut legs);
+    let now = s.time();
+    let pts: Vec<(f64, f64)> = legs.iter().filter(|l| l.state <= 2).map(|l| l.at(now)).collect();
+    let crowd = |p: (f64, f64)| pts.iter().filter(|q| (q.0 - p.0).hypot(q.1 - p.1) < 60.0).count();
+    let p0 = pts.iter().step_by(10).copied().max_by_key(|&p| crowd(p)).unwrap();
+    let a = p0.1.atan2(p0.0);
+    let g = s.world.planet.surface_radius(a.cos(), a.sin());
+    let depth = s.test_blast_depth(10.0);
+    let kills0 = s.ground_report().blast_kills;
+    s.test_blast_at((a.cos() * g, a.sin() * g), 10.0, depth, false);
+    let tl = s.blast_timelines()[0];
+    assert!(tl.t_surface < s.eco.tick_s, "the shock reaches the ground {} s on", tl.t_surface);
+    // (Those in the loosened column's rock go at once, as before.)
+    let at_once = s.ground_report().blast_kills - kills0;
+    let (mut jumped, mut wrecked_before) = (None, 0);
+    for k in 1..=40 {
+        s.step();
+        let kills = s.ground_report().blast_kills - kills0 - at_once;
+        if jumped.is_none() {
+            if s.bodies.hopping() > 0 {
+                jumped = Some(k as f64 * s.eco.tick_s);
+            } else {
+                wrecked_before = wrecked_before.max(kills);
+            }
+        }
+        if k % 5 == 0 {
+            assert!(off(&s) < 1e-6 * initial, "tick {k}: the books are off by {} kg", off(&s));
+        }
+    }
+    let jumped = jumped.expect("the ground kicked up");
+    let wrecked = s.ground_report().blast_kills - kills0 - at_once;
+    println!("the ground jumped {jumped:.1} s on; {at_once} cutters wrecked at once, {wrecked} by the jump");
+    assert!(jumped <= 0.5, "the ground jumped {jumped:.1} s on");
+    assert!(wrecked > 50, "the cutters on the jumping ground wrecked ({wrecked})");
+    assert_eq!(wrecked_before, 0, "cutters wrecked by the jump before the ground under them moved");
+    while s.blasts_pending() > 0 {
+        s.step();
+    }
+    assert!(off(&s) < 1e-6 * initial, "the books are off by {} kg", off(&s));
+    assert!(air_off(&s) < 1e-6 * initial, "the air is off by {} kg", air_off(&s));
+}
+
+/// A charge too deep for its yield to throw a crater out (subsidence, mound
+/// or contained: docs/explosion-sequence.md, step 6) throws none: the ground
+/// over it jumps and falls back where it was, and no dome bursts and no gas
+/// vents. Over a subsidence shot it then sinks a little, as the rubble under
+/// it settles into the cavity; over the deeper ones it stays within a few
+/// metres of where it was. (Until 27 Nov a full crater was thrown from any
+/// depth, popping out 250 m over a contained shot, the ground there 16 to 19
+/// m lower.) The books balance throughout.
+#[test]
+fn a_charge_too_deep_for_a_crater_throws_none() {
+    for (depth, kind) in [(151.0, CraterKind::Subsidence), (200.0, CraterKind::Mound), (250.0, CraterKind::Contained)] {
+        let mut s = sim();
+        let initial: f64 = s.world.ledger.initial.iter().sum();
+        let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+        let over = (0.5, -(s.world.planet.max_radius + 5.0));
+        // The ground's top over the charge, across 7 m of it.
+        let ground = |s: &Sim| {
+            (-3..=3)
+                .map(|x| {
+                    let mut y = over.1 as i64;
+                    while s.world.material(x, y) == VACUUM {
+                        y += 1;
+                    }
+                    y
+                })
+                .sum::<i64>() as f64
+                / 7.0
+        };
+        let y0 = ground(&s);
+        s.test_blast_at(over, 10.0, depth, false);
+        let tl = s.blast_timelines()[0];
+        assert_eq!(tl.kind, kind, "{depth} m down");
+        let mut t = 0;
+        while s.blasts_pending() > 0 || t < 200 {
+            s.step();
+            t += 1;
+            assert!(t < 600, "{depth} m: the blast ran its course within a minute");
+            if t % 5 == 0 {
+                assert!(off(&s) < 1e-6 * initial, "{depth} m, tick {t}: the books are off by {} kg", off(&s));
+                assert!(air_off(&s) < 1e-6 * initial, "{depth} m, tick {t}: the air is off by {} kg", air_off(&s));
+            }
+        }
+        let y1 = ground(&s);
+        println!("{depth} m down ({kind:?}): the ground over it {:.1} m lower", y1 - y0);
+        assert_eq!(s.last_crater.0, 0, "{depth} m: a crater thrown out");
+        assert!(s.vents.is_empty(), "{depth} m: its gas vented");
+        // (A sapper's 10 kt crater leaves the ground there 17 m lower.)
+        let (lo, hi) = if kind == CraterKind::Subsidence { (-2.0, 12.0) } else { (-4.0, 4.0) };
+        assert!(y1 - y0 >= lo && y1 - y0 <= hi, "{depth} m: the ground over it {:.1} m lower", y1 - y0);
+        assert!(off(&s) < 1e-6 * initial, "{depth} m: the books are off by {} kg", off(&s));
+    }
+}
+
+/// A test blast asked for on the ground goes off on the ground, wherever it
+/// is: in the open, with a fireball on a body with air. (Its depth was
+/// looked for again beside it, as for a sapper's charge down its shaft: on
+/// rough ground 13 of 60 such blasts on the barren body went off buried,
+/// one 812 m down, and one on the dev planet 3.5 m down, with no fireball.)
+#[test]
+fn a_test_blast_on_the_ground_goes_off_on_the_ground() {
+    for air in [false, true] {
+        let mut s = if air { dev_sim() } else { sim() };
+        let initial: f64 = s.world.ledger.initial.iter().sum();
+        let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+        let top = s.world.planet.max_radius + 5.0;
+        for k in 0..12 {
+            let a = k as f64 * std::f64::consts::TAU / 12.0 + 0.01;
+            s.take_booms();
+            s.test_blast_at((a.cos() * top, a.sin() * top), 0.1, 0.0, k % 2 == 1);
+            let tl = *s.blast_timelines().last().unwrap();
+            let b = s.take_booms()[0];
+            assert!(tl.depth_m == 0.0 && tl.open() && !b.buried, "{k}: {} m down", tl.depth_m);
+            assert_eq!(tl.fireball_m > 0.0, air, "{k}: a fireball ({} m) only with air", tl.fireball_m);
+        }
+        s.finish_blasts();
+        assert!(off(&s) < 1e-6 * initial, "the books are off by {} kg", off(&s));
+        assert!(air_off(&s) < 1e-6 * initial, "the air is off by {} kg", air_off(&s));
+    }
+}
+
+/// A save taken while a blast's ground is still to be thrown (the kicked-up
+/// ground round its crater, due as its shock gets there; the plants its air
+/// blast blows down, due as its front does; its crater's deeper layers)
+/// throws it all first, so the game loaded from the save has the world the
+/// game that goes on has. (Left queued, the game that went on threw it and
+/// the loaded one never did: 3,248 plant cells left within 600 m against
+/// 3,753.)
+#[test]
+fn a_save_throws_what_a_blast_still_has_to_throw() {
+    let mut s = dev_life();
+    let initial: f64 = s.world.ledger.initial.iter().sum();
+    let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+    // In the thickest forest on the body.
+    let (a, _) = (0..72).map(|k| k as f64 * std::f64::consts::TAU / 72.0).map(|a| (a, plants_band(&s, a, 0.0, 300.0).len())).max_by_key(|p| p.1).unwrap();
+    let g = s.world.planet.surface_radius(a.cos(), a.sin());
+    let depth = s.test_blast_depth(10.0);
+    s.test_blast_at((a.cos() * g, a.sin() * g), 10.0, depth, false);
+    for _ in 0..3 {
+        s.step();
+    }
+    assert!(s.blasts_pending() > 0, "still going off three ticks in");
+    let mut l = save_and_load(&mut s);
+    assert_eq!(s.ejecta_pending(), 0, "nothing left waiting to be thrown");
+    assert_eq!(s.bodies.hopping() + s.bodies.rising(), 0, "nothing left in the air waiting");
+    for _ in 0..60 {
+        s.step();
+        l.step();
+    }
+    let (left, loaded) = (plants_band(&s, a, 0.0, 600.0).len(), plants_band(&l, a, 0.0, 600.0).len());
+    println!("{left} plant cells left within 600 m in the game that went on, {loaded} in the one loaded");
+    assert!(left.abs_diff(loaded) * 50 <= left.max(loaded), "{left} plant cells left in the game that went on, {loaded} in the one loaded");
+    for s in [&s, &l] {
+        assert!(off(s) < 1e-6 * initial, "the books are off by {} kg", off(s));
+        assert!(air_off(s) < 1e-6 * initial, "the air is off by {} kg", air_off(s));
+    }
+}
+
+/// On a living world, the plants on the ground a blast throws are torn out
+/// and thrown with it, and die where they land (they are cut off: the life
+/// cycle has them rot); none is left hanging over the hole; and the animals
+/// on that ground are flung and killed, a burst of gore each (Benjamin, 27
+/// Nov: plants were left standing with their roots blown off).
+#[test]
+fn plants_and_animals_on_thrown_ground_die() {
+    // The dev planet with its life on, as in the game.
+    let mut s = {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+        let base = dft_sim::load_body(&data, "dev-planet").unwrap();
+        let mut spec = base.spec.clone();
+        spec.life = Some(1.0);
+        let p = dft_sim::planet::Planet::new(spec, base.mats.clone()).unwrap();
+        let eco = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
+        let mut s = Sim::new(World::new(p), eco);
+        s.free_drones = Some(0);
+        s
+    };
+    let initial: f64 = s.world.ledger.initial.iter().sum();
+    let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+    let flora = |s: &Sim, c: (i64, i64)| {
+        let m = s.world.material(c.0, c.1);
+        m != VACUUM && s.world.planet.mats.get(m).name.starts_with("flora ")
+    };
+    // Plant cells over the ground within `half` m either way of angle `a`.
+    let plants = |s: &Sim, a: f64, half: f64| {
+        let (ux, uy) = (a.cos(), a.sin());
+        let g = s.world.planet.surface_radius(ux, uy);
+        let mut out = std::collections::BTreeSet::new();
+        for along in (-half as i64)..=(half as i64) {
+            for up in -8..130 {
+                let r = g + up as f64;
+                let c = ((ux * r - uy * along as f64).floor() as i64, (uy * r + ux * along as f64).floor() as i64);
+                if flora(s, c) {
+                    out.insert(c);
+                }
+            }
+        }
+        out
+    };
+    // The plants round where a crater would be (its own fly off with its
+    // ground, most of them off this small body): from 60 m to 120 m out
+    // either way of angle `a`.
+    let round = |s: &Sim, a: f64| {
+        let r0 = s.world.planet.surface_radius(a.cos(), a.sin());
+        let off = |c: &(i64, i64)| {
+            let d = (c.1 as f64 + 0.5).atan2(c.0 as f64 + 0.5) - a;
+            d.sin().atan2(d.cos()).abs() * r0
+        };
+        plants(s, a, 120.0).into_iter().filter(|c| off(c) > 60.0).count()
+    };
+    // Under the animal with the most plants round it.
+    let views = s.animal_views();
+    assert!(!views.is_empty(), "the dev planet has animals");
+    let (pick, near) = views.iter().step_by(8).take(16).map(|v| (v, round(&s, v.to.1.atan2(v.to.0)))).max_by_key(|p| p.1).unwrap();
+    let (id, at) = (pick.id, pick.to);
+    let a = at.1.atan2(at.0);
+    assert!(near > 50, "plants round the blast ({near} cells)");
+    let (_, _, lost0) = s.fauna_totals();
+    let rotting0 = s.life.as_ref().map_or(0, |l| l.counts().2);
+    let depth = s.test_blast_depth(10.0);
+    s.test_blast_at(at, 10.0, depth, false);
+    let tl = s.blast_timelines()[0];
+    s.gore.clear();
+    // The animal over it is flung and killed as soon as the ground under it
+    // goes (its plan worked out within the first few ticks), not before.
+    let mut k = 0;
+    while s.animal_views().iter().any(|v| v.id == id) {
+        s.step();
+        k += 1;
+        assert!(k <= 6, "the animal over the blast is killed within {k} ticks");
+    }
+    assert!(s.bodies.hopping() + s.bodies.rising() > 0, "the ground under it on its way when it is killed");
+    let (_, _, lost) = s.fauna_totals();
+    assert!(lost > lost0, "counted as lost");
+    assert!(!s.gore.is_empty(), "a burst of gore for it");
+    let mut t = 0;
+    while s.blasts_pending() > 0 || t < 100 {
+        s.step();
+        t += 1;
+        assert!(t < 600, "the blast ran its course within a minute");
+        if t % 10 == 0 {
+            assert!(off(&s) < 1e-6 * initial, "tick {t}: the books are off by {} kg", off(&s));
+            assert!(air_off(&s) < 1e-6 * initial, "tick {t}: the air is off by {} kg", air_off(&s));
+        }
+    }
+    assert_eq!(s.bodies.hopping(), 0, "the kicked-up ground all back down");
+    // Torn out and landed: the life cycle has them dying.
+    let rotting = s.life.as_ref().map_or(0, |l| l.counts().2);
+    assert!(rotting >= rotting0 + near / 2, "{near} plant cells over it, {} more dying", rotting as i64 - rotting0 as i64);
+    // None left hanging: every plant cell over the ground that jumped is
+    // joined up, plant to plant (side by side, as the world holds pieces
+    // together), to the ground (or to a big stand).
+    let reach = (0.9 * tl.spall_m).min(150.0);
+    let loose: std::collections::BTreeSet<(i64, i64)> = s.loose_cells().collect();
+    for c in plants(&s, a, reach) {
+        // (Not the plants thrown and landed: rubble, lying where it fell.)
+        if loose.contains(&c) {
+            continue;
+        }
+        let mut seen = std::collections::BTreeSet::from([c]);
+        let mut queue = vec![c];
+        let mut held = false;
+        while let Some(q) = queue.pop() {
+            for d in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let n = (q.0 + d.0, q.1 + d.1);
+                let m = s.world.material(n.0, n.1);
+                if m == VACUUM || seen.contains(&n) {
+                    continue;
+                }
+                if !flora(&s, n) {
+                    held = true;
+                    break;
+                }
+                seen.insert(n);
+                queue.push(n);
+            }
+            if held || seen.len() > 4000 {
+                held = true;
+                break;
+            }
+        }
+        assert!(held, "the plant cell at {c:?} is left hanging");
+    }
+}
+
+/// The dev planet with its life on, as in the game: it has air, plants and
+/// animals.
+fn dev_life() -> Sim {
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let base = dft_sim::load_body(&data, "dev-planet").unwrap();
+    let mut spec = base.spec.clone();
+    spec.life = Some(1.0);
+    let p = dft_sim::planet::Planet::new(spec, base.mats.clone()).unwrap();
+    let eco = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
+    let mut s = Sim::new(World::new(p), eco);
+    s.free_drones = Some(0);
+    s
+}
+
+fn is_plant(s: &Sim, c: (i64, i64)) -> bool {
+    let m = s.world.material(c.0, c.1);
+    m != VACUUM && s.world.planet.mats.get(m).name.starts_with("flora ")
+}
+
+/// The plant cells standing over the ground from `x0` to `x1` m along it
+/// either side of angle `a` (not those thrown and landed, which lie loose).
+fn plants_band(s: &Sim, a: f64, x0: f64, x1: f64) -> std::collections::BTreeSet<(i64, i64)> {
+    let (ux, uy) = (a.cos(), a.sin());
+    let g = s.world.planet.surface_radius(ux, uy);
+    let loose: std::collections::BTreeSet<(i64, i64)> = s.loose_cells().collect();
+    let mut out = std::collections::BTreeSet::new();
+    for side in [-1.0, 1.0] {
+        let mut x = x0;
+        while x <= x1 {
+            let b = a + side * x / g;
+            let (vx, vy) = (b.cos(), b.sin());
+            let r0 = s.world.planet.surface_radius(vx, vy);
+            for up in -8..130 {
+                let r = r0 + up as f64;
+                let c = ((vx * r).floor() as i64, (vy * r).floor() as i64);
+                if is_plant(s, c) && !loose.contains(&c) {
+                    out.insert(c);
+                }
+            }
+            x += 0.7;
+        }
+    }
+    out
+}
+
+/// A plant cell not joined up, plant to plant side by side, to the ground
+/// (or to a stand of more than 4,000 cells), if any of `cells` is.
+fn hanging(s: &Sim, cells: &std::collections::BTreeSet<(i64, i64)>) -> Option<(i64, i64)> {
+    let loose: std::collections::BTreeSet<(i64, i64)> = s.loose_cells().collect();
+    for &c in cells {
+        if loose.contains(&c) || !is_plant(s, c) {
+            continue;
+        }
+        let mut seen = std::collections::BTreeSet::from([c]);
+        let mut queue = vec![c];
+        let mut held = false;
+        while let Some(q) = queue.pop() {
+            for d in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let n = (q.0 + d.0, q.1 + d.1);
+                if s.world.material(n.0, n.1) == VACUUM || seen.contains(&n) {
+                    continue;
+                }
+                if !is_plant(s, n) {
+                    held = true;
+                    break;
+                }
+                seen.insert(n);
+                queue.push(n);
+            }
+            if held || seen.len() > 4000 {
+                held = true;
+                break;
+            }
+        }
+        if !held {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// On a body with air, a buried blast's air blast runs out from the ground
+/// over it at the speed of sound once its shock gets there
+/// (docs/explosion-sequence.md, part 3), far past the ground's jump: the
+/// plants it reaches are blown down (in sight thrown downwind, landing to
+/// wilt, none of them before the front gets there and none left hanging),
+/// animals thrown or killed; and the crater's dust rolls out along the
+/// ground as a base surge, from when the dome bursts. Out of sight, the
+/// trees it blows down are killed where they stand. The books balance
+/// throughout.
+#[test]
+fn an_air_blast_blows_down_plants_and_throws_animals() {
+    for seen in [true, false] {
+        let mut s = dev_life();
+        if !seen {
+            s.set_attention(Some(None));
+        }
+        let initial: f64 = s.world.ledger.initial.iter().sum();
+        let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+        // Over the ground 250 m along from an animal, where the plants
+        // round it are thickest.
+        let views = s.animal_views();
+        let r = s.world.planet.radius;
+        let (a, near) = views
+            .iter()
+            .step_by(4)
+            .take(30)
+            .flat_map(|v| [-1.0, 1.0].map(|k| v.to.1.atan2(v.to.0) + k * 250.0 / r))
+            .map(|a| (a, plants_band(&s, a, 190.0, 330.0).len()))
+            .max_by_key(|p| p.1)
+            .unwrap();
+        assert!(near > 300, "plants round the blast ({near} cells)");
+        let rot0 = s.life.as_ref().map_or(0, |l| l.counts().2);
+        let g = s.world.planet.surface_radius(a.cos(), a.sin());
+        let depth = s.test_blast_depth(10.0);
+        s.test_blast_at((a.cos() * g, a.sin() * g), 10.0, depth, false);
+        let tl = s.blast_timelines()[0];
+        let rep = s.air_last.expect("an air blast on a body with air");
+        let born = s.time();
+        // The band past the ground's jump, out to where trees go down
+        // (30 kPa: more than half of them).
+        let (x0, x1) = (tl.spall_m + 5.0, rep.reach(30.0));
+        assert!(x1 > x0 + 50.0 && rep.plant_m > x1, "trees down from {x0:.0} m to {x1:.0} m, plants stripped to {:.0} m", rep.plant_m);
+        let band = plants_band(&s, a, x0, x1);
+        assert!(band.len() > 200, "{} plant cells from {x0:.0} to {x1:.0} m", band.len());
+        let mut t = 0;
+        while s.blasts_pending() > 0 || t < 100 {
+            s.step();
+            t += 1;
+            assert!(t < 600, "the blast ran its course within a minute");
+            // Nothing in the band goes before the front gets there.
+            if s.time() + s.eco.tick_s < born + rep.t_at(x0) {
+                assert_eq!(plants_band(&s, a, x0, x1).len(), band.len(), "tick {t}: plants went before the air blast got to them");
+            }
+            if t % 10 == 0 {
+                assert!(off(&s) < 1e-6 * initial, "tick {t}: the books are off by {} kg", off(&s));
+                assert!(air_off(&s) < 1e-6 * initial, "tick {t}: the air is off by {} kg", air_off(&s));
+            }
+        }
+        assert_eq!(s.bodies.hopping(), 0, "all that was thrown is back down");
+        let rep = s.air_last.unwrap();
+        let after = plants_band(&s, a, x0, x1);
+        let rot = s.life.as_ref().map_or(0, |l| l.counts().2);
+        println!("seen {seen}: {rep:?}; {} of {} plant cells left standing in the band, {} more dying", after.len(), band.len(), rot as i64 - rot0 as i64);
+        assert!(rep.animals_flung + rep.animals_killed >= 1, "the animal 250 m out is thrown or killed");
+        if seen {
+            assert!(rep.blown > 0 && rep.plant_cells as usize > band.len() / 2, "{} plants blown down, {} cells thrown", rep.blown, rep.plant_cells);
+            assert!(after.len() < band.len() / 2, "{} of {} plant cells left standing", after.len(), band.len());
+            assert!(rot >= rot0 + (band.len() - after.len()) / 2, "thrown and landed, they are dying");
+            assert_eq!(hanging(&s, &plants_band(&s, a, x0 - 20.0, rep.plant_m)), None, "a plant cell left hanging");
+            // The base surge, from when the dome burst.
+            let sg = s.surges.first().copied().expect("a base surge");
+            assert!((sg.t - (born + tl.t_vent)).abs() < 1e-9 && sg.reach_m > 60.0 && sg.life_s >= 60.0, "{sg:?}");
+        } else {
+            // Out of sight: killed where they stand, nothing thrown.
+            assert!(rep.killed_in_place > 0 && rep.plant_cells == 0 && rep.stripped == 0, "{rep:?}");
+            assert!(after.len() + 20 >= band.len(), "{} of {} plant cells still there", after.len(), band.len());
+            assert!(rot > rot0 + band.len() / 4, "killed where they stand, they are dying");
+        }
+        assert!(off(&s) < 1e-6 * initial, "the books are off by {} kg", off(&s));
+        assert!(air_off(&s) < 1e-6 * initial, "the air is off by {} kg", air_off(&s));
+    }
+}
+
+/// On a body with air, a blast's air blast blows the swarm's machines away
+/// as its front gets to each (Benjamin, 27 Nov): cutters and haulers 300 m
+/// out are thrown away from the blast, as far as the wind behind the front
+/// carries them in a third of a second, for the screen to draw them flying
+/// back; none is told to the screen before the front reaches it. A 300 m
+/// out, nothing is strong enough to wreck a cutter.
+#[test]
+fn an_air_blast_blows_the_swarms_machines_away() {
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let base = dft_sim::load_body(&data, "dev-planet").unwrap();
+    let p = dft_sim::planet::Planet::new(base.spec.clone(), base.mats.clone()).unwrap();
+    let mut eco = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
+    eco.seed_swarm.start_harvesters = 3000;
+    let mut s = Sim::new(World::new(p), eco);
+    s.free_drones = Some(3000);
+    s.run(40.0);
+    let initial: f64 = s.world.ledger.initial.iter().sum();
+    let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+    // Where most cutters are (within 60 m of one).
+    let mut legs = Vec::new();
+    s.drone_legs(&mut legs);
+    let now = s.time();
+    let pts: Vec<(f64, f64)> = legs.iter().filter(|l| l.state <= 2).map(|l| l.at(now)).collect();
+    let crowd = |p: (f64, f64)| pts.iter().filter(|q| (q.0 - p.0).hypot(q.1 - p.1) < 60.0).count();
+    let p0 = pts.iter().step_by(10).copied().max_by_key(|&p| crowd(p)).unwrap();
+    assert!(crowd(p0) > 50, "a flock at work ({} cutters)", crowd(p0));
+    // A blast 300 m along the ground from it.
+    let r = s.world.planet.radius;
+    let a = p0.1.atan2(p0.0) + 300.0 / r;
+    let g = s.world.planet.surface_radius(a.cos(), a.sin());
+    let depth = s.test_blast_depth(10.0);
+    s.pushes.clear();
+    s.test_blast_at((a.cos() * g, a.sin() * g), 10.0, depth, false);
+    let rep = s.air_last.unwrap();
+    let born = s.time();
+    let mut seen = 0;
+    let mut t = 0;
+    while s.blasts_pending() > 0 || t < 50 {
+        s.step();
+        t += 1;
+        assert!(t < 600, "the blast ran its course within a minute");
+        // Each told to the screen once the front has got to it, and soon
+        // after.
+        for p in &s.pushes[seen..] {
+            assert!(p.t <= s.time() + 1e-9 && p.t >= s.time() - 0.5, "tick {t}: one thrown at {} s told at {} s", p.t - born, s.time() - born);
+        }
+        seen = s.pushes.len();
+        if t % 10 == 0 {
+            assert!(off(&s) < 1e-6 * initial, "tick {t}: the books are off by {} kg", off(&s));
+        }
+    }
+    let rep2 = s.air_last.unwrap();
+    let cutters: Vec<_> = s.pushes.iter().filter(|p| p.kind == 0).collect();
+    let haulers = s.pushes.iter().filter(|p| p.kind == 1).count();
+    println!("{rep2:?}; {} cutters and {haulers} haulers thrown on screen", cutters.len());
+    assert!(cutters.len() > 50 && rep2.pushed as usize >= s.pushes.len(), "{} cutters thrown", cutters.len());
+    assert!(haulers >= 1, "the flock's hauler is thrown too");
+    let src = rep.src;
+    let away = cutters.iter().filter(|p| (p.dx as f64) * (p0.0 - src.0) + (p.dy as f64) * (p0.1 - src.1) > 0.0).count();
+    assert!(away * 10 >= cutters.len() * 8, "{away} of {} thrown away from the blast", cutters.len());
+    for p in &cutters {
+        let d = (p.dx as f64).hypot(p.dy as f64);
+        assert!((d - p.speed as f64 * 0.3).abs() < 1e-3 && p.speed > 0.0 && p.speed <= 150.0, "thrown {d} m at {} m/s", p.speed);
+        assert!(p.t >= born + rep.t0 && p.t <= born + rep.t_at(rep.push_m) + 1e-6);
+    }
+    assert!(rep2.wrecked * 10 <= rep2.pushed, "{} wrecked of {}", rep2.wrecked, rep2.pushed);
+    assert!(off(&s) < 1e-6 * initial, "the books are off by {} kg", off(&s));
+}
+
+/// Test blasts on the surface and in the air over it (sappers bury theirs,
+/// but the routine takes any depth) run their course and keep the books; on
+/// the surface and over it the dome bursts as the shock reaches the ground,
+/// and the screen draws a blast in the open.
+#[test]
+fn surface_and_air_test_blasts_run_their_course_and_keep_the_books() {
+    for (depth, conventional) in [(0.0, false), (-20.0, true), (-300.0, false)] {
+        let mut s = sim();
+        let initial: f64 = s.world.ledger.initial.iter().sum();
+        let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+        s.take_booms();
+        s.test_blast_at((0.5, -(s.world.planet.max_radius + 5.0)), 10.0, depth, conventional);
+        let tl = s.blast_timelines()[0];
+        assert!((tl.depth_m - depth).abs() < 3.0, "{} m deep (put at {depth} m)", tl.depth_m);
+        assert!(tl.t_surface < 1e-3 && tl.t_vent < 0.05, "no air, no dome: the shock {} s on, the vent {} s", tl.t_surface, tl.t_vent);
+        let boom = s.take_booms()[0];
+        assert!(!boom.buried, "{depth} m: a blast in the open");
+        // This body has no air: no fireball and no air blast; a nuclear
+        // charge still flashes.
+        assert_eq!(boom.fireball_m, 0.0, "{depth} m: no fireball with no air");
+        assert!(s.air_last.is_none(), "{depth} m: no air blast with no air");
+        assert_eq!(s.flash_last.is_some(), !conventional, "{depth} m: a nuclear charge's flash");
+        // On the ground a shallow bowl, by the table (see below); smaller
+        // over it; none too high for its fireball to reach the ground.
+        if depth == -300.0 {
+            assert_eq!(tl.kind, CraterKind::Air);
+        } else {
+            assert!(tl.kind == CraterKind::Crater && tl.bowl_m > 1.0);
+        }
+        let mut t = 0;
+        while s.blasts_pending() > 0 {
+            s.step();
+            t += 1;
+            assert!(t < 600, "{depth} m: the blast ran its course within a minute");
+            if t % 5 == 0 {
+                assert!(off(&s) < 1e-6 * initial, "{depth} m, tick {t}: the books are off by {} kg", off(&s));
+                assert!(air_off(&s) < 1e-6 * initial, "{depth} m, tick {t}: the air is off by {} kg", air_off(&s));
+            }
+        }
+        for _ in 0..100 {
+            s.step();
+        }
+        assert!(s.pushes.is_empty() && s.surges.is_empty(), "{depth} m: nothing thrown by air and no base surge with no air");
+        if depth == 0.0 {
+            assert!((s.last_crater.1 - tl.bowl_d).abs() < 1e-9 && (11.0..13.0).contains(&tl.bowl_d) && s.last_crater.0 > 300, "a bowl {} m deep planned ({} cells), {} m by the table", s.last_crater.1, s.last_crater.0, tl.bowl_d);
+        }
+        if depth == -300.0 {
+            // Too high: no rock broken, nothing thrown.
+            assert_eq!((s.cracked_cells().count(), s.loose_cells().count(), s.last_crater.0), (0, 0, 0), "{depth} m: ground broken");
+        }
+        assert!(off(&s) < 1e-6 * initial, "{depth} m: the books are off by {} kg", off(&s));
+        assert!(air_off(&s) < 1e-6 * initial, "{depth} m: the air is off by {} kg", air_off(&s));
+    }
+}
+
+/// A nuclear blast on the ground on a body with air (the dev planet with its
+/// life on) has a fireball that vaporises the plants and animals in it, and a
+/// flash of heat that sets plants in sight alight out past it and burns
+/// animals to death (docs/explosion-sequence.md, "A blast in the open"); the
+/// swarm is not harmed by it. A conventional charge of the same yield does
+/// neither by heat (its air blast still does its work). The books balance
+/// throughout.
+#[test]
+fn a_nuclear_blast_in_the_open_burns_what_is_in_sight_and_a_conventional_one_does_not() {
+    for conventional in [false, true] {
+        let mut s = dev_life();
+        let initial: f64 = s.world.ledger.initial.iter().sum();
+        let off = |s: &Sim| s.world.ledger.imbalance(&s.world.remaining_kg());
+        // 120 m along from an animal (in the fireball), where the plants
+        // within 400 m are thickest.
+        let views = s.animal_views();
+        let r = s.world.planet.radius;
+        let (a, near) = views
+            .iter()
+            .step_by(4)
+            .take(30)
+            .flat_map(|v| [-1.0, 1.0].map(|k| v.to.1.atan2(v.to.0) + k * 120.0 / r))
+            .map(|a| (a, plants_band(&s, a, 0.0, 400.0).len()))
+            .max_by_key(|p| p.1)
+            .unwrap();
+        assert!(near > 300, "plants round the blast ({near} cells)");
+        let (_, _, lost0) = s.fauna_totals();
+        let g = s.world.planet.surface_radius(a.cos(), a.sin());
+        s.take_booms();
+        s.test_blast_at((a.cos() * g, a.sin() * g), 10.0, 0.0, conventional);
+        let tl = s.blast_timelines()[0];
+        let boom = s.take_booms()[0];
+        assert!(!boom.buried && boom.fireball_m > 0.0 && (boom.fireball_m as f64 - tl.fireball_m).abs() < 1e-3, "{boom:?}");
+        assert!(s.air_last.is_some(), "an air blast on a body with air");
+        let mut t = 0;
+        while s.blasts_pending() > 0 || t < 50 {
+            s.step();
+            t += 1;
+            assert!(t < 900, "the blast ran its course");
+            if t % 10 == 0 {
+                assert!(off(&s) < 1e-6 * initial, "tick {t}: the books are off by {} kg", off(&s));
+                assert!(air_off(&s) < 1e-6 * initial, "tick {t}: the air is off by {} kg", air_off(&s));
+            }
+        }
+        let (_, _, lost) = s.fauna_totals();
+        if conventional {
+            assert!(s.flash_last.is_none(), "a conventional charge sends out no heat pulse");
+            assert!(tl.fireball_m < 80.0 && tl.thermal_q == 0.0, "{tl:?}");
+        } else {
+            let f = s.flash_last.expect("a nuclear blast in the open flashes");
+            println!("{f:?}; {} animals lost", lost - lost0);
+            assert!(f.done, "its flash ran its course");
+            assert!(f.vaporised > 100, "{} plant cells vaporised in its fireball", f.vaporised);
+            assert!(f.glazed > 100, "{} ground cells glazed under its fireball", f.glazed);
+            assert!(f.lit + f.lit_unseen > 0, "plants in sight out past its fireball set alight");
+            assert!(f.animals_vaporised + f.animals_burned + f.animals_irradiated >= 1 && lost > lost0, "the animal in its fireball is gone");
+            // Next to nothing left standing in its fireball: no plant cell
+            // open to the sky, but a few that rubble thrown early lay over
+            // when it got there (the roots, and what the rubble still
+            // covers, it doesn't reach).
+            let open_sky = |c: &(i64, i64)| {
+                let p = (c.0 as f64 + 0.5, c.1 as f64 + 0.5);
+                let (u, r0) = ((p.0 / p.0.hypot(p.1), p.1 / p.0.hypot(p.1)), p.0.hypot(p.1));
+                (1..150).all(|k| {
+                    let q = ((u.0 * (r0 + k as f64)).floor() as i64, (u.1 * (r0 + k as f64)).floor() as i64);
+                    s.world.material(q.0, q.1) == VACUUM || is_plant(&s, q)
+                })
+            };
+            let left = plants_band(&s, a, 0.0, 0.8 * f.ground_m).into_iter().filter(open_sky).count();
+            assert!(left * 20 < f.vaporised as usize, "{left} plant cells left open to the sky in the fireball, {} vaporised", f.vaporised);
+        }
+        assert!(off(&s) < 1e-6 * initial, "the books are off by {} kg", off(&s));
+        assert!(air_off(&s) < 1e-6 * initial, "the air is off by {} kg", air_off(&s));
+    }
+}
+
 /// A big blast's crater (some thousands of cells) is thrown in clumps of
 /// several cells a piece, and the books still balance cell by cell: while
 /// the clumps fly, when they land as small piles, through a save and load
@@ -134,7 +976,8 @@ fn a_big_crater_is_thrown_in_clumps_and_keeps_the_books() {
     let (mut most, mut cells, mut seen) = (0, 0, 0);
     for t in 0..400 {
         s.step();
-        most = most.max(s.bodies.drops());
+        // (The crater's own pieces, not the ground round it kicked up.)
+        most = most.max(s.bodies.drops() - s.bodies.hopping());
         cells = cells.max(s.last_crater.0);
         if t % 5 == 0 {
             assert!(off(&s) < 1e-6 * initial, "tick {t}: the books are off by {} kg", off(&s));
@@ -872,18 +1715,28 @@ fn blast_timings() {
         let t = std::time::Instant::now();
         s.test_blast(over, kt);
         let mut worst = (t.elapsed().as_secs_f64(), 0.0, 0.0, 0.0, 0.0);
+        let tl = s.blast_timelines()[0];
+        let (mut opened, mut jumped) = (None, None);
         let mut work = vec![s.prof2[7]];
         let mut steps = Vec::new();
-        let (mut ticks, mut after, mut most) = (0, 0, 0);
+        let (mut ticks, mut after, mut most, mut hops) = (0, 0, 0, 0);
         while s.blasts_pending() > 0 || after < 600 {
             let (t, b, f, k, p) = (std::time::Instant::now(), s.prof2[7], s.prof2[2], s.prof2[6], s.prof[3]);
             s.step();
+            // (Its crater is queued a tick before its top layer goes.)
+            if opened.is_none() && s.last_crater.0 > 0 {
+                opened = Some((ticks + after + 2) as f64 * s.eco.tick_s);
+            }
+            if jumped.is_none() && s.bodies.hopping() > 0 {
+                jumped = Some((ticks + after + 1) as f64 * s.eco.tick_s);
+            }
             let e = t.elapsed().as_secs_f64();
             steps.push(e);
             if e > worst.0 {
                 worst = (e, s.prof2[7] - b, s.prof2[2] - f, s.prof2[6] - k, s.prof[3] - p);
             }
             most = most.max(s.bodies.drops());
+            hops = hops.max(s.bodies.hopping());
             if s.blasts_pending() > 0 {
                 ticks += 1;
                 work.push(s.prof2[7] - b);
@@ -905,6 +1758,16 @@ fn blast_timings() {
         }
         let share = |kg: f64| 100.0 * kg / (cells.max(1) as f64 * kg_cell);
         eprintln!(
+            "{kt} kt: shock {:.0} m/s, at the surface {:.3} s on, the dome bursting {:.2} s on, the crater's ground rising from {} s on, the ground round it from {} s on; the ground jumping at {:.0} m/s over it, out to {:.0} m either side, at most {hops} pieces of it kicked up in the air",
+            tl.shock_mps,
+            tl.t_surface,
+            tl.t_vent,
+            opened.map_or("never".to_string(), |v| format!("{v:.1}")),
+            jumped.map_or("never".to_string(), |v| format!("{v:.1}")),
+            tl.spall_v0,
+            tl.spall_m,
+        );
+        eprintln!(
             "{kt} kt: {ticks} ticks ({:.1} game s); worst tick {:.1} ms (blast work {:.1}, flying {:.1}, blast tick and settling {:.1}, the swarm's once-a-second work {:.1}), median {:.1} ms; blast work at most {:.1} ms, typically {:.1}, {:.0} ms in all; crater {cells} cells, {bowl:.0} m deep planned, ground at the middle {} m lower; at most {most} pieces in flight, {still} still flying a minute on; {:.0}% of the crater's mass left the body within the minute, {:.0}% in the end; the view moved away, the rest set down in {away} ticks, the dearest {:.1} ms",
             ticks as f64 * s.eco.tick_s,
             worst.0 * 1000.0,
@@ -921,6 +1784,94 @@ fn blast_timings() {
             share(vented(&s) - v0),
             away_worst * 1000.0,
         );
+    }
+}
+
+/// What a blast costs on a body with air, plants and animals and a swarm at
+/// work (run by hand: cargo test --release --test sapper_blast --
+/// --ignored --nocapture blast_timings_air): the dev planet with its life
+/// on and 20,000 free cutters, a charge going off at a sapper's depth that
+/// far along the ground from where most of them work (300 m at 10 kt, more
+/// for bigger ones, so they are outside the crater and the ground's jump),
+/// then 30 s more: the dearest whole step and the median, the blast's own
+/// work at most in a tick and in all, how many ticks it ran, and the most
+/// pieces in the air.
+#[test]
+#[ignore]
+fn blast_timings_air() {
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    // (Also in the thickest forest on the body, every plant cell in sight;
+    // and on the surface or over it, `depth` m down, nuclear or not.)
+    let rows: [(f64, bool, Option<f64>, bool); 9] = [
+        (10.0, false, None, false),
+        (100.0, false, None, false),
+        (1000.0, false, None, false),
+        (10.0, true, None, false),
+        (1000.0, true, None, false),
+        (10.0, true, Some(0.0), false),
+        (10.0, true, Some(0.0), true),
+        (100.0, true, Some(-150.0), false),
+        (1000.0, false, Some(0.0), false),
+    ];
+    for (kt, forest, open, conventional) in rows {
+        let base = dft_sim::load_body(&data, "dev-planet").unwrap();
+        let mut spec = base.spec.clone();
+        spec.life = Some(1.0);
+        let p = dft_sim::planet::Planet::new(spec, base.mats.clone()).unwrap();
+        let mut eco = Economy::load(&data.join("economy.toml").to_string_lossy()).unwrap();
+        eco.seed_swarm.start_harvesters = 20_000;
+        let mut s = Sim::new(World::new(p), eco);
+        s.free_drones = Some(20_000);
+        s.run(40.0);
+        let mut legs = Vec::new();
+        s.drone_legs(&mut legs);
+        let now = s.time();
+        let pts: Vec<(f64, f64)> = legs.iter().filter(|l| l.state <= 2).map(|l| l.at(now)).collect();
+        let crowd = |p: (f64, f64)| pts.iter().filter(|q| (q.0 - p.0).hypot(q.1 - p.1) < 60.0).count();
+        let p0 = pts.iter().step_by(50).copied().max_by_key(|&p| crowd(p)).unwrap();
+        let a = if forest {
+            let (a, n) = (0..72).map(|k| k as f64 * std::f64::consts::TAU / 72.0).map(|a| (a, plants_band(&s, a, 0.0, 300.0).len())).max_by_key(|p| p.1).unwrap();
+            println!("{kt} kt in the forest: {n} plant cells within 300 m");
+            a
+        } else {
+            p0.1.atan2(p0.0) + 300.0 * (kt / 10.0f64).cbrt() / s.world.planet.radius
+        };
+        let g = s.world.planet.surface_radius(a.cos(), a.sin());
+        let depth = open.unwrap_or_else(|| s.test_blast_depth(kt));
+        let t = std::time::Instant::now();
+        s.test_blast_at((a.cos() * g, a.sin() * g), kt, depth, conventional);
+        let first = t.elapsed().as_secs_f64();
+        println!("{kt} kt, {depth:.0} m down, {}:", if conventional { "conventional" } else { "nuclear" });
+        let (mut steps, mut work) = (vec![first], vec![s.prof2[7]]);
+        let (mut ticks, mut after, mut most) = (0, 0, 0);
+        while s.blasts_pending() > 0 || after < 300 {
+            let (t, b) = (std::time::Instant::now(), s.prof2[7]);
+            s.step();
+            steps.push(t.elapsed().as_secs_f64());
+            most = most.max(s.bodies.drops());
+            if s.blasts_pending() > 0 {
+                ticks += 1;
+                work.push(s.prof2[7] - b);
+            } else {
+                after += 1;
+            }
+            assert!(ticks < 3000);
+        }
+        let worst = steps.iter().copied().fold(0.0, f64::max);
+        steps.sort_by(|a, b| a.total_cmp(b));
+        let wmax = work.iter().copied().fold(0.0, f64::max);
+        println!(
+            "{kt} kt: {} cutters within 60 m of the flock; {ticks} ticks; worst step {:.1} ms, median {:.1} ms; blast work at most {:.1} ms in a tick, {:.0} ms in all; at most {most} pieces in the air",
+            crowd(p0),
+            worst * 1000.0,
+            steps[steps.len() / 2] * 1000.0,
+            wmax * 1000.0,
+            work.iter().sum::<f64>() * 1000.0,
+        );
+        println!("{kt} kt: {:?}", s.air_last);
+        if open.is_some() {
+            println!("{kt} kt: {:?}", s.flash_last);
+        }
     }
 }
 

@@ -1197,7 +1197,7 @@ impl Sim {
     /// and loosen_top radii each side at the top) is booked as loose ground
     /// the sector's cutters eat first, fast; and the share of the sector's
     /// cutters working where the column breaks the surface die.
-    pub(super) fn far_sapper_blast(&mut self, k: usize) {
+    pub(super) fn far_sapper_blast(&mut self, k: usize, nuclear: bool) {
         let sp = self.eco.units.sapper.clone();
         let r = self.sapper_radius();
         let depth = self.sapper_depth();
@@ -1226,7 +1226,12 @@ impl Sim {
         self.units.blasts += 1;
         self.explosions += 1;
         self.units.blast_kills += gone;
-        self.director_log_push(format!("a sapper goes off in far sector {k} (out of sight): {:.0} kt of ground loosened, {gone} cutters killed", cells * dens / 1e6));
+        // The animals there are real wherever they are: the ground's jump
+        // and the air blast reach them as they would in sight. (Its plants
+        // are not cells here, but the sector's math: they are left.)
+        let at = (a.cos() * (r_at - depth), a.sin() * (r_at - depth));
+        let (killed, scared) = self.far_blast_animals(at, sp.yield_kt, nuclear, depth);
+        self.director_log_push(format!("a sapper goes off in far sector {k} (out of sight): {:.0} kt of ground loosened, {gone} cutters and {killed} animals killed, {scared} animals thrown", cells * dens / 1e6));
     }
 
     pub(super) fn write_far(&self, o: &mut crate::save::W) {
